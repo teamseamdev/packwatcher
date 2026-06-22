@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bell, Boxes, CreditCard, LayoutDashboard, ListChecks, Shield, User } from "lucide-react";
+import { BrandMark } from "@/components/brand-mark";
 import type { Plan } from "@/lib/types";
 
 const desktopItems = [
@@ -26,7 +27,7 @@ export function AppNav({ plan }: { plan: Plan }) {
       <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/80 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 md:px-6">
           <Link href="/dashboard" className="flex items-center gap-3">
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-teal-300 font-black text-slate-950">PW</span>
+            <BrandMark size="sm" />
             <span className="hidden font-bold sm:block">PackWatcher</span>
           </Link>
           <nav className="hidden items-center gap-1 md:flex">

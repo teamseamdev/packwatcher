@@ -44,6 +44,9 @@ NEXT_PUBLIC_STRIPE_PRO_PRICE_ID=
    - `http://localhost:3000`
    - `http://localhost:3000/auth/callback`
    - Production equivalents after Vercel deployment.
+6. Enable Google and Discord in Supabase Auth > Providers.
+7. Add each provider's client ID and client secret in Supabase.
+8. In Google Cloud and the Discord Developer Portal, use the Supabase callback URL shown in each Supabase provider panel.
 
 Manual admin override for testing:
 
@@ -64,7 +67,7 @@ Open `http://localhost:3000`.
 
 ## MVP User Flow
 
-1. Sign up with email.
+1. Sign up with email, Google, or Discord.
 2. Add products in Watchlist.
 3. Trigger a manual check from a product card.
 4. See stock status and check history on Dashboard.
@@ -118,10 +121,12 @@ Create a Stripe recurring price for the PRO plan, then set `NEXT_PUBLIC_STRIPE_P
 2. Import the project in Vercel.
 3. Add every variable from `.env.example`.
 4. Set `NEXT_PUBLIC_APP_URL` to your Vercel URL.
-5. Add Supabase production auth callback URL:
+5. Add Supabase production auth callback URLs:
    - `https://your-domain.com/auth/callback`
-6. Configure a Vercel Cron job to call `/api/check-all` with `x-admin-secret`.
-7. Configure the Stripe webhook URL:
+6. Add your production site URL in Supabase Auth URL configuration.
+7. Enable Google and Discord providers in Supabase, then add the provider callback URL from Supabase into each provider dashboard.
+8. Configure a Vercel Cron job to call `/api/check-all` with `x-admin-secret`.
+9. Configure the Stripe webhook URL:
    - `https://your-domain.com/api/stripe/webhook`
 
 ## Current File Tree

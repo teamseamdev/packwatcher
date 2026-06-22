@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Activity, BellRing, Boxes, Calculator, ShieldCheck, TrendingUp } from "lucide-react";
+import { BrandMark } from "@/components/brand-mark";
 import { ButtonLink } from "@/components/button-link";
 import { PricingCards } from "@/components/pricing-cards";
 
@@ -19,7 +20,7 @@ export default function LandingPage() {
     <main className="min-h-screen">
       <header className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5">
         <Link href="/" className="flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-lg bg-teal-400 font-black text-slate-950">PW</span>
+          <BrandMark />
           <span className="text-lg font-bold tracking-wide">PackWatcher</span>
         </Link>
         <nav className="hidden items-center gap-7 text-sm text-slate-300 md:flex">

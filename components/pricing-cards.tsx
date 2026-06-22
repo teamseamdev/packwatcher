@@ -1,11 +1,12 @@
 import { ButtonLink } from "@/components/button-link";
+import { FREE_TRACKED_PRODUCT_LIMIT } from "@/lib/plans";
 
 const plans = [
   {
     name: "FREE",
     price: "$0",
     body: "Start watching the drops you care about.",
-    features: ["5 tracked products", "Basic alerts", "Inventory tracker", "Manual checks"]
+    features: [`${FREE_TRACKED_PRODUCT_LIMIT} tracked products`, "Basic alerts", "Inventory tracker", "Manual checks"]
   },
   {
     name: "PRO",

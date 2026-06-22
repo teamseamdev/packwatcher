@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireProfile, requireUser } from "@/lib/auth";
+import { FREE_TRACKED_PRODUCT_LIMIT } from "@/lib/plans";
 import { runProductCheck } from "@/lib/stock-checkers/run-check";
 
 const ProductSchema = z.object({
@@ -22,8 +23,8 @@ export async function addProduct(formData: FormData) {
   const { supabase, user, profile } = await requireProfile();
   const { count } = await supabase.from("tracked_products").select("*", { count: "exact", head: true }).eq("user_id", user.id);
 
-  if (profile?.plan === "free" && (count ?? 0) >= 5) {
-    throw new Error("Free plan limit reached.");
+  if (profile?.plan === "free" && (count ?? 0) >= FREE_TRACKED_PRODUCT_LIMIT) {
+    throw new Error(`Free plan limit reached. Upgrade to track more than ${FREE_TRACKED_PRODUCT_LIMIT} products.`);
   }
 
   const parsed = ProductSchema.parse(Object.fromEntries(formData));

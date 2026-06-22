@@ -16,7 +16,7 @@ export async function createClient() {
           try {
             cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
           } catch {
-            // Server Components cannot mutate cookies; middleware refreshes sessions.
+            // Server Components cannot mutate cookies; proxy refreshes sessions.
           }
         }
       }

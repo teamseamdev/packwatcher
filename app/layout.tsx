@@ -4,7 +4,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "PackWatcher | Never Miss a Restock.",
   description: "Real-time TCG restock alerts, inventory tracking, and profit management for serious collectors.",
-  manifest: "/manifest.json"
+  manifest: "/manifest.json",
+  icons: {
+    icon: "/packwatch.png",
+    apple: "/packwatch.png"
+  }
 };
 
 export const viewport: Viewport = {
