@@ -10,14 +10,20 @@ type OAuthProvider = "google" | "discord";
 export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(() =>
+    typeof window === "undefined" ? "" : new URLSearchParams(location.search).get("error") ?? ""
+  );
   const [isPending, startTransition] = useTransition();
+
+  function nextPath() {
+    return new URLSearchParams(location.search).get("next") ?? "/dashboard";
+  }
 
   function submit() {
     startTransition(async () => {
       setMessage("");
       const supabase = createClient();
-      const redirectTo = `${location.origin}/auth/callback?next=/dashboard`;
+      const redirectTo = `${location.origin}/auth/callback?next=${encodeURIComponent(nextPath())}`;
       const result = mode === "login"
         ? await supabase.auth.signInWithPassword({ email, password })
         : await supabase.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo } });
@@ -32,7 +38,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
         return;
       }
 
-      location.href = "/dashboard";
+      location.href = nextPath();
     });
   }
 
@@ -40,7 +46,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
     startTransition(async () => {
       setMessage("");
       const supabase = createClient();
-      const redirectTo = `${location.origin}/auth/callback?next=/dashboard`;
+      const redirectTo = `${location.origin}/auth/callback?next=${encodeURIComponent(nextPath())}`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider,
         options: { redirectTo }

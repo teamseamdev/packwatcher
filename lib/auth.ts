@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { ensureProfile } from "@/lib/profiles";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/types";
 
@@ -17,7 +18,7 @@ export async function requireUser() {
 export async function requireProfile() {
   const { supabase, user } = await requireUser();
   const { data } = await supabase.from("profiles").select("*").eq("id", user.id).single();
-  const profile = data as Profile | null;
+  const profile = (data as Profile | null) ?? await ensureProfile(user);
   return { supabase, user, profile };
 }
 

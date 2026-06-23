@@ -3,6 +3,7 @@ import { Activity, BellRing, Boxes, Calculator, ShieldCheck, TrendingUp } from "
 import { BrandMark } from "@/components/brand-mark";
 import { ButtonLink } from "@/components/button-link";
 import { PricingCards } from "@/components/pricing-cards";
+import { getCurrentUser } from "@/lib/auth";
 
 const features = [
   { icon: BellRing, title: "Restock Alerts", body: "Track product pages and get notified when watched items move back in stock." },
@@ -15,7 +16,11 @@ const features = [
 
 const stores = ["Pokemon Center", "Target", "Walmart", "Best Buy", "GameStop", "TCGplayer", "Local shops", "More soon"];
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const { user } = await getCurrentUser();
+  const primaryHref = user ? "/dashboard" : "/signup";
+  const primaryText = user ? "Dashboard" : "Get Started";
+
   return (
     <main className="min-h-screen">
       <header className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5">
@@ -29,7 +34,7 @@ export default function LandingPage() {
           <a href="#pricing">Pricing</a>
           <a href="#faq">FAQ</a>
         </nav>
-        <ButtonLink href="/login" size="sm">Sign In</ButtonLink>
+        <ButtonLink href={user ? "/dashboard" : "/login"} size="sm">{user ? "Dashboard" : "Sign In"}</ButtonLink>
       </header>
 
       <section className="grid-texture mx-auto grid min-h-[calc(100vh-88px)] max-w-7xl content-center px-5 pb-16 pt-10">
@@ -44,7 +49,7 @@ export default function LandingPage() {
             Real-time TCG restock alerts, inventory tracking, and profit management for serious collectors.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <ButtonLink href="/signup">Get Started</ButtonLink>
+            <ButtonLink href={primaryHref}>{primaryText}</ButtonLink>
             <ButtonLink href="#pricing" variant="secondary">View Pricing</ButtonLink>
           </div>
         </div>
@@ -105,7 +110,7 @@ export default function LandingPage() {
           <h2 className="text-3xl font-black text-white sm:text-5xl">Start watching the next drop.</h2>
           <p className="mt-4 max-w-2xl text-slate-300">Create a watchlist, run a manual check, and keep your collection numbers honest.</p>
           <div className="mt-7">
-            <ButtonLink href="/signup">Get Started</ButtonLink>
+            <ButtonLink href={primaryHref}>{primaryText}</ButtonLink>
           </div>
         </div>
       </section>
