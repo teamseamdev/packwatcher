@@ -77,6 +77,10 @@ Open `http://localhost:3000`.
 
 Watchlist URLs are enriched with safe public metadata when possible, including product title, store hostname, preview image, price, and stock phrase matches. Users can search, sort, filter, and toggle alerts per tracked product.
 
+Admins can add shared catalog products and retailer offers from the Admin area. Users can then track those catalog offers without typing URLs; PackWatcher creates their tracker from the stored retailer link and alert settings.
+
+Existing Supabase projects should run the latest `supabase/schema.sql` additions for `catalog_products` and `catalog_offers`.
+
 ## Stock Checking
 
 The MVP stock checker fetches public HTML and uses safe keyword matching:

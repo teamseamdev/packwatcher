@@ -41,6 +41,12 @@ export async function runProductCheck(productId: string, options: { enforceRateL
 
   await supabase.from("tracked_products").update(updates).eq("id", product.id);
 
+  await supabase.from("catalog_offers").update({
+    status: result.status,
+    last_price: result.price,
+    last_checked_at: result.checkedAt
+  }).eq("url", product.url).eq("store_name", product.store_name);
+
   if (product.alerts_enabled && previousStatus === "out_of_stock" && result.status === "in_stock") {
     await supabase.from("notifications").insert({
       user_id: product.user_id,

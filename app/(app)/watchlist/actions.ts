@@ -6,6 +6,7 @@ import { requireProfile, requireUser } from "@/lib/auth";
 import { FREE_TRACKED_PRODUCT_LIMIT } from "@/lib/plans";
 import { fetchProductMetadata } from "@/lib/product-metadata";
 import { runProductCheck } from "@/lib/stock-checkers/run-check";
+import type { CatalogOffer } from "@/lib/types";
 
 const optionalText = z.string().trim().optional().or(z.literal(""));
 
@@ -55,6 +56,75 @@ export async function addProduct(formData: FormData) {
 
   if (product?.id) {
     await runProductCheck(product.id, { enforceRateLimit: false }).catch(() => undefined);
+  }
+
+  revalidatePath("/watchlist");
+  revalidatePath("/dashboard");
+}
+
+export async function trackCatalogOffer(offerId: string) {
+  const { supabase, user, profile } = await requireProfile();
+  const { count } = await supabase.from("tracked_products").select("*", { count: "exact", head: true }).eq("user_id", user.id);
+
+  if (profile?.plan === "free" && (count ?? 0) >= FREE_TRACKED_PRODUCT_LIMIT) {
+    throw new Error(`Free plan limit reached. Upgrade to track more than ${FREE_TRACKED_PRODUCT_LIMIT} products.`);
+  }
+
+  const { data, error } = await supabase
+    .from("catalog_offers")
+    .select("*, catalog_products(*)")
+    .eq("id", offerId)
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Catalog offer not found.");
+  }
+
+  const offer = data as CatalogOffer;
+  const product = offer.catalog_products;
+  if (!product) {
+    throw new Error("Catalog product not found.");
+  }
+
+  const { data: duplicate } = await supabase
+    .from("tracked_products")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("url", offer.url)
+    .maybeSingle();
+
+  if (duplicate) {
+    revalidatePath("/watchlist");
+    return;
+  }
+
+  const { data: tracked, error: insertError } = await supabase
+    .from("tracked_products")
+    .insert({
+      user_id: user.id,
+      name: product.name,
+      store_name: offer.store_name,
+      url: offer.url,
+      image_url: product.image_url,
+      category: product.category,
+      set_name: product.set_name,
+      msrp: product.msrp,
+      target_price: null,
+      status: offer.status,
+      last_price: offer.last_price,
+      last_checked_at: offer.last_checked_at,
+      alerts_enabled: true,
+      notes: `Tracked from PackWatcher catalog: ${product.tcg}`
+    })
+    .select("id")
+    .single();
+
+  if (insertError) {
+    throw new Error(insertError.message);
+  }
+
+  if (tracked?.id) {
+    await runProductCheck(tracked.id, { enforceRateLimit: false }).catch(() => undefined);
   }
 
   revalidatePath("/watchlist");

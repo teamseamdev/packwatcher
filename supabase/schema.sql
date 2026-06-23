@@ -74,6 +74,29 @@ create table public.billing_status (
   plan public.plan_type not null default 'free'
 );
 
+create table public.catalog_products (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  tcg text not null default 'pokemon',
+  category text,
+  set_name text,
+  image_url text,
+  msrp numeric(10,2),
+  created_at timestamptz not null default now()
+);
+
+create table public.catalog_offers (
+  id uuid primary key default gen_random_uuid(),
+  catalog_product_id uuid not null references public.catalog_products(id) on delete cascade,
+  store_name text not null,
+  url text not null,
+  status public.stock_status not null default 'unknown',
+  last_price numeric(10,2),
+  last_checked_at timestamptz,
+  created_at timestamptz not null default now(),
+  unique (catalog_product_id, store_name, url)
+);
+
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -117,6 +140,8 @@ alter table public.stock_checks enable row level security;
 alter table public.notifications enable row level security;
 alter table public.inventory_items enable row level security;
 alter table public.billing_status enable row level security;
+alter table public.catalog_products enable row level security;
+alter table public.catalog_offers enable row level security;
 
 create policy "profiles select own" on public.profiles for select using (auth.uid() = id);
 create policy "profiles admin select" on public.profiles for select using (public.is_admin());
@@ -147,7 +172,18 @@ create policy "inventory admin select" on public.inventory_items for select usin
 create policy "billing own select" on public.billing_status for select using (auth.uid() = user_id);
 create policy "billing admin select" on public.billing_status for select using (public.is_admin());
 
+create policy "catalog products authenticated select" on public.catalog_products for select using (auth.role() = 'authenticated');
+create policy "catalog products admin all" on public.catalog_products
+  for all using (public.is_admin()) with check (public.is_admin());
+
+create policy "catalog offers authenticated select" on public.catalog_offers for select using (auth.role() = 'authenticated');
+create policy "catalog offers admin all" on public.catalog_offers
+  for all using (public.is_admin()) with check (public.is_admin());
+
 create index tracked_products_user_id_idx on public.tracked_products(user_id);
 create index stock_checks_product_id_checked_idx on public.stock_checks(tracked_product_id, checked_at desc);
 create index notifications_user_id_created_idx on public.notifications(user_id, created_at desc);
 create index inventory_items_user_id_idx on public.inventory_items(user_id);
+create index catalog_products_search_idx on public.catalog_products using gin (to_tsvector('english', name || ' ' || coalesce(set_name, '') || ' ' || coalesce(category, '') || ' ' || tcg));
+create index catalog_offers_product_id_idx on public.catalog_offers(catalog_product_id);
+create index catalog_offers_status_idx on public.catalog_offers(status);

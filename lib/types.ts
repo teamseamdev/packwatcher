@@ -29,6 +29,29 @@ export type TrackedProduct = {
   created_at: string;
 };
 
+export type CatalogProduct = {
+  id: string;
+  name: string;
+  tcg: string;
+  category: string | null;
+  set_name: string | null;
+  image_url: string | null;
+  msrp: number | null;
+  created_at: string;
+};
+
+export type CatalogOffer = {
+  id: string;
+  catalog_product_id: string;
+  store_name: string;
+  url: string;
+  status: StockStatus;
+  last_price: number | null;
+  last_checked_at: string | null;
+  created_at: string;
+  catalog_products: CatalogProduct | null;
+};
+
 export type InventoryItem = {
   id: string;
   user_id: string;
