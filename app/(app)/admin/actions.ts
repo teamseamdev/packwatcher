@@ -3,6 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { isAdmin, requireProfile } from "@/lib/auth";
+import { importPokemonFromBestBuy } from "@/lib/catalog-importers/bestbuy";
+import { importPokemonSealedFromTcgCsv } from "@/lib/catalog-importers/tcgcsv";
+import { upsertImportedOffers } from "@/lib/catalog-importers/upsert";
 import { runProductCheck } from "@/lib/stock-checkers/run-check";
 
 const CatalogOfferSchema = z.object({
@@ -61,6 +64,32 @@ export async function addCatalogOffer(formData: FormData) {
     status: "unknown",
     last_price: parsed.last_price || parsed.msrp || null
   });
+
+  revalidatePath("/admin");
+  revalidatePath("/watchlist");
+}
+
+export async function importTcgCsvPokemonCatalog(formData: FormData) {
+  const { supabase, profile } = await requireProfile();
+  if (!isAdmin(profile)) throw new Error("Admin access required.");
+
+  const maxGroups = Number(formData.get("max_groups") ?? 30);
+  const maxProducts = Number(formData.get("max_products") ?? 500);
+  const imported = await importPokemonSealedFromTcgCsv({ maxGroups, maxProducts });
+  await upsertImportedOffers(supabase, imported.offers);
+
+  revalidatePath("/admin");
+  revalidatePath("/watchlist");
+}
+
+export async function importBestBuyPokemonCatalog(formData: FormData) {
+  const { supabase, profile } = await requireProfile();
+  if (!isAdmin(profile)) throw new Error("Admin access required.");
+
+  const query = String(formData.get("query") ?? "pokemon trading cards");
+  const pageSize = Number(formData.get("page_size") ?? 50);
+  const imported = await importPokemonFromBestBuy({ query, pageSize });
+  await upsertImportedOffers(supabase, imported.offers);
 
   revalidatePath("/admin");
   revalidatePath("/watchlist");

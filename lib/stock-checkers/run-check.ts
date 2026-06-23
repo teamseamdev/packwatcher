@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendPushToUser } from "@/lib/push";
 import { getAdapter } from "@/lib/stock-checkers";
 import { assertRateLimit } from "@/lib/stock-checkers/rate-limit";
 import type { TrackedProduct } from "@/lib/types";
@@ -48,12 +49,21 @@ export async function runProductCheck(productId: string, options: { enforceRateL
   }).eq("url", product.url).eq("store_name", product.store_name);
 
   if (product.alerts_enabled && previousStatus === "out_of_stock" && result.status === "in_stock") {
+    const title = `${product.name} is in stock`;
+    const message = `${product.store_name} appears to have ${product.name} in stock. Open the store page to confirm and purchase manually.`;
+
     await supabase.from("notifications").insert({
       user_id: product.user_id,
       tracked_product_id: product.id,
       type: "restock",
-      title: `${product.name} is in stock`,
-      message: `${product.store_name} appears to have ${product.name} in stock. Open the store page to confirm and purchase manually.`
+      title,
+      message
+    });
+
+    await sendPushToUser(product.user_id, {
+      title,
+      body: message,
+      url: "/alerts"
     });
 
     if (process.env.DISCORD_WEBHOOK_URL) {

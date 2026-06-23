@@ -76,13 +76,16 @@ create table public.billing_status (
 
 create table public.catalog_products (
   id uuid primary key default gen_random_uuid(),
+  source text,
+  source_product_id text,
   name text not null,
   tcg text not null default 'pokemon',
   category text,
   set_name text,
   image_url text,
   msrp numeric(10,2),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  unique (source, source_product_id)
 );
 
 create table public.catalog_offers (
@@ -95,6 +98,17 @@ create table public.catalog_offers (
   last_checked_at timestamptz,
   created_at timestamptz not null default now(),
   unique (catalog_product_id, store_name, url)
+);
+
+create table public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  user_agent text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create or replace function public.handle_new_user()
@@ -142,6 +156,7 @@ alter table public.inventory_items enable row level security;
 alter table public.billing_status enable row level security;
 alter table public.catalog_products enable row level security;
 alter table public.catalog_offers enable row level security;
+alter table public.push_subscriptions enable row level security;
 
 create policy "profiles select own" on public.profiles for select using (auth.uid() = id);
 create policy "profiles admin select" on public.profiles for select using (public.is_admin());
@@ -180,6 +195,9 @@ create policy "catalog offers authenticated select" on public.catalog_offers for
 create policy "catalog offers admin all" on public.catalog_offers
   for all using (public.is_admin()) with check (public.is_admin());
 
+create policy "push subscriptions own all" on public.push_subscriptions
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
 create index tracked_products_user_id_idx on public.tracked_products(user_id);
 create index stock_checks_product_id_checked_idx on public.stock_checks(tracked_product_id, checked_at desc);
 create index notifications_user_id_created_idx on public.notifications(user_id, created_at desc);
@@ -187,3 +205,4 @@ create index inventory_items_user_id_idx on public.inventory_items(user_id);
 create index catalog_products_search_idx on public.catalog_products using gin (to_tsvector('english', name || ' ' || coalesce(set_name, '') || ' ' || coalesce(category, '') || ' ' || tcg));
 create index catalog_offers_product_id_idx on public.catalog_offers(catalog_product_id);
 create index catalog_offers_status_idx on public.catalog_offers(status);
+create index push_subscriptions_user_id_idx on public.push_subscriptions(user_id);

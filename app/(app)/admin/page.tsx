@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { StatCard } from "@/components/stat-card";
 import { isAdmin, requireProfile } from "@/lib/auth";
-import { addCatalogOffer, adminCheckProduct, promoteAdmin } from "./actions";
+import { addCatalogOffer, adminCheckProduct, importBestBuyPokemonCatalog, importTcgCsvPokemonCatalog, promoteAdmin } from "./actions";
 
 export default async function AdminPage() {
   const { supabase, profile } = await requireProfile();
@@ -44,6 +44,28 @@ export default async function AdminPage() {
         <StatCard title="Failed checks" value={failedChecks} />
       </section>
       <section className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+          <h2 className="font-bold text-white">Catalog importers</h2>
+          <div className="mt-4 grid gap-3">
+            <form action={importTcgCsvPokemonCatalog} className="rounded-lg bg-white/5 p-3">
+              <p className="text-sm font-semibold text-white">TCGCSV Pokemon sealed</p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <input name="max_groups" placeholder="Max groups" defaultValue="30" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm" />
+                <input name="max_products" placeholder="Max products" defaultValue="500" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm" />
+              </div>
+              <button className="mt-3 h-10 rounded-lg bg-teal-300 px-3 text-sm font-semibold text-slate-950">Import TCGCSV</button>
+            </form>
+            <form action={importBestBuyPokemonCatalog} className="rounded-lg bg-white/5 p-3">
+              <p className="text-sm font-semibold text-white">Best Buy API</p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <input name="query" placeholder="Search query" defaultValue="pokemon trading cards" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm" />
+                <input name="page_size" placeholder="Page size" defaultValue="50" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm" />
+              </div>
+              <button className="mt-3 h-10 rounded-lg bg-teal-300 px-3 text-sm font-semibold text-slate-950">Import Best Buy</button>
+            </form>
+          </div>
+        </div>
+
         <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
           <h2 className="font-bold text-white">Add catalog offer</h2>
           <form action={addCatalogOffer} className="mt-4 grid gap-3">

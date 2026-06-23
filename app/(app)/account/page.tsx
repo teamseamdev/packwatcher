@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { PushNotificationSettings } from "@/components/push-notification-settings";
 import { requireProfile } from "@/lib/auth";
 
 async function signOut() {
@@ -9,7 +10,8 @@ async function signOut() {
 }
 
 export default async function AccountPage() {
-  const { user, profile } = await requireProfile();
+  const { supabase, user, profile } = await requireProfile();
+  const { count: subscriptionCount } = await supabase.from("push_subscriptions").select("*", { count: "exact", head: true }).eq("user_id", user.id);
 
   return (
     <div className="max-w-2xl">
@@ -25,6 +27,9 @@ export default async function AccountPage() {
           <button className="h-11 rounded-lg border border-white/10 px-4 text-sm font-semibold">Sign out</button>
         </form>
       </section>
+      <div className="mt-6">
+        <PushNotificationSettings publicKey={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY} subscriptionCount={subscriptionCount ?? 0} />
+      </div>
     </div>
   );
 }

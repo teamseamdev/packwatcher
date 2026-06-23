@@ -5,6 +5,8 @@ create extension if not exists "pgcrypto";
 
 create table if not exists public.catalog_products (
   id uuid primary key default gen_random_uuid(),
+  source text,
+  source_product_id text,
   name text not null,
   tcg text not null default 'pokemon',
   category text,
@@ -13,6 +15,9 @@ create table if not exists public.catalog_products (
   msrp numeric(10,2),
   created_at timestamptz not null default now()
 );
+
+alter table public.catalog_products add column if not exists source text;
+alter table public.catalog_products add column if not exists source_product_id text;
 
 create table if not exists public.catalog_offers (
   id uuid primary key default gen_random_uuid(),
@@ -35,6 +40,19 @@ begin
     alter table public.catalog_offers
       add constraint catalog_offers_catalog_product_id_store_name_url_key
       unique (catalog_product_id, store_name, url);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'catalog_products_source_source_product_id_key'
+  ) then
+    alter table public.catalog_products
+      add constraint catalog_products_source_source_product_id_key
+      unique (source, source_product_id);
   end if;
 end $$;
 

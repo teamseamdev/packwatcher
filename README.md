@@ -29,6 +29,7 @@ DISCORD_WEBHOOK_URL=
 NEXT_PUBLIC_VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
 FIREBASE_SERVER_KEY=
+BESTBUY_API_KEY=
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 NEXT_PUBLIC_STRIPE_PRO_PRICE_ID=
@@ -80,6 +81,21 @@ Watchlist URLs are enriched with safe public metadata when possible, including p
 Admins can add shared catalog products and retailer offers from the Admin area. Users can then track those catalog offers without typing URLs; PackWatcher creates their tracker from the stored retailer link and alert settings.
 
 Existing Supabase projects should run `supabase/migrations/001_catalog.sql` in the Supabase SQL editor. Use `supabase/schema.sql` only for fresh projects.
+
+Run `supabase/migrations/002_push_subscriptions.sql` to enable mobile/browser push subscriptions.
+
+Catalog importers:
+
+- TCGCSV Pokemon sealed importer seeds shared Pokemon sealed products from server-side TCGCSV data.
+- Best Buy importer uses `BESTBUY_API_KEY` to import Pokemon-related Best Buy offers with API-backed availability.
+- Walmart, Target, Pokemon Center, and other retailers can be added as admin/imported offers, then monitored by the safe stock checker.
+
+Push notifications:
+
+- Generate VAPID keys with `npx web-push generate-vapid-keys`.
+- Set `NEXT_PUBLIC_VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` in Vercel.
+- Android works in supported browsers.
+- iOS requires Safari 16.4+ and the site installed to the Home Screen before web push can be enabled.
 
 ## Stock Checking
 
