@@ -30,6 +30,10 @@ NEXT_PUBLIC_VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
 FIREBASE_SERVER_KEY=
 BESTBUY_API_KEY=
+BESTBUY_IMPORT_QUERY=pokemon trading cards
+BESTBUY_IMPORT_PAGE_SIZE=100
+TCGCSV_MAX_GROUPS=250
+TCGCSV_MAX_PRODUCTS=5000
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 NEXT_PUBLIC_STRIPE_PRO_PRICE_ID=
@@ -88,6 +92,7 @@ Catalog importers:
 
 - TCGCSV Pokemon sealed importer seeds shared Pokemon sealed products from server-side TCGCSV data.
 - Best Buy importer uses `BESTBUY_API_KEY` to import Pokemon-related Best Buy offers with API-backed availability.
+- `POST /api/catalog/sync` imports every currently available catalog source. It always attempts TCGCSV and only runs Best Buy when `BESTBUY_API_KEY` is configured.
 - Pokemon Center and Amazon have retailer-specific safe monitoring adapters.
 - Walmart, Target, Pokemon Center, Amazon, Best Buy, and other product URLs can be added through the Admin bulk URL importer, then monitored by the safe stock checker.
 - Prefer official feeds/APIs where available. Use URL monitoring only for public product pages and never for checkout, queue, CAPTCHA, or account automation.
@@ -126,6 +131,9 @@ curl -X POST http://localhost:3000/api/check-product \
 
 curl -X POST http://localhost:3000/api/check-all \
   -H "x-admin-secret: $ADMIN_CHECK_SECRET"
+
+curl -X POST http://localhost:3000/api/catalog/sync \
+  -H "x-admin-secret: $ADMIN_CHECK_SECRET"
 ```
 
 ## Stripe
@@ -149,7 +157,10 @@ Create a Stripe recurring price for the PRO plan, then set `NEXT_PUBLIC_STRIPE_P
    - `https://your-domain.com/auth/callback`
 6. Add your production site URL in Supabase Auth URL configuration.
 7. Enable Google and Discord providers in Supabase, then add the provider callback URL from Supabase into each provider dashboard.
-8. Configure a Vercel Cron job to call `/api/check-all` with `x-admin-secret`.
+8. Configure Vercel Cron jobs:
+   - `/api/catalog/sync` daily to refresh searchable catalog products.
+   - `/api/check-all` every few minutes to check tracked products.
+   - Include `x-admin-secret` with the value from `ADMIN_CHECK_SECRET`.
 9. Configure the Stripe webhook URL:
    - `https://your-domain.com/api/stripe/webhook`
 

@@ -6,6 +6,7 @@ import { z } from "zod";
 import { isAdmin, requireProfile } from "@/lib/auth";
 import type { ImportedCatalogOffer } from "@/lib/catalog-importers/types";
 import { importPokemonFromBestBuy } from "@/lib/catalog-importers/bestbuy";
+import { syncAvailableCatalogs } from "@/lib/catalog-importers/sync-all";
 import { importPokemonSealedFromTcgCsv } from "@/lib/catalog-importers/tcgcsv";
 import { upsertImportedOffers } from "@/lib/catalog-importers/upsert";
 import { fetchProductMetadata } from "@/lib/product-metadata";
@@ -94,6 +95,16 @@ export async function importBestBuyPokemonCatalog(formData: FormData) {
   const pageSize = Number(formData.get("page_size") ?? 50);
   const imported = await importPokemonFromBestBuy({ query, pageSize });
   await upsertImportedOffers(supabase, imported.offers);
+
+  revalidatePath("/admin");
+  revalidatePath("/watchlist");
+}
+
+export async function syncAllAvailableCatalogs() {
+  const { supabase, profile } = await requireProfile();
+  if (!isAdmin(profile)) throw new Error("Admin access required.");
+
+  await syncAvailableCatalogs(supabase);
 
   revalidatePath("/admin");
   revalidatePath("/watchlist");
