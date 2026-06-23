@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { StatCard } from "@/components/stat-card";
 import { isAdmin, requireProfile } from "@/lib/auth";
-import { addCatalogOffer, adminCheckProduct, importBestBuyPokemonCatalog, importTcgCsvPokemonCatalog, promoteAdmin } from "./actions";
+import { addCatalogOffer, adminCheckProduct, importBestBuyPokemonCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, promoteAdmin } from "./actions";
 
 export default async function AdminPage() {
   const { supabase, profile } = await requireProfile();
@@ -62,6 +62,13 @@ export default async function AdminPage() {
                 <input name="page_size" placeholder="Page size" defaultValue="50" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm" />
               </div>
               <button className="mt-3 h-10 rounded-lg bg-teal-300 px-3 text-sm font-semibold text-slate-950">Import Best Buy</button>
+            </form>
+            <form action={importRetailerUrlsToCatalog} className="rounded-lg bg-white/5 p-3">
+              <p className="text-sm font-semibold text-white">Bulk retailer URLs</p>
+              <p className="mt-1 text-xs leading-5 text-slate-400">Paste Pokemon Center, Amazon, Target, Walmart, Best Buy, or other product URLs. PackWatcher will fetch safe public metadata and create searchable catalog offers.</p>
+              <input name="set_name" placeholder="Optional set name" className="mt-3 h-10 w-full rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm" />
+              <textarea name="urls" placeholder="One product URL per line" className="mt-2 min-h-32 w-full rounded-lg border border-white/10 bg-slate-950/70 p-3 text-sm outline-none focus:border-teal-300" />
+              <button className="mt-3 h-10 rounded-lg bg-teal-300 px-3 text-sm font-semibold text-slate-950">Import URLs</button>
             </form>
           </div>
         </div>

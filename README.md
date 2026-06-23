@@ -88,7 +88,9 @@ Catalog importers:
 
 - TCGCSV Pokemon sealed importer seeds shared Pokemon sealed products from server-side TCGCSV data.
 - Best Buy importer uses `BESTBUY_API_KEY` to import Pokemon-related Best Buy offers with API-backed availability.
-- Walmart, Target, Pokemon Center, and other retailers can be added as admin/imported offers, then monitored by the safe stock checker.
+- Pokemon Center and Amazon have retailer-specific safe monitoring adapters.
+- Walmart, Target, Pokemon Center, Amazon, Best Buy, and other product URLs can be added through the Admin bulk URL importer, then monitored by the safe stock checker.
+- Prefer official feeds/APIs where available. Use URL monitoring only for public product pages and never for checkout, queue, CAPTCHA, or account automation.
 
 Push notifications:
 

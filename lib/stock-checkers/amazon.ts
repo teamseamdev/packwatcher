@@ -1,16 +1,16 @@
 import { fetchPageHtml } from "@/lib/fetch-page-html";
 import { detectStockFromHtml } from "@/lib/stock-checkers/generic";
 import { extractProductMetadata } from "@/lib/product-metadata";
-import type { RetailerAdapter } from "@/lib/stock-checkers/types";
+import type { RetailerAdapter, StockCheckInput, StockCheckResult } from "@/lib/stock-checkers/types";
 
-export const pokemonCenterAdapter: RetailerAdapter = {
-  name: "pokemon-center",
-  matches: (url, storeName) => /pokemoncenter\.com/i.test(url) || /pokemon center/i.test(storeName),
-  async check(input) {
+export const amazonAdapter: RetailerAdapter = {
+  name: "amazon",
+  matches: (url, storeName) => /amazon\.com/i.test(url) || /amazon/i.test(storeName),
+  async check(input: StockCheckInput): Promise<StockCheckResult> {
     const html = await fetchPageHtml(input.url);
     const detected = detectStockFromHtml(html, {
-      inStock: ["add to cart", "available now"],
-      outOfStock: ["sold out", "unavailable", "out of stock"]
+      inStock: ["add to cart", "buy now", "in stock"],
+      outOfStock: ["currently unavailable", "temporarily out of stock", "we don't know when or if this item will be back in stock"]
     });
     const metadata = extractProductMetadata(html, input.url);
 

@@ -9,10 +9,15 @@ export async function fetchWithRetry(url: string, retries = 2) {
   return fetchPageHtml(url, retries);
 }
 
-export function detectStockFromHtml(html: string): Pick<StockCheckResult, "status" | "rawMatchReason" | "price"> {
+export function detectStockFromHtml(
+  html: string,
+  phrases: { inStock?: string[]; outOfStock?: string[] } = {}
+): Pick<StockCheckResult, "status" | "rawMatchReason" | "price"> {
   const normalized = html.replace(/\s+/g, " ").toLowerCase();
-  const outMatch = outOfStockPhrases.find((phrase) => normalized.includes(phrase));
-  const inMatch = inStockPhrases.find((phrase) => normalized.includes(phrase));
+  const outPhrases = [...(phrases.outOfStock ?? []), ...outOfStockPhrases].map((phrase) => phrase.toLowerCase());
+  const inPhrases = [...(phrases.inStock ?? []), ...inStockPhrases].map((phrase) => phrase.toLowerCase());
+  const outMatch = outPhrases.find((phrase) => normalized.includes(phrase));
+  const inMatch = inPhrases.find((phrase) => normalized.includes(phrase));
   const priceMatch = normalized.match(/\$\s?(\d{1,5}(?:\.\d{2})?)/);
   const price = priceMatch ? Number(priceMatch[1]) : null;
 
