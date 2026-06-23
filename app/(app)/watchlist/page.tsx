@@ -1,21 +1,21 @@
 import { CatalogOfferPicker } from "@/components/catalog-offer-picker";
 import { WatchlistGrid } from "@/components/watchlist-grid";
-import { requireUser } from "@/lib/auth";
+import { isAdmin, requireProfile } from "@/lib/auth";
 import type { CatalogOffer, TrackedProduct } from "@/lib/types";
 import { addProduct } from "./actions";
 
 export default async function WatchlistPage() {
-  const { supabase, user } = await requireUser();
+  const { supabase, user, profile } = await requireProfile();
   const [{ data: products }, { data: offers }] = await Promise.all([
     supabase.from("tracked_products").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).returns<TrackedProduct[]>(),
-    supabase.from("catalog_offers").select("*, catalog_products(*)").order("created_at", { ascending: false }).limit(100)
+    supabase.from("catalog_offers").select("*, catalog_products(*)").order("created_at", { ascending: false }).limit(1000)
   ]);
   const trackedProducts = products ?? [];
 
   return (
     <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
       <div className="space-y-6">
-        <CatalogOfferPicker offers={(offers ?? []) as CatalogOffer[]} trackedProducts={trackedProducts} />
+        <CatalogOfferPicker offers={(offers ?? []) as CatalogOffer[]} trackedProducts={trackedProducts} isAdmin={isAdmin(profile)} />
         <section className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
           <h1 className="text-2xl font-black text-white">Add by URL</h1>
           <p className="mt-2 text-sm leading-6 text-slate-400">Use this when the catalog does not have the product yet. PackWatcher will pull safe public metadata when available.</p>
