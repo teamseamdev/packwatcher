@@ -78,26 +78,55 @@ create table public.catalog_products (
   id uuid primary key default gen_random_uuid(),
   source text,
   source_product_id text,
+  source_id text,
+  slug text,
   name text not null,
+  title text,
+  brand text default 'Pokemon',
   tcg text not null default 'pokemon',
   category text,
   set_name text,
+  series_name text,
+  product_type text,
   image_url text,
   msrp numeric(10,2),
+  metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
   unique (source, source_product_id)
 );
 
 create table public.catalog_offers (
   id uuid primary key default gen_random_uuid(),
   catalog_product_id uuid not null references public.catalog_products(id) on delete cascade,
+  product_id uuid references public.catalog_products(id) on delete cascade,
   store_name text not null,
+  retailer text,
+  retailer_product_id text,
+  title text,
   url text not null,
   status public.stock_status not null default 'unknown',
   last_price numeric(10,2),
+  price numeric(10,2),
+  currency text not null default 'USD',
+  image_url text,
+  in_stock boolean,
+  availability_text text,
   last_checked_at timestamptz,
+  metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
   unique (catalog_product_id, store_name, url)
+);
+
+create table public.product_alerts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  product_id uuid not null references public.catalog_products(id) on delete cascade,
+  notify_push boolean not null default true,
+  notify_email boolean not null default false,
+  created_at timestamptz not null default now(),
+  unique (user_id, product_id)
 );
 
 create table public.push_subscriptions (
@@ -156,6 +185,7 @@ alter table public.inventory_items enable row level security;
 alter table public.billing_status enable row level security;
 alter table public.catalog_products enable row level security;
 alter table public.catalog_offers enable row level security;
+alter table public.product_alerts enable row level security;
 alter table public.push_subscriptions enable row level security;
 
 create policy "profiles select own" on public.profiles for select using (auth.uid() = id);
@@ -195,6 +225,9 @@ create policy "catalog offers authenticated select" on public.catalog_offers for
 create policy "catalog offers admin all" on public.catalog_offers
   for all using (public.is_admin()) with check (public.is_admin());
 
+create policy "product alerts own all" on public.product_alerts
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
 create policy "push subscriptions own all" on public.push_subscriptions
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
@@ -205,4 +238,10 @@ create index inventory_items_user_id_idx on public.inventory_items(user_id);
 create index catalog_products_search_idx on public.catalog_products using gin (to_tsvector('english', name || ' ' || coalesce(set_name, '') || ' ' || coalesce(category, '') || ' ' || tcg));
 create index catalog_offers_product_id_idx on public.catalog_offers(catalog_product_id);
 create index catalog_offers_status_idx on public.catalog_offers(status);
+create index catalog_products_slug_idx on public.catalog_products(slug);
+create index catalog_products_source_id_idx on public.catalog_products(source, source_id);
+create index catalog_offers_product_id_new_idx on public.catalog_offers(product_id);
+create index catalog_offers_in_stock_idx on public.catalog_offers(in_stock);
+create index product_alerts_user_id_idx on public.product_alerts(user_id);
+create index product_alerts_product_id_idx on public.product_alerts(product_id);
 create index push_subscriptions_user_id_idx on public.push_subscriptions(user_id);

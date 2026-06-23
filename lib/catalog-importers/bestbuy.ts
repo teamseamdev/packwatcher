@@ -40,17 +40,22 @@ export async function importPokemonFromBestBuy(options: { query?: string; pageSi
     .map((product) => ({
       source: "bestbuy",
       sourceProductId: String(product.sku),
-      name: product.name,
+      title: product.name,
+      brand: "Pokemon",
       tcg: "pokemon",
       category: "Sealed Product",
       setName: null,
+      seriesName: null,
+      productType: "Sealed Product",
       imageUrl: product.image ?? null,
       msrp: product.regularPrice ?? null,
       storeName: "Best Buy",
+      retailerProductId: String(product.sku),
       url: product.url!,
       lastPrice: product.salePrice ?? product.regularPrice ?? null,
-      status: product.onlineAvailability ? "in_stock" : "out_of_stock"
+      status: product.onlineAvailability ? "in_stock" : "out_of_stock",
+      availabilityText: product.onlineAvailability ? "Available online" : "Not available online"
     }));
 
-  return { offers, errors: [] as string[] };
+  return { products: offers, offers, errors: [] as string[] };
 }

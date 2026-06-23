@@ -8,7 +8,7 @@ import type { ImportedCatalogOffer } from "@/lib/catalog-importers/types";
 import { importPokemonFromBestBuy } from "@/lib/catalog-importers/bestbuy";
 import { syncAvailableCatalogs } from "@/lib/catalog-importers/sync-all";
 import { importPokemonSealedFromTcgCsv } from "@/lib/catalog-importers/tcgcsv";
-import { upsertImportedOffers } from "@/lib/catalog-importers/upsert";
+import { upsertImportedCatalog, upsertImportedOffers } from "@/lib/catalog-importers/upsert";
 import { fetchProductMetadata } from "@/lib/product-metadata";
 import { getAdapter } from "@/lib/stock-checkers";
 import { runProductCheck } from "@/lib/stock-checkers/run-check";
@@ -49,9 +49,12 @@ export async function addCatalogOffer(formData: FormData) {
     .from("catalog_products")
     .insert({
       name: parsed.name,
+      title: parsed.name,
+      brand: parsed.tcg.toLowerCase() === "pokemon" ? "Pokemon" : parsed.tcg,
       tcg: parsed.tcg,
       category: parsed.category || null,
       set_name: parsed.set_name || null,
+      product_type: parsed.category || "Sealed Product",
       image_url: parsed.image_url || null,
       msrp: parsed.msrp || null
     })
@@ -64,10 +67,16 @@ export async function addCatalogOffer(formData: FormData) {
 
   await supabase.from("catalog_offers").insert({
     catalog_product_id: product.id,
+    product_id: product.id,
     store_name: parsed.store_name,
+    retailer: parsed.store_name,
+    title: parsed.name,
     url: parsed.url,
     status: "unknown",
-    last_price: parsed.last_price || parsed.msrp || null
+    in_stock: false,
+    availability_text: "Trackable",
+    last_price: parsed.last_price || parsed.msrp || null,
+    price: parsed.last_price || parsed.msrp || null
   });
 
   revalidatePath("/admin");
@@ -81,7 +90,7 @@ export async function importTcgCsvPokemonCatalog(formData: FormData) {
   const maxGroups = Number(formData.get("max_groups") ?? 30);
   const maxProducts = Number(formData.get("max_products") ?? 500);
   const imported = await importPokemonSealedFromTcgCsv({ maxGroups, maxProducts });
-  await upsertImportedOffers(supabase, imported.offers);
+  await upsertImportedCatalog(supabase, imported);
 
   revalidatePath("/admin");
   revalidatePath("/watchlist");
@@ -94,7 +103,7 @@ export async function importBestBuyPokemonCatalog(formData: FormData) {
   const query = String(formData.get("query") ?? "pokemon trading cards");
   const pageSize = Number(formData.get("page_size") ?? 50);
   const imported = await importPokemonFromBestBuy({ query, pageSize });
-  await upsertImportedOffers(supabase, imported.offers);
+  await upsertImportedCatalog(supabase, imported);
 
   revalidatePath("/admin");
   revalidatePath("/watchlist");
@@ -104,10 +113,31 @@ export async function syncAllAvailableCatalogs() {
   const { supabase, profile } = await requireProfile();
   if (!isAdmin(profile)) throw new Error("Admin access required.");
 
-  await syncAvailableCatalogs(supabase);
+  const result = await syncAvailableCatalogs(supabase);
 
   revalidatePath("/admin");
   revalidatePath("/watchlist");
+  revalidatePath("/dashboard");
+
+  return result;
+}
+
+export type SyncActionState = {
+  ok: boolean | null;
+  result?: Awaited<ReturnType<typeof syncAvailableCatalogs>>;
+  error?: string;
+};
+
+export async function syncAllAvailableCatalogsWithState(
+  _previousState: SyncActionState,
+  _formData: FormData
+): Promise<SyncActionState> {
+  try {
+    const result = await syncAllAvailableCatalogs();
+    return { ok: true, result };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Catalog sync failed." };
+  }
 }
 
 function storeNameFromUrl(url: string) {
@@ -145,16 +175,21 @@ export async function importRetailerUrlsToCatalog(formData: FormData) {
       offers.push({
         source: `url-${storeName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
         sourceProductId,
-        name: metadata?.title || check?.title || `${storeName} Pokemon product`,
+        title: metadata?.title || check?.title || `${storeName} Pokemon product`,
+        brand: "Pokemon",
         tcg: "pokemon",
         category: "Sealed Product",
         setName: fallbackSetName,
+        seriesName: fallbackSetName,
+        productType: "Sealed Product",
         imageUrl: metadata?.imageUrl || check?.imageUrl || null,
         msrp: metadata?.price ?? check?.price ?? null,
         storeName,
+        retailerProductId: sourceProductId,
         url,
         lastPrice: check?.price ?? metadata?.price ?? null,
-        status: check?.status ?? "unknown"
+        status: check?.status ?? "unknown",
+        availabilityText: check?.rawMatchReason ?? "Trackable retailer URL"
       });
 
       await new Promise((resolve) => setTimeout(resolve, 250));

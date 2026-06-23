@@ -26,35 +26,47 @@ function CatalogLoading() {
 }
 
 async function DashboardCatalog({ isAdminUser, trackedProducts }: { isAdminUser: boolean; trackedProducts: TrackedProduct[] }) {
-  const { supabase } = await requireProfile();
+  const { supabase, user } = await requireProfile();
   await ensureCatalogHasRows(supabase);
-  const { data } = await supabase
-    .from("catalog_offers")
-    .select("*, catalog_products(*)")
-    .order("last_checked_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
-    .limit(300);
+  const [{ data: products }, { data: offers }, { data: productAlerts }] = await Promise.all([
+    supabase
+      .from("catalog_products")
+      .select("*")
+      .eq("tcg", "pokemon")
+      .order("created_at", { ascending: false })
+      .limit(500),
+    supabase
+      .from("catalog_offers")
+      .select("*")
+      .order("last_checked_at", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false })
+      .limit(1000),
+    supabase.from("product_alerts").select("product_id").eq("user_id", user.id)
+  ]);
 
   const trackedUrls = new Set(trackedProducts.map((product) => product.url));
+  const trackedProductIds = new Set((productAlerts ?? []).map((alert) => alert.product_id));
   const groupsByProduct = new Map<string, CatalogProductGroup>();
 
-  for (const row of data ?? []) {
-    const offer = row as CatalogOffer;
-    const product = offer.catalog_products as CatalogProduct | null;
-    if (!product) continue;
+  for (const row of products ?? []) {
+    const product = row as CatalogProduct;
+    groupsByProduct.set(product.id, {
+      product,
+      offers: [],
+      trackedOfferUrls: [],
+      isProductTracked: trackedProductIds.has(product.id)
+    });
+  }
 
-    const existing = groupsByProduct.get(product.id);
+  for (const row of offers ?? []) {
+    const offer = row as CatalogOffer;
+    const productId = offer.product_id ?? offer.catalog_product_id;
+    const existing = groupsByProduct.get(productId);
     if (existing) {
       existing.offers.push(offer);
       if (trackedUrls.has(offer.url)) {
         existing.trackedOfferUrls.push(offer.url);
       }
-    } else {
-      groupsByProduct.set(product.id, {
-        product,
-        offers: [offer],
-        trackedOfferUrls: trackedUrls.has(offer.url) ? [offer.url] : []
-      });
     }
   }
 
@@ -70,11 +82,12 @@ async function DashboardCatalog({ isAdminUser, trackedProducts }: { isAdminUser:
 
 export default async function DashboardPage() {
   const { supabase, user, profile } = await requireProfile();
-  const [{ data: products }, { data: notifications }, { data: inventory }, { data: checks }] = await Promise.all([
+  const [{ data: products }, { data: notifications }, { data: inventory }, { data: checks }, { count: productAlertCount }] = await Promise.all([
     supabase.from("tracked_products").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).returns<TrackedProduct[]>(),
     supabase.from("notifications").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(5),
     supabase.from("inventory_items").select("*").eq("user_id", user.id).returns<InventoryItem[]>(),
-    supabase.from("stock_checks").select("*, tracked_products!inner(user_id)").eq("tracked_products.user_id", user.id).order("checked_at", { ascending: false }).limit(5)
+    supabase.from("stock_checks").select("*, tracked_products!inner(user_id)").eq("tracked_products.user_id", user.id).order("checked_at", { ascending: false }).limit(5),
+    supabase.from("product_alerts").select("*", { count: "exact", head: true }).eq("user_id", user.id)
   ]);
 
   const trackedProducts = products ?? [];
@@ -99,7 +112,7 @@ export default async function DashboardPage() {
       </div>
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <StatCard title="Watched Products" value={trackedProducts.length} icon={<ListChecks />} />
+        <StatCard title="Watched Products" value={Math.max(trackedProducts.length, productAlertCount ?? 0)} icon={<ListChecks />} />
         <StatCard title="In-Stock Products" value={trackedProducts.filter((item) => item.status === "in_stock").length} icon={<PackageCheck />} />
         <StatCard title="Recent Alerts" value={notifications?.length ?? 0} icon={<BellRing />} />
         <StatCard title="Inventory Value" value={currency(collectionValue)} icon={<Boxes />} />

@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
+import { AdminSyncPanel } from "@/components/admin-sync-panel";
 import { StatCard } from "@/components/stat-card";
 import { isAdmin, requireProfile } from "@/lib/auth";
-import { addCatalogOffer, adminCheckProduct, importBestBuyPokemonCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, promoteAdmin, syncAllAvailableCatalogs } from "./actions";
+import { addCatalogOffer, adminCheckProduct, importBestBuyPokemonCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, promoteAdmin } from "./actions";
 
 export default async function AdminPage() {
   const { supabase, profile } = await requireProfile();
@@ -47,11 +48,7 @@ export default async function AdminPage() {
         <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
           <h2 className="font-bold text-white">Catalog importers</h2>
           <div className="mt-4 grid gap-3">
-            <form action={syncAllAvailableCatalogs} className="rounded-lg border border-teal-300/20 bg-teal-300/10 p-3">
-              <p className="text-sm font-semibold text-white">Sync all available catalogs</p>
-              <p className="mt-1 text-xs leading-5 text-slate-300">Runs TCGCSV automatically and Best Buy when an API key is configured. Use this for cron-backed catalog refreshes.</p>
-              <button className="mt-3 h-10 rounded-lg bg-teal-300 px-3 text-sm font-semibold text-slate-950">Sync catalogs</button>
-            </form>
+            <AdminSyncPanel />
             <form action={importTcgCsvPokemonCatalog} className="rounded-lg bg-white/5 p-3">
               <p className="text-sm font-semibold text-white">TCGCSV Pokemon sealed</p>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">

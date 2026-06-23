@@ -86,6 +86,12 @@ export async function trackCatalogOffer(offerId: string) {
     throw new Error("Catalog product not found.");
   }
 
+  await supabase.from("product_alerts").upsert({
+    user_id: user.id,
+    product_id: product.id,
+    notify_push: true
+  }, { onConflict: "user_id,product_id" });
+
   const { data: duplicate } = await supabase
     .from("tracked_products")
     .select("id")
@@ -129,6 +135,45 @@ export async function trackCatalogOffer(offerId: string) {
 
   revalidatePath("/watchlist");
   revalidatePath("/dashboard");
+  revalidatePath(`/catalog/${product.id}`);
+}
+
+export async function trackCatalogProduct(productId: string) {
+  const { supabase, user, profile } = await requireProfile();
+  const { data: existing } = await supabase
+    .from("product_alerts")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("product_id", productId)
+    .maybeSingle();
+
+  if (existing) {
+    revalidatePath(`/catalog/${productId}`);
+    return;
+  }
+
+  const { count } = await supabase
+    .from("product_alerts")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", user.id);
+
+  if (profile?.plan === "free" && (count ?? 0) >= FREE_TRACKED_PRODUCT_LIMIT) {
+    throw new Error(`Free plan limit reached. Upgrade to track more than ${FREE_TRACKED_PRODUCT_LIMIT} products.`);
+  }
+
+  const { data: product } = await supabase.from("catalog_products").select("id").eq("id", productId).single();
+  if (!product) throw new Error("Catalog product not found.");
+
+  const { error } = await supabase.from("product_alerts").upsert({
+    user_id: user.id,
+    product_id: productId,
+    notify_push: true
+  }, { onConflict: "user_id,product_id" });
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/watchlist");
+  revalidatePath("/dashboard");
+  revalidatePath(`/catalog/${productId}`);
 }
 
 export async function checkOwnProduct(productId: string) {

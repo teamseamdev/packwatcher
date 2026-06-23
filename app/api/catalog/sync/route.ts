@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncAvailableCatalogs } from "@/lib/catalog-importers/sync-all";
 
+export const maxDuration = 300;
+
 function assertAdmin(request: Request) {
   const configured = process.env.ADMIN_CHECK_SECRET;
   const provided = request.headers.get("x-admin-secret");
@@ -22,7 +24,7 @@ function assertCron(request: Request) {
 async function runCatalogSync() {
   const supabase = createAdminClient();
   const result = await syncAvailableCatalogs(supabase);
-  return NextResponse.json({ ok: true, result });
+  return NextResponse.json(result);
 }
 
 export async function POST(request: Request) {

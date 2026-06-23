@@ -1,4 +1,4 @@
-import type { ImportedCatalogOffer } from "@/lib/catalog-importers/types";
+import type { ImportedCatalogOffer, ImportedCatalogProduct } from "@/lib/catalog-importers/types";
 
 const TCGCSV_BASE = "https://tcgcsv.com/tcgplayer";
 const POKEMON_CATEGORY_ID = 3;
@@ -23,12 +23,13 @@ const sealedTerms = [
 ];
 
 type TcgCsvCollection<T> = {
-  results: T[];
+  results?: T[];
 };
 
 type TcgCsvGroup = {
   groupId: number;
   name: string;
+  abbreviation?: string | null;
 };
 
 type TcgCsvProduct = {
@@ -37,6 +38,8 @@ type TcgCsvProduct = {
   cleanName?: string | null;
   imageUrl?: string | null;
   url?: string | null;
+  categoryName?: string | null;
+  groupName?: string | null;
 };
 
 type TcgCsvPrice = {
@@ -46,7 +49,8 @@ type TcgCsvPrice = {
   lowPrice?: number | null;
 };
 
-async function tcgcsvFetch<T>(path: string): Promise<TcgCsvCollection<T>> {
+async function tcgcsvFetch<T>(path: string): Promise<T[]> {
+  console.log(`[catalog-sync] TCGCSV fetch ${path}`);
   const response = await fetch(`${TCGCSV_BASE}${path}`, {
     headers: { "user-agent": "PackWatcher/0.1 catalog importer" },
     next: { revalidate: 0 }
@@ -56,7 +60,9 @@ async function tcgcsvFetch<T>(path: string): Promise<TcgCsvCollection<T>> {
     throw new Error(`TCGCSV ${response.status} for ${path}`);
   }
 
-  return response.json() as Promise<TcgCsvCollection<T>>;
+  const json = await response.json() as T[] | TcgCsvCollection<T>;
+  if (Array.isArray(json)) return json;
+  return json.results ?? [];
 }
 
 function isSealedProduct(product: TcgCsvProduct) {
@@ -64,52 +70,101 @@ function isSealedProduct(product: TcgCsvProduct) {
   return sealedTerms.some((term) => name.includes(term));
 }
 
+function productType(product: TcgCsvProduct) {
+  const name = product.name.toLowerCase();
+  if (name.includes("elite trainer box") || name.includes(" etb")) return "Elite Trainer Box";
+  if (name.includes("booster box")) return "Booster Box";
+  if (name.includes("booster bundle")) return "Booster Bundle";
+  if (name.includes("booster pack") || name.includes("blister")) return "Booster Pack";
+  if (name.includes("tin")) return "Tin";
+  if (name.includes("collection")) return "Collection Box";
+  return "Sealed Product";
+}
+
 function priceFor(productId: number, prices: TcgCsvPrice[]) {
   const price = prices.find((item) => item.productId === productId);
   return price?.marketPrice ?? price?.midPrice ?? price?.lowPrice ?? null;
+}
+
+function tcgplayerUrl(product: TcgCsvProduct) {
+  return product.url ?? `https://www.tcgplayer.com/product/${product.productId}`;
 }
 
 export async function importPokemonSealedFromTcgCsv(options: { maxGroups?: number; maxProducts?: number } = {}) {
   const maxGroups = options.maxGroups ?? 30;
   const maxProducts = options.maxProducts ?? 500;
   const groups = await tcgcsvFetch<TcgCsvGroup>(`/${POKEMON_CATEGORY_ID}/groups`);
+  const products: ImportedCatalogProduct[] = [];
   const offers: ImportedCatalogOffer[] = [];
   const errors: string[] = [];
 
-  for (const group of groups.results.slice(0, maxGroups)) {
-    if (offers.length >= maxProducts) break;
+  console.log(`[catalog-sync] TCGCSV groups found: ${groups.length}`);
 
-    try {
-      const [products, prices] = await Promise.all([
-        tcgcsvFetch<TcgCsvProduct>(`/${POKEMON_CATEGORY_ID}/${group.groupId}/products`),
-        tcgcsvFetch<TcgCsvPrice>(`/${POKEMON_CATEGORY_ID}/${group.groupId}/prices`)
-      ]);
+  const selectedGroups = groups.slice(0, maxGroups);
+  const batchSize = 5;
 
-      for (const product of products.results.filter(isSealedProduct)) {
-        if (offers.length >= maxProducts) break;
-        if (!product.url) continue;
+  for (let index = 0; index < selectedGroups.length && products.length < maxProducts; index += batchSize) {
+    const batch = selectedGroups.slice(index, index + batchSize);
+    const results = await Promise.all(batch.map(async (group) => {
+      try {
+        const [groupProducts, prices] = await Promise.all([
+          tcgcsvFetch<TcgCsvProduct>(`/${POKEMON_CATEGORY_ID}/${group.groupId}/products`),
+          tcgcsvFetch<TcgCsvPrice>(`/${POKEMON_CATEGORY_ID}/${group.groupId}/prices`)
+        ]);
+        return { group, groupProducts, prices, error: null };
+      } catch (error) {
+        return { group, groupProducts: [] as TcgCsvProduct[], prices: [] as TcgCsvPrice[], error };
+      }
+    }));
 
-        offers.push({
-          source: "tcgcsv",
-          sourceProductId: String(product.productId),
-          name: product.cleanName || product.name,
-          tcg: "pokemon",
-          category: "Sealed Product",
-          setName: group.name,
-          imageUrl: product.imageUrl?.replace("_200w", "_in_1000x1000") ?? null,
-          msrp: null,
-          storeName: "TCGplayer",
-          url: product.url,
-          lastPrice: priceFor(product.productId, prices.results),
-          status: "unknown"
-        });
+    for (const result of results) {
+      if (result.error) {
+        errors.push(result.error instanceof Error ? result.error.message : `Failed group ${result.group.name}`);
+        continue;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 125));
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : `Failed group ${group.name}`);
+      const sealedProducts = result.groupProducts.filter(isSealedProduct);
+      console.log(`[catalog-sync] TCGCSV ${result.group.name}: ${sealedProducts.length} sealed products`);
+
+      for (const product of sealedProducts) {
+        if (products.length >= maxProducts) break;
+
+        const title = product.cleanName || product.name;
+        const importedProduct: ImportedCatalogProduct = {
+          source: "tcgcsv",
+          sourceProductId: String(product.productId),
+          title,
+          brand: "Pokemon",
+          tcg: "pokemon",
+          category: "Sealed Product",
+          setName: product.groupName ?? result.group.name,
+          seriesName: result.group.name,
+          productType: productType(product),
+          imageUrl: product.imageUrl?.replace("_200w", "_in_1000x1000") ?? null,
+          msrp: null,
+          metadata: {
+            groupId: result.group.groupId,
+            groupName: result.group.name,
+            categoryName: product.categoryName ?? null
+          }
+        };
+
+        products.push(importedProduct);
+        offers.push({
+          ...importedProduct,
+          storeName: "TCGplayer",
+          retailerProductId: String(product.productId),
+          url: tcgplayerUrl(product),
+          lastPrice: priceFor(product.productId, result.prices),
+          status: "unknown",
+          availabilityText: "Trackable marketplace listing"
+        });
+      }
     }
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
   }
 
-  return { offers, errors };
+  console.log(`[catalog-sync] TCGCSV products prepared: ${products.length}, offers prepared: ${offers.length}`);
+  return { products, offers, errors };
 }

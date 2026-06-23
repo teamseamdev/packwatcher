@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { BellPlus, PackageSearch, Search } from "lucide-react";
-import { trackCatalogOffer } from "@/app/(app)/watchlist/actions";
+import { trackCatalogProduct } from "@/app/(app)/watchlist/actions";
 import { currency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, TrackedProduct } from "@/lib/types";
 
@@ -24,10 +24,12 @@ function stockLabel(status: string) {
 export function CatalogOfferPicker({
   offers,
   trackedProducts,
+  trackedProductIds = [],
   isAdmin = false
 }: {
   offers: CatalogOffer[];
   trackedProducts: TrackedProduct[];
+  trackedProductIds?: string[];
   isAdmin?: boolean;
 }) {
   const [query, setQuery] = useState("");
@@ -35,6 +37,7 @@ export function CatalogOfferPicker({
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
   const trackedUrls = useMemo(() => new Set(trackedProducts.map((product) => product.url)), [trackedProducts]);
+  const trackedCatalogProducts = useMemo(() => new Set(trackedProductIds), [trackedProductIds]);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -56,12 +59,12 @@ export function CatalogOfferPicker({
       });
   }, [offers, query, sort]);
 
-  function track(offerId: string) {
+  function track(productId: string) {
     startTransition(async () => {
       setMessage("");
       try {
-        await trackCatalogOffer(offerId);
-        setMessage("Tracking enabled. You will get alerts when this offer comes back in stock.");
+        await trackCatalogProduct(productId);
+        setMessage("Tracking enabled. You will get alerts when any retailer offer comes back in stock.");
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "Could not track this product.");
       }
@@ -104,7 +107,7 @@ export function CatalogOfferPicker({
         {offers.length ? (
           filtered.length ? filtered.map((offer) => {
             const product = productForOffer(offer);
-            const alreadyTracked = trackedUrls.has(offer.url);
+            const alreadyTracked = trackedUrls.has(offer.url) || (product ? trackedCatalogProducts.has(product.id) : false);
 
             return (
               <article key={offer.id} className="grid grid-cols-[72px_1fr] gap-3 rounded-lg border border-white/10 bg-slate-950/60 p-3">
@@ -123,7 +126,7 @@ export function CatalogOfferPicker({
                     <p className="text-sm font-semibold text-teal-200">{currency(offer.last_price ?? product?.msrp)}</p>
                     <button
                       disabled={alreadyTracked || isPending}
-                      onClick={() => track(offer.id)}
+                      onClick={() => product ? track(product.id) : undefined}
                       className="inline-flex h-9 items-center gap-2 rounded-lg bg-teal-300 px-3 text-xs font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <BellPlus className="h-4 w-4" />

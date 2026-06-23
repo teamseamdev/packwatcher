@@ -31,25 +31,55 @@ export type TrackedProduct = {
 
 export type CatalogProduct = {
   id: string;
+  slug: string | null;
+  title: string | null;
+  brand: string | null;
   name: string;
   tcg: string;
   category: string | null;
   set_name: string | null;
+  series_name: string | null;
+  product_type: string | null;
   image_url: string | null;
   msrp: number | null;
+  source: string | null;
+  source_product_id: string | null;
+  source_id: string | null;
+  metadata: Record<string, unknown> | null;
   created_at: string;
+  updated_at: string | null;
 };
 
 export type CatalogOffer = {
   id: string;
   catalog_product_id: string;
+  product_id: string | null;
   store_name: string;
+  retailer: string | null;
+  retailer_product_id: string | null;
+  title: string | null;
   url: string;
   status: StockStatus;
   last_price: number | null;
+  price: number | null;
+  currency: string | null;
+  image_url: string | null;
+  in_stock: boolean | null;
+  availability_text: string | null;
   last_checked_at: string | null;
+  metadata: Record<string, unknown> | null;
   created_at: string;
+  updated_at: string | null;
   catalog_products: CatalogProduct | null;
+};
+
+export type ProductAlert = {
+  id: string;
+  user_id: string;
+  product_id: string;
+  notify_push: boolean;
+  notify_email: boolean;
+  created_at: string;
 };
 
 export type InventoryItem = {

@@ -37,6 +37,7 @@ TCGCSV_MAX_GROUPS=250
 TCGCSV_MAX_PRODUCTS=5000
 TCGCSV_QUICK_MAX_GROUPS=40
 TCGCSV_QUICK_MAX_PRODUCTS=1000
+CATALOG_OFFER_CHECK_LIMIT=100
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 NEXT_PUBLIC_STRIPE_PRO_PRICE_ID=
@@ -91,6 +92,8 @@ Existing Supabase projects should run `supabase/migrations/001_catalog.sql` in t
 
 Run `supabase/migrations/002_push_subscriptions.sql` to enable mobile/browser push subscriptions.
 
+Run `supabase/migrations/003_catalog_tracking_upgrade.sql` to add product-level tracking, live offer fields, indexes, and RLS. Existing projects should run migrations `001`, `002`, and `003` in order. Each migration is safe to rerun.
+
 Catalog importers:
 
 - TCGCSV Pokemon sealed importer seeds shared Pokemon sealed products from server-side TCGCSV data.
@@ -98,6 +101,8 @@ Catalog importers:
 - `POST /api/catalog/sync` imports every currently available catalog source using `x-admin-secret`.
 - `GET /api/catalog/sync` supports Vercel Cron using `Authorization: Bearer $CRON_SECRET`.
 - Catalog sync always attempts TCGCSV and only runs Best Buy when `BESTBUY_API_KEY` is configured.
+- Imports use chunked upserts, so repeated syncs update the catalog without creating duplicate products or offers.
+- Existing catalog offers are checked after imports. Only an unavailable-to-available transition creates in-app and web push alerts.
 - Dashboard and Watchlist automatically attempt a quick TCGCSV sync if the catalog is empty, so users do not land on a blank catalog.
 - Pokemon Center and Amazon have retailer-specific safe monitoring adapters.
 - Walmart, Target, Pokemon Center, Amazon, Best Buy, and other product URLs can be added through the Admin bulk URL importer, then monitored by the safe stock checker.
@@ -126,6 +131,8 @@ Retailer adapters live in `lib/stock-checkers/`:
 - `walmart.ts`
 - `bestbuy.ts`
 - `generic.ts`
+
+The catalog offer monitor interface lives in `lib/retailers/`. Best Buy, Target, Walmart, GameStop, and Pokemon Center currently use conservative URL checks; official catalog APIs can be added behind the same interface.
 
 Admin cron endpoints:
 
@@ -168,9 +175,9 @@ Create a Stripe recurring price for the PRO plan, then set `NEXT_PUBLIC_STRIPE_P
 7. Enable Google and Discord providers in Supabase, then add the provider callback URL from Supabase into each provider dashboard.
 8. Configure Vercel Cron jobs:
    - `/api/catalog/sync` daily to refresh searchable catalog products.
-   - `/api/check-all` every few minutes to check tracked products.
    - Vercel Cron should call `GET /api/catalog/sync` with `Authorization: Bearer $CRON_SECRET`.
    - Manual/admin calls can still use `POST /api/catalog/sync` with `x-admin-secret`.
+   - For checks more frequent than the Vercel Hobby daily schedule, use an authenticated external scheduler such as GitHub Actions, cron-job.org, Upstash QStash, or a paid Vercel plan.
 9. Configure the Stripe webhook URL:
    - `https://your-domain.com/api/stripe/webhook`
 

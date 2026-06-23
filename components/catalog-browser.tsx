@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { BellPlus, ExternalLink, PackageSearch, Search } from "lucide-react";
-import { trackCatalogOffer } from "@/app/(app)/watchlist/actions";
+import { trackCatalogOffer, trackCatalogProduct } from "@/app/(app)/watchlist/actions";
 import { currency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, StockStatus } from "@/lib/types";
 
@@ -12,6 +12,7 @@ export type CatalogProductGroup = {
   product: CatalogProduct;
   offers: CatalogOffer[];
   trackedOfferUrls: string[];
+  isProductTracked: boolean;
 };
 
 type CatalogFilter = "all" | "in_stock" | "trackable" | "etb" | "booster_pack" | "booster_box" | "collection_box" | "tin";
@@ -117,6 +118,18 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
     });
   }
 
+  function trackProduct(productId: string) {
+    startTransition(async () => {
+      setMessage("");
+      try {
+        await trackCatalogProduct(productId);
+        setMessage("Tracking enabled. PackWatcher will alert you when any retailer offer comes back in stock.");
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Could not track this product.");
+      }
+    });
+  }
+
   if (!groups.length) {
     return (
       <section className="rounded-lg border border-white/10 bg-white/[0.04] p-6">
@@ -182,7 +195,7 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
           const status = groupStatus(group);
           const offer = bestOffer(group);
           const isExpanded = expandedId === group.product.id;
-          const alreadyTracked = group.offers.some((item) => group.trackedOfferUrls.includes(item.url));
+          const alreadyTracked = group.isProductTracked || group.offers.some((item) => group.trackedOfferUrls.includes(item.url));
 
           return (
             <article key={group.product.id} className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
@@ -198,7 +211,9 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
               </div>
               <div className="p-4">
                 <div className="min-h-20">
-                  <h3 className="line-clamp-2 font-bold text-white">{group.product.name}</h3>
+                  <Link href={`/catalog/${group.product.id}`} className="line-clamp-2 font-bold text-white hover:text-teal-200">
+                    {group.product.title ?? group.product.name}
+                  </Link>
                   <p className="mt-2 text-sm text-slate-400">{group.product.category ?? "Sealed Product"}{group.product.set_name ? ` - ${group.product.set_name}` : ""}</p>
                 </div>
                 <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
@@ -213,8 +228,8 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <button
-                    disabled={!offer || alreadyTracked || isPending}
-                    onClick={() => offer ? trackOffer(offer.id) : undefined}
+                    disabled={alreadyTracked || isPending}
+                    onClick={() => trackProduct(group.product.id)}
                     className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-300 px-4 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <BellPlus className="h-4 w-4" />
@@ -223,6 +238,9 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
                   <button onClick={() => setExpandedId(isExpanded ? null : group.product.id)} className="h-10 rounded-lg border border-white/10 px-4 text-sm font-semibold text-slate-200">
                     {isExpanded ? "Hide offers" : "View offers"}
                   </button>
+                  <Link href={`/catalog/${group.product.id}`} className="inline-flex h-10 items-center rounded-lg border border-white/10 px-4 text-sm font-semibold text-slate-200">
+                    Product page
+                  </Link>
                 </div>
                 {isExpanded ? (
                   <div className="mt-4 space-y-2 border-t border-white/10 pt-4">
