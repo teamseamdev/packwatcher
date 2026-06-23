@@ -4,19 +4,22 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireProfile, requireUser } from "@/lib/auth";
 import { FREE_TRACKED_PRODUCT_LIMIT } from "@/lib/plans";
+import { fetchProductMetadata } from "@/lib/product-metadata";
 import { runProductCheck } from "@/lib/stock-checkers/run-check";
 
+const optionalText = z.string().trim().optional().or(z.literal(""));
+
 const ProductSchema = z.object({
-  name: z.string().min(1),
-  store_name: z.string().min(1),
+  name: optionalText,
+  store_name: optionalText,
   url: z.string().url(),
-  category: z.string().optional(),
-  set_name: z.string().optional(),
+  category: optionalText,
+  set_name: optionalText,
   image_url: z.string().url().optional().or(z.literal("")),
   msrp: z.coerce.number().optional(),
   target_price: z.coerce.number().optional(),
   alerts_enabled: z.coerce.boolean().default(false),
-  notes: z.string().optional()
+  notes: optionalText
 });
 
 export async function addProduct(formData: FormData) {
@@ -28,14 +31,32 @@ export async function addProduct(formData: FormData) {
   }
 
   const parsed = ProductSchema.parse(Object.fromEntries(formData));
-  await supabase.from("tracked_products").insert({
+  const metadata = await fetchProductMetadata(parsed.url).catch(() => null);
+  const name = parsed.name || metadata?.title || "Untitled product";
+  const storeName = parsed.store_name || metadata?.storeName || new URL(parsed.url).hostname.replace(/^www\./, "");
+  const imageUrl = parsed.image_url || metadata?.imageUrl || null;
+  const initialPrice = metadata?.price ?? null;
+
+  const { data: product, error } = await supabase.from("tracked_products").insert({
     ...parsed,
+    name,
+    store_name: storeName,
     user_id: user.id,
     status: "unknown",
-    msrp: parsed.msrp || null,
+    msrp: parsed.msrp || initialPrice,
     target_price: parsed.target_price || null,
-    image_url: parsed.image_url || null
-  });
+    image_url: imageUrl,
+    last_price: initialPrice
+  }).select("id").single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (product?.id) {
+    await runProductCheck(product.id, { enforceRateLimit: false }).catch(() => undefined);
+  }
+
   revalidatePath("/watchlist");
   revalidatePath("/dashboard");
 }
@@ -45,6 +66,17 @@ export async function checkOwnProduct(productId: string) {
   const { data: product } = await supabase.from("tracked_products").select("id").eq("id", productId).eq("user_id", user.id).single();
   if (!product) throw new Error("Product not found.");
   await runProductCheck(productId, { enforceRateLimit: true });
+  revalidatePath("/watchlist");
+  revalidatePath("/dashboard");
+}
+
+export async function toggleProductAlerts(productId: string, enabled: boolean) {
+  const { supabase, user } = await requireUser();
+  await supabase
+    .from("tracked_products")
+    .update({ alerts_enabled: enabled })
+    .eq("id", productId)
+    .eq("user_id", user.id);
   revalidatePath("/watchlist");
   revalidatePath("/dashboard");
 }

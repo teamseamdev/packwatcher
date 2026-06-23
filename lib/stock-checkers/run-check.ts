@@ -25,11 +25,21 @@ export async function runProductCheck(productId: string, options: { enforceRateL
     checked_at: result.checkedAt
   });
 
-  await supabase.from("tracked_products").update({
+  const updates: Partial<TrackedProduct> = {
     status: result.status,
     last_price: result.price,
     last_checked_at: result.checkedAt
-  }).eq("id", product.id);
+  };
+
+  if (!product.image_url && result.imageUrl) {
+    updates.image_url = result.imageUrl;
+  }
+
+  if ((product.name === product.url || product.name === "Untitled product") && result.title) {
+    updates.name = result.title;
+  }
+
+  await supabase.from("tracked_products").update(updates).eq("id", product.id);
 
   if (product.alerts_enabled && previousStatus === "out_of_stock" && result.status === "in_stock") {
     await supabase.from("notifications").insert({

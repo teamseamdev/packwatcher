@@ -1,35 +1,12 @@
+import { fetchPageHtml } from "@/lib/fetch-page-html";
 import type { RetailerAdapter, StockCheckInput, StockCheckResult } from "@/lib/stock-checkers/types";
+import { extractProductMetadata } from "@/lib/product-metadata";
 
 const inStockPhrases = ["in stock", "add to cart", "add for shipping", "available now", "ship it"];
 const outOfStockPhrases = ["sold out", "out of stock", "currently unavailable", "unavailable", "notify me"];
 
 export async function fetchWithRetry(url: string, retries = 2) {
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    try {
-      const response = await fetch(url, {
-        headers: {
-          "user-agent": "PackWatcher/0.1 safe stock monitor",
-          accept: "text/html,application/xhtml+xml"
-        },
-        next: { revalidate: 0 }
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      return await response.text();
-    } catch (error) {
-      lastError = error;
-      if (attempt < retries) {
-        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
-      }
-    }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error("Fetch failed");
+  return fetchPageHtml(url, retries);
 }
 
 export function detectStockFromHtml(html: string): Pick<StockCheckResult, "status" | "rawMatchReason" | "price"> {
@@ -53,9 +30,13 @@ export function detectStockFromHtml(html: string): Pick<StockCheckResult, "statu
 export async function genericCheck(input: StockCheckInput): Promise<StockCheckResult> {
   const html = await fetchWithRetry(input.url);
   const detected = detectStockFromHtml(html);
+  const metadata = extractProductMetadata(html, input.url);
 
   return {
     ...detected,
+    price: detected.price ?? metadata.price,
+    title: metadata.title,
+    imageUrl: metadata.imageUrl,
     checkedAt: new Date().toISOString()
   };
 }

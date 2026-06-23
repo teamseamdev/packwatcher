@@ -75,6 +75,8 @@ Open `http://localhost:3000`.
 6. Track owned items in Inventory.
 7. View estimated profit and ROI.
 
+Watchlist URLs are enriched with safe public metadata when possible, including product title, store hostname, preview image, price, and stock phrase matches. Users can search, sort, filter, and toggle alerts per tracked product.
+
 ## Stock Checking
 
 The MVP stock checker fetches public HTML and uses safe keyword matching:

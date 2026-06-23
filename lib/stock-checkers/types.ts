@@ -11,6 +11,8 @@ export type StockCheckResult = {
   price: number | null;
   rawMatchReason: string;
   checkedAt: string;
+  title?: string | null;
+  imageUrl?: string | null;
 };
 
 export type RetailerAdapter = {
