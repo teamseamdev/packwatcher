@@ -10,12 +10,34 @@ function assertAdmin(request: Request) {
   }
 }
 
+function assertCron(request: Request) {
+  const configured = process.env.CRON_SECRET;
+  const authorization = request.headers.get("authorization");
+
+  if (!configured || authorization !== `Bearer ${configured}`) {
+    throw new Error("Unauthorized");
+  }
+}
+
+async function runCatalogSync() {
+  const supabase = createAdminClient();
+  const result = await syncAvailableCatalogs(supabase);
+  return NextResponse.json({ ok: true, result });
+}
+
 export async function POST(request: Request) {
   try {
     assertAdmin(request);
-    const supabase = createAdminClient();
-    const result = await syncAvailableCatalogs(supabase);
-    return NextResponse.json({ ok: true, result });
+    return await runCatalogSync();
+  } catch (error) {
+    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Unknown error" }, { status: 400 });
+  }
+}
+
+export async function GET(request: Request) {
+  try {
+    assertCron(request);
+    return await runCatalogSync();
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Unknown error" }, { status: 400 });
   }

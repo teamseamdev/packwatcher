@@ -25,6 +25,7 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 ADMIN_CHECK_SECRET=
+CRON_SECRET=
 DISCORD_WEBHOOK_URL=
 NEXT_PUBLIC_VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
@@ -92,7 +93,9 @@ Catalog importers:
 
 - TCGCSV Pokemon sealed importer seeds shared Pokemon sealed products from server-side TCGCSV data.
 - Best Buy importer uses `BESTBUY_API_KEY` to import Pokemon-related Best Buy offers with API-backed availability.
-- `POST /api/catalog/sync` imports every currently available catalog source. It always attempts TCGCSV and only runs Best Buy when `BESTBUY_API_KEY` is configured.
+- `POST /api/catalog/sync` imports every currently available catalog source using `x-admin-secret`.
+- `GET /api/catalog/sync` supports Vercel Cron using `Authorization: Bearer $CRON_SECRET`.
+- Catalog sync always attempts TCGCSV and only runs Best Buy when `BESTBUY_API_KEY` is configured.
 - Pokemon Center and Amazon have retailer-specific safe monitoring adapters.
 - Walmart, Target, Pokemon Center, Amazon, Best Buy, and other product URLs can be added through the Admin bulk URL importer, then monitored by the safe stock checker.
 - Prefer official feeds/APIs where available. Use URL monitoring only for public product pages and never for checkout, queue, CAPTCHA, or account automation.
@@ -134,6 +137,9 @@ curl -X POST http://localhost:3000/api/check-all \
 
 curl -X POST http://localhost:3000/api/catalog/sync \
   -H "x-admin-secret: $ADMIN_CHECK_SECRET"
+
+curl http://localhost:3000/api/catalog/sync \
+  -H "Authorization: Bearer $CRON_SECRET"
 ```
 
 ## Stripe
@@ -160,7 +166,8 @@ Create a Stripe recurring price for the PRO plan, then set `NEXT_PUBLIC_STRIPE_P
 8. Configure Vercel Cron jobs:
    - `/api/catalog/sync` daily to refresh searchable catalog products.
    - `/api/check-all` every few minutes to check tracked products.
-   - Include `x-admin-secret` with the value from `ADMIN_CHECK_SECRET`.
+   - Vercel Cron should call `GET /api/catalog/sync` with `Authorization: Bearer $CRON_SECRET`.
+   - Manual/admin calls can still use `POST /api/catalog/sync` with `x-admin-secret`.
 9. Configure the Stripe webhook URL:
    - `https://your-domain.com/api/stripe/webhook`
 
