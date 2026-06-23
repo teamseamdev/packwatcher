@@ -1,11 +1,13 @@
 import { CatalogOfferPicker } from "@/components/catalog-offer-picker";
 import { WatchlistGrid } from "@/components/watchlist-grid";
 import { isAdmin, requireProfile } from "@/lib/auth";
+import { ensureCatalogHasRows } from "@/lib/catalog/ensure-catalog";
 import type { CatalogOffer, TrackedProduct } from "@/lib/types";
 import { addProduct } from "./actions";
 
 export default async function WatchlistPage() {
   const { supabase, user, profile } = await requireProfile();
+  await ensureCatalogHasRows(supabase);
   const [{ data: products }, { data: offers }] = await Promise.all([
     supabase.from("tracked_products").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).returns<TrackedProduct[]>(),
     supabase.from("catalog_offers").select("*, catalog_products(*)").order("created_at", { ascending: false }).limit(1000)

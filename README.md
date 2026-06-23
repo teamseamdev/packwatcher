@@ -35,6 +35,8 @@ BESTBUY_IMPORT_QUERY=pokemon trading cards
 BESTBUY_IMPORT_PAGE_SIZE=100
 TCGCSV_MAX_GROUPS=250
 TCGCSV_MAX_PRODUCTS=5000
+TCGCSV_QUICK_MAX_GROUPS=40
+TCGCSV_QUICK_MAX_PRODUCTS=1000
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 NEXT_PUBLIC_STRIPE_PRO_PRICE_ID=
@@ -96,6 +98,7 @@ Catalog importers:
 - `POST /api/catalog/sync` imports every currently available catalog source using `x-admin-secret`.
 - `GET /api/catalog/sync` supports Vercel Cron using `Authorization: Bearer $CRON_SECRET`.
 - Catalog sync always attempts TCGCSV and only runs Best Buy when `BESTBUY_API_KEY` is configured.
+- Dashboard and Watchlist automatically attempt a quick TCGCSV sync if the catalog is empty, so users do not land on a blank catalog.
 - Pokemon Center and Amazon have retailer-specific safe monitoring adapters.
 - Walmart, Target, Pokemon Center, Amazon, Best Buy, and other product URLs can be added through the Admin bulk URL importer, then monitored by the safe stock checker.
 - Prefer official feeds/APIs where available. Use URL monitoring only for public product pages and never for checkout, queue, CAPTCHA, or account automation.

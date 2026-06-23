@@ -55,6 +55,18 @@ function matchesProductType(group: CatalogProductGroup, filter: CatalogFilter) {
   return true;
 }
 
+function featuredScore(group: CatalogProductGroup) {
+  const text = [group.product.name, group.product.category, group.product.set_name].join(" ").toLowerCase();
+  if (text.includes("elite trainer box") || text.includes(" etb")) return 100;
+  if (text.includes("booster box")) return 95;
+  if (text.includes("booster bundle")) return 90;
+  if (text.includes("ultra-premium") || text.includes("premium collection")) return 85;
+  if (text.includes("collection")) return 75;
+  if (text.includes("tin")) return 70;
+  if (text.includes("booster pack") || text.includes("blister")) return 65;
+  return 10;
+}
+
 export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGroup[]; isAdmin: boolean }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<CatalogFilter>("all");
@@ -65,25 +77,32 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
   const filteredGroups = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
-    return groups.filter((group) => {
-      const status = groupStatus(group);
-      const searchable = [
-        group.product.name,
-        group.product.tcg,
-        group.product.category,
-        group.product.set_name,
-        ...group.offers.map((offer) => offer.store_name)
-      ].join(" ").toLowerCase();
+    return groups
+      .filter((group) => {
+        const status = groupStatus(group);
+        const searchable = [
+          group.product.name,
+          group.product.tcg,
+          group.product.category,
+          group.product.set_name,
+          ...group.offers.map((offer) => offer.store_name)
+        ].join(" ").toLowerCase();
 
-      const matchesQuery = !normalizedQuery || searchable.includes(normalizedQuery);
-      const matchesFilter =
-        filter === "all" ||
-        (filter === "in_stock" && status === "in_stock") ||
-        (filter === "trackable" && group.offers.length > 0) ||
-        matchesProductType(group, filter);
+        const matchesQuery = !normalizedQuery || searchable.includes(normalizedQuery);
+        const matchesFilter =
+          filter === "all" ||
+          (filter === "in_stock" && status === "in_stock") ||
+          (filter === "trackable" && group.offers.length > 0) ||
+          matchesProductType(group, filter);
 
-      return matchesQuery && matchesFilter;
-    });
+        return matchesQuery && matchesFilter;
+      })
+      .sort((a, b) => {
+        const aInStock = groupStatus(a) === "in_stock";
+        const bInStock = groupStatus(b) === "in_stock";
+        if (aInStock !== bInStock) return aInStock ? -1 : 1;
+        return featuredScore(b) - featuredScore(a);
+      });
   }, [filter, groups, query]);
 
   function trackOffer(offerId: string) {
@@ -125,7 +144,7 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
     <section className="space-y-4">
       <div>
         <p className="text-sm font-semibold text-teal-200">Pokemon catalog</p>
-        <h2 className="mt-1 text-2xl font-black text-white">Find a product, track it, get notified</h2>
+        <h2 className="mt-1 text-2xl font-black text-white">Top Pokemon products to track</h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
           Browse sealed Pokemon products already in the catalog. Search narrows the visible products instead of starting from a blank page.
         </p>

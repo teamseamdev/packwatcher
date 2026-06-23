@@ -3,6 +3,7 @@ import { BellRing, Boxes, Clock, ListChecks, PackageCheck, TrendingUp } from "lu
 import { CatalogBrowser, type CatalogProductGroup } from "@/components/catalog-browser";
 import { StatCard } from "@/components/stat-card";
 import { isAdmin, requireProfile } from "@/lib/auth";
+import { ensureCatalogHasRows } from "@/lib/catalog/ensure-catalog";
 import { calculateProfit, currency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, InventoryItem, TrackedProduct } from "@/lib/types";
 
@@ -26,6 +27,7 @@ function CatalogLoading() {
 
 async function DashboardCatalog({ isAdminUser, trackedProducts }: { isAdminUser: boolean; trackedProducts: TrackedProduct[] }) {
   const { supabase } = await requireProfile();
+  await ensureCatalogHasRows(supabase);
   const { data } = await supabase
     .from("catalog_offers")
     .select("*, catalog_products(*)")
