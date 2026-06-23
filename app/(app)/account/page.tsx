@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { PushNotificationSettings } from "@/components/push-notification-settings";
 import { requireProfile } from "@/lib/auth";
 
@@ -27,6 +28,15 @@ export default async function AccountPage() {
           <button className="h-11 rounded-lg border border-white/10 px-4 text-sm font-semibold">Sign out</button>
         </form>
       </section>
+      {profile?.plan === "admin" ? (
+        <section className="mt-6 rounded-lg border border-teal-300/20 bg-teal-300/10 p-5">
+          <h2 className="font-bold text-white">Admin access</h2>
+          <p className="mt-2 text-sm text-slate-300">Manage catalog imports, users, checks, and notification logs.</p>
+          <Link href="/admin" className="mt-4 inline-flex h-11 items-center rounded-lg bg-teal-300 px-4 text-sm font-semibold text-slate-950">
+            Open Admin
+          </Link>
+        </section>
+      ) : null}
       <div className="mt-6">
         <PushNotificationSettings publicKey={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY} subscriptionCount={subscriptionCount ?? 0} />
       </div>

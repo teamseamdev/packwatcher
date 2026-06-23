@@ -30,6 +30,11 @@ export function AppNav({ plan }: { plan: Plan }) {
             <BrandMark size="sm" />
             <span className="hidden font-bold sm:block">PackWatcher</span>
           </Link>
+          {plan === "admin" ? (
+            <Link href="/admin" aria-label="Admin" className={`inline-flex h-10 w-10 items-center justify-center rounded-lg md:hidden ${pathname.startsWith("/admin") ? "bg-teal-300 text-slate-950" : "border border-white/10 text-slate-300"}`}>
+              <Shield className="h-5 w-5" />
+            </Link>
+          ) : null}
           <nav className="hidden items-center gap-1 md:flex">
             {desktopItems.map((item) => (
               <Link key={item.href} href={item.href} className={itemClass(item.href)}>
