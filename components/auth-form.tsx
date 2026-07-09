@@ -61,7 +61,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   return (
     <main className="grid min-h-screen place-items-center px-5 py-10">
       <section className="w-full max-w-md rounded-lg border border-white/10 bg-slate-950/80 p-6">
-        <Link href="/" className="inline-flex items-center gap-3 text-sm font-bold text-teal-200">
+        <Link href="/" className="inline-flex items-center gap-3 text-sm font-bold text-amber-200">
           <BrandMark />
           PackWatcher
         </Link>
@@ -81,16 +81,16 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
           <span className="h-px flex-1 bg-white/10" />
         </div>
         <div className="space-y-4">
-          <input className="h-12 w-full rounded-lg border border-white/10 bg-white/5 px-4 outline-none focus:border-teal-300" placeholder="Email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
-          <input className="h-12 w-full rounded-lg border border-white/10 bg-white/5 px-4 outline-none focus:border-teal-300" placeholder="Password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
-          <button className="h-12 w-full rounded-lg bg-teal-300 font-semibold text-slate-950 disabled:opacity-60" disabled={isPending} onClick={submit}>
+          <input className="h-12 w-full rounded-lg border border-white/10 bg-white/5 px-4 outline-none focus:border-amber-300" placeholder="Email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+          <input className="h-12 w-full rounded-lg border border-white/10 bg-white/5 px-4 outline-none focus:border-amber-300" placeholder="Password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          <button className="h-12 w-full rounded-lg bg-amber-300 font-semibold text-slate-950 disabled:opacity-60" disabled={isPending} onClick={submit}>
             {isPending ? "Working..." : mode === "login" ? "Sign In" : "Sign Up"}
           </button>
         </div>
         {message ? <p className="mt-4 rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-slate-200">{message}</p> : null}
         <p className="mt-6 text-sm text-slate-400">
           {mode === "login" ? "Need an account? " : "Already have an account? "}
-          <Link className="text-teal-200" href={mode === "login" ? "/signup" : "/login"}>
+          <Link className="text-amber-200" href={mode === "login" ? "/signup" : "/login"}>
             {mode === "login" ? "Sign up" : "Sign in"}
           </Link>
         </p>
@@ -98,3 +98,4 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
     </main>
   );
 }
+

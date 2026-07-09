@@ -54,7 +54,7 @@ export function WatchlistGrid({ products }: { products: TrackedProduct[] }) {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search products, stores, sets"
-            className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-teal-300"
+            className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300"
           />
           <select value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)} className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none">
             <option value="all">All status</option>
@@ -98,7 +98,7 @@ export function WatchlistGrid({ products }: { products: TrackedProduct[] }) {
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 <form action={checkOwnProduct.bind(null, product.id)}>
-                  <button className="h-10 rounded-lg bg-teal-300 px-4 text-sm font-semibold text-slate-950">Check now</button>
+                  <button className="h-10 rounded-lg bg-amber-300 px-4 text-sm font-semibold text-slate-950">Check now</button>
                 </form>
                 <button
                   className="inline-flex h-10 items-center gap-2 rounded-lg border border-white/10 px-4 text-sm disabled:opacity-60"
@@ -120,3 +120,4 @@ export function WatchlistGrid({ products }: { products: TrackedProduct[] }) {
     </div>
   );
 }
+

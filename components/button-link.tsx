@@ -13,9 +13,10 @@ export function ButtonLink({ href, children, variant = "primary", size = "md" }:
     "inline-flex items-center justify-center rounded-lg font-semibold transition",
     size === "sm" ? "h-10 px-4 text-sm" : "h-12 px-5 text-sm",
     variant === "primary"
-      ? "bg-teal-300 text-slate-950 hover:bg-teal-200"
+      ? "bg-amber-300 text-slate-950 hover:bg-amber-200"
       : "border border-white/15 bg-white/5 text-white hover:bg-white/10"
   ].join(" ");
 
   return <Link href={href} className={classes}>{children}</Link>;
 }
+

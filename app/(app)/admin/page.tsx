@@ -33,7 +33,7 @@ export default async function AdminPage() {
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-sm font-semibold text-teal-200">Admin</p>
+        <p className="text-sm font-semibold text-amber-200">Admin</p>
         <h1 className="mt-1 text-3xl font-black text-white">Operations dashboard</h1>
       </div>
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
@@ -55,7 +55,7 @@ export default async function AdminPage() {
                 <input name="max_groups" placeholder="Max groups" defaultValue="30" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm" />
                 <input name="max_products" placeholder="Max products" defaultValue="500" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm" />
               </div>
-              <button className="mt-3 h-10 rounded-lg bg-teal-300 px-3 text-sm font-semibold text-slate-950">Import TCGCSV</button>
+              <button className="mt-3 h-10 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Import TCGCSV</button>
             </form>
             <form action={importBestBuyPokemonCatalog} className="rounded-lg bg-white/5 p-3">
               <p className="text-sm font-semibold text-white">Best Buy API</p>
@@ -63,14 +63,14 @@ export default async function AdminPage() {
                 <input name="query" placeholder="Search query" defaultValue="pokemon trading cards" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm" />
                 <input name="page_size" placeholder="Page size" defaultValue="50" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm" />
               </div>
-              <button className="mt-3 h-10 rounded-lg bg-teal-300 px-3 text-sm font-semibold text-slate-950">Import Best Buy</button>
+              <button className="mt-3 h-10 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Import Best Buy</button>
             </form>
             <form action={importRetailerUrlsToCatalog} className="rounded-lg bg-white/5 p-3">
               <p className="text-sm font-semibold text-white">Bulk retailer URLs</p>
               <p className="mt-1 text-xs leading-5 text-slate-400">Paste Pokemon Center, Amazon, Target, Walmart, Best Buy, or other product URLs. PackWatcher will fetch safe public metadata and create searchable catalog offers.</p>
               <input name="set_name" placeholder="Optional set name" className="mt-3 h-10 w-full rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm" />
-              <textarea name="urls" placeholder="One product URL per line" className="mt-2 min-h-32 w-full rounded-lg border border-white/10 bg-slate-950/70 p-3 text-sm outline-none focus:border-teal-300" />
-              <button className="mt-3 h-10 rounded-lg bg-teal-300 px-3 text-sm font-semibold text-slate-950">Import URLs</button>
+              <textarea name="urls" placeholder="One product URL per line" className="mt-2 min-h-32 w-full rounded-lg border border-white/10 bg-slate-950/70 p-3 text-sm outline-none focus:border-amber-300" />
+              <button className="mt-3 h-10 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Import URLs</button>
             </form>
           </div>
         </div>
@@ -89,9 +89,9 @@ export default async function AdminPage() {
               ["url", "Store URL"],
               ["last_price", "Last price"]
             ].map(([name, label]) => (
-              <input key={name} name={name} placeholder={label} defaultValue={name === "tcg" ? "pokemon" : ""} className="h-10 rounded-lg border border-white/10 bg-white/5 px-3 text-sm outline-none focus:border-teal-300" />
+              <input key={name} name={name} placeholder={label} defaultValue={name === "tcg" ? "pokemon" : ""} className="h-10 rounded-lg border border-white/10 bg-white/5 px-3 text-sm outline-none focus:border-amber-300" />
             ))}
-            <button className="h-10 rounded-lg bg-teal-300 px-3 text-sm font-semibold text-slate-950">Add to catalog</button>
+            <button className="h-10 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Add to catalog</button>
           </form>
         </div>
 
@@ -105,7 +105,7 @@ export default async function AdminPage() {
                   <p className="text-sm text-slate-400">{product.store_name} - {product.status}</p>
                 </div>
                 <form action={adminCheckProduct.bind(null, product.id)}>
-                  <button className="h-9 rounded-lg bg-teal-300 px-3 text-sm font-semibold text-slate-950">Check</button>
+                  <button className="h-9 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Check</button>
                 </form>
               </div>
             ))}
@@ -145,3 +145,4 @@ export default async function AdminPage() {
     </div>
   );
 }
+

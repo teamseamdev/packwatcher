@@ -10,6 +10,9 @@ PackWatcher does not implement auto-checkout, CAPTCHA bypassing, queue bypassing
 - TypeScript
 - Tailwind CSS
 - Supabase Auth and Postgres
+- Supabase Storage for PackWatcher Clips raw videos, thumbnails, and exports
+- FFmpeg for local video analysis, clipping, and export
+- Optional OpenAI vision analysis for future PackWatcher Clips autofill
 - Stripe skeleton
 - Web push / FCM-ready environment placeholders
 - Cron-ready admin check APIs
@@ -41,7 +44,17 @@ CATALOG_OFFER_CHECK_LIMIT=100
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 NEXT_PUBLIC_STRIPE_PRO_PRICE_ID=
+FFMPEG_PATH=
+OPENAI_API_KEY=
+CLIPS_ENABLE_OPENAI=false
+CLIPS_LOCAL_ANALYSIS=true
+CLIPS_MAX_UPLOAD_MB=5120
+CLIPS_OPENAI_MODEL=gpt-4o-mini
 ```
+
+`FFMPEG_PATH` is optional when `ffmpeg` is already available on your system `PATH`. On Windows, install FFmpeg and set this to the full binary path if needed, for example `C:\ffmpeg\bin\ffmpeg.exe`.
+
+`OPENAI_API_KEY` is optional for PackWatcher Clips. Keep `CLIPS_ENABLE_OPENAI=false` to force free local/manual mode. If OpenAI is unavailable or quota-limited, the Clips workflow still works with FFmpeg thumbnails and manual confirmation.
 
 ## Supabase Setup
 
@@ -93,6 +106,59 @@ Existing Supabase projects should run `supabase/migrations/001_catalog.sql` in t
 Run `supabase/migrations/002_push_subscriptions.sql` to enable mobile/browser push subscriptions.
 
 Run `supabase/migrations/003_catalog_tracking_upgrade.sql` to add product-level tracking, live offer fields, indexes, and RLS. Existing projects should run migrations `001`, `002`, and `003` in order. Each migration is safe to rerun.
+
+Run `supabase/migrations/add_packwatcher_clips.sql` to add PackWatcher Clips project tables, private Supabase Storage buckets, and per-user storage policies.
+
+If the `clip-source-videos` bucket already exists and uploads fail with "The object exceeded the maximum allowed size", run `supabase/migrations/006_raise_packwatcher_clips_upload_limit_5gb.sql` to raise Clips source/export uploads to 5 GB.
+
+During local development, if Supabase Storage still enforces a lower project or plan upload cap, PackWatcher Clips falls back to `.local-clips/` for the raw source video and continues the review/export flow. `.local-clips/` is ignored by git and is intended for local testing only.
+
+## PackWatcher Clips
+
+PackWatcher Clips lives at `/clips` after sign-in.
+
+What V1 includes:
+
+- Upload MP4/MOV/WEBM raw pack-opening footage up to 5 GB into the private `clip-source-videos` Supabase Storage bucket.
+- Create a clip project with product name, total cost paid, pack count, and notes.
+- Use local FFmpeg assist to extract thumbnails every two seconds and create likely review moments.
+- Review candidate moments, include/exclude them, edit start/end timestamps, and manually enter card names/values.
+- Automatically calculate total pull value, profit/loss, ROI percentage, and average value per pack.
+- Render a 1080x1920 MP4 with blurred background or center crop plus readable cost/pull/profit/card overlays.
+- Store thumbnails in `clip-thumbnails` and exports in `clip-exports`.
+- Download finished MP4 exports from the project or export page.
+
+Required local tool:
+
+```bash
+ffmpeg -version
+npm run dev
+```
+
+If `ffmpeg -version` fails, install FFmpeg and set `FFMPEG_PATH` in `.env.local`.
+
+On Windows, one common install path is:
+
+```bash
+winget install Gyan.FFmpeg
+```
+
+Restart the dev server after installing FFmpeg or changing `.env.local`.
+
+Optional tools for future upgrades:
+
+- PySceneDetect for richer scene detection.
+- faster-whisper or whisper.cpp for reaction/audio moment detection.
+- OpenAI API key for optional AI card-recognition assistance.
+
+How to test Clips:
+
+1. Start the dev server.
+2. Go to `/clips`.
+3. Upload a short test video.
+4. Enter the product name, total cost, and pack count.
+5. Review extracted moments and manually enter card values.
+6. Export and download a vertical MP4.
 
 Catalog importers:
 

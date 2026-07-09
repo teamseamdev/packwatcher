@@ -27,7 +27,7 @@ export default async function InventoryPage() {
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-sm font-semibold text-teal-200">Inventory</p>
+        <p className="text-sm font-semibold text-amber-200">Inventory</p>
         <h1 className="mt-1 text-3xl font-black text-white">Collection tracker</h1>
       </div>
       <section className="grid gap-4 sm:grid-cols-3">
@@ -48,10 +48,10 @@ export default async function InventoryPage() {
               ["fees", "Fees"],
               ["shipping", "Shipping"]
             ].map(([name, label]) => (
-              <input key={name} name={name} placeholder={label} type={name === "purchase_date" ? "date" : "text"} className="h-11 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm outline-none focus:border-teal-300" />
+              <input key={name} name={name} placeholder={label} type={name === "purchase_date" ? "date" : "text"} className="h-11 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm outline-none focus:border-amber-300" />
             ))}
-            <textarea name="notes" placeholder="Notes" className="min-h-24 w-full rounded-lg border border-white/10 bg-white/5 p-3 text-sm outline-none focus:border-teal-300" />
-            <button className="h-11 w-full rounded-lg bg-teal-300 font-semibold text-slate-950">Add item</button>
+            <textarea name="notes" placeholder="Notes" className="min-h-24 w-full rounded-lg border border-white/10 bg-white/5 p-3 text-sm outline-none focus:border-amber-300" />
+            <button className="h-11 w-full rounded-lg bg-amber-300 font-semibold text-slate-950">Add item</button>
           </div>
         </form>
         <div className="space-y-3">
@@ -71,7 +71,7 @@ export default async function InventoryPage() {
                     <p className="mt-1 text-sm text-slate-400">Qty {item.quantity}</p>
                   </div>
                   <div className="text-right">
-                    <p className="font-bold text-teal-200">{currency(result.profit)}</p>
+                    <p className="font-bold text-amber-200">{currency(result.profit)}</p>
                     <p className="text-xs text-slate-400">{result.profitPercentage.toFixed(1)}% profit</p>
                   </div>
                 </div>
@@ -83,3 +83,4 @@ export default async function InventoryPage() {
     </div>
   );
 }
+

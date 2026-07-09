@@ -42,7 +42,7 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
           )}
         </div>
         <div>
-          <p className="text-sm font-semibold text-teal-200">{product.brand ?? "Pokemon"} sealed product</p>
+          <p className="text-sm font-semibold text-amber-200">{product.brand ?? "Pokemon"} sealed product</p>
           <h1 className="mt-2 text-3xl font-black text-white">{product.title ?? product.name}</h1>
           <p className="mt-3 text-sm text-slate-400">
             {[product.product_type ?? product.category, product.set_name, product.series_name].filter(Boolean).join(" - ")}
@@ -55,7 +55,7 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
 
       <section>
         <div>
-          <p className="text-sm font-semibold text-teal-200">Retailer offers</p>
+          <p className="text-sm font-semibold text-amber-200">Retailer offers</p>
           <h2 className="mt-1 text-2xl font-black text-white">{offers.length} offer{offers.length === 1 ? "" : "s"} found</h2>
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -68,7 +68,7 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
                     <h3 className="font-bold text-white">{offer.retailer ?? offer.store_name}</h3>
                     <p className="mt-1 text-sm text-slate-400">{offer.title ?? product.title ?? product.name}</p>
                   </div>
-                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${inStock ? "bg-teal-300 text-slate-950" : "bg-white/10 text-slate-300"}`}>
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${inStock ? "bg-amber-300 text-slate-950" : "bg-white/10 text-slate-300"}`}>
                     {offerStatus(offer)}
                   </span>
                 </div>
@@ -97,3 +97,4 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
     </div>
   );
 }
+

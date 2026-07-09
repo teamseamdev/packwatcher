@@ -11,7 +11,7 @@ function CatalogLoading() {
   return (
     <section className="space-y-4">
       <div>
-        <div className="h-4 w-32 animate-pulse rounded-lg bg-teal-300/20" />
+        <div className="h-4 w-32 animate-pulse rounded-lg bg-amber-300/20" />
         <div className="mt-3 h-8 w-80 max-w-full animate-pulse rounded-lg bg-white/10" />
         <div className="mt-3 h-4 w-full max-w-2xl animate-pulse rounded-lg bg-white/10" />
       </div>
@@ -104,7 +104,7 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-8">
       <div>
-        <p className="text-sm font-semibold text-teal-200">Dashboard</p>
+        <p className="text-sm font-semibold text-amber-200">Dashboard</p>
         <h1 className="mt-2 text-3xl font-black text-white">Find Pokemon products and get restock alerts</h1>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
           Browse the sealed product catalog, track the products you want, and PackWatcher will notify you when tracked offers come back in stock.
@@ -151,3 +151,4 @@ export default async function DashboardPage() {
     </div>
   );
 }
+

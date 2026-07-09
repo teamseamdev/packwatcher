@@ -10,7 +10,7 @@ export default async function AlertsPage() {
 
   return (
     <div>
-      <p className="text-sm font-semibold text-teal-200">Alerts</p>
+      <p className="text-sm font-semibold text-amber-200">Alerts</p>
       <h1 className="mt-1 text-3xl font-black text-white">Notification log</h1>
       <div className="mt-6">
         <PushNotificationSettings publicKey={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY} subscriptionCount={subscriptionCount ?? 0} />
@@ -31,3 +31,4 @@ export default async function AlertsPage() {
     </div>
   );
 }
+

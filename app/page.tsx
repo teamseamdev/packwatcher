@@ -39,7 +39,7 @@ export default async function LandingPage() {
 
       <section className="grid-texture mx-auto grid min-h-[calc(100vh-88px)] max-w-7xl content-center px-5 pb-16 pt-10">
         <div className="max-w-4xl">
-          <p className="mb-5 inline-flex rounded-full border border-teal-300/30 bg-teal-300/10 px-4 py-2 text-sm text-teal-100">
+          <p className="mb-5 inline-flex rounded-full border border-amber-300/30 bg-amber-300/10 px-4 py-2 text-sm text-amber-100">
             PackWatcher for TCG collectors
           </p>
           <h1 className="max-w-4xl text-5xl font-black leading-[1.02] text-white sm:text-7xl lg:text-8xl">
@@ -63,7 +63,7 @@ export default async function LandingPage() {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {features.map((feature) => (
             <article key={feature.title} className="rounded-lg border border-white/10 bg-white/[0.04] p-6">
-              <feature.icon className="mb-5 h-7 w-7 text-teal-300" />
+              <feature.icon className="mb-5 h-7 w-7 text-amber-300" />
               <h3 className="text-lg font-semibold">{feature.title}</h3>
               <p className="mt-3 text-sm leading-6 text-slate-300">{feature.body}</p>
             </article>
@@ -106,7 +106,7 @@ export default async function LandingPage() {
       </section>
 
       <section className="px-5 py-20">
-        <div className="mx-auto max-w-7xl rounded-lg border border-teal-300/20 bg-teal-300/10 p-8 sm:p-12">
+        <div className="mx-auto max-w-7xl rounded-lg border border-amber-300/20 bg-amber-300/10 p-8 sm:p-12">
           <h2 className="text-3xl font-black text-white sm:text-5xl">Start watching the next drop.</h2>
           <p className="mt-4 max-w-2xl text-slate-300">Create a watchlist, run a manual check, and keep your collection numbers honest.</p>
           <div className="mt-7">
@@ -117,3 +117,4 @@ export default async function LandingPage() {
     </main>
   );
 }
+

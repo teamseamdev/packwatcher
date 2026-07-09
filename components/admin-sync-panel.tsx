@@ -14,7 +14,7 @@ export function AdminSyncPanel() {
   const result = state.result;
 
   return (
-    <div className="rounded-lg border border-teal-300/20 bg-teal-300/10 p-3">
+    <div className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-3">
       <p className="text-sm font-semibold text-white">Sync all available catalogs</p>
       <p className="mt-1 text-xs leading-5 text-slate-300">
         Imports TCGCSV products, imports Best Buy when configured, checks existing offers, and triggers restock alerts.
@@ -22,7 +22,7 @@ export function AdminSyncPanel() {
       <form action={action}>
         <button
           disabled={pending}
-          className="mt-3 inline-flex h-10 items-center gap-2 rounded-lg bg-teal-300 px-3 text-sm font-semibold text-slate-950 disabled:opacity-60"
+          className="mt-3 inline-flex h-10 items-center gap-2 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950 disabled:opacity-60"
         >
           <RefreshCw className={`h-4 w-4 ${pending ? "animate-spin" : ""}`} />
           {pending ? "Syncing catalogs..." : "Sync catalogs"}
@@ -60,10 +60,11 @@ export function AdminSyncPanel() {
               {result.errors.map((error) => <p key={error}>{error}</p>)}
             </div>
           ) : (
-            <p className="mt-3 text-teal-200">Sync completed without reported errors.</p>
+            <p className="mt-3 text-amber-200">Sync completed without reported errors.</p>
           )}
         </div>
       ) : null}
     </div>
   );
 }
+

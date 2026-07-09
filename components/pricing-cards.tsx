@@ -26,7 +26,7 @@ export function PricingCards() {
       <div className="grid gap-4 md:grid-cols-2">
         {plans.map((plan) => (
           <article key={plan.name} className="rounded-lg border border-white/10 bg-white/[0.04] p-7">
-            <h3 className="text-sm font-bold tracking-[0.2em] text-teal-200">{plan.name}</h3>
+            <h3 className="text-sm font-bold tracking-[0.2em] text-amber-200">{plan.name}</h3>
             <p className="mt-4 text-5xl font-black text-white">
               {plan.price}<span className="text-base font-medium text-slate-400">/month</span>
             </p>
@@ -45,3 +45,4 @@ export function PricingCards() {
     </div>
   );
 }
+

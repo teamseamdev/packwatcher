@@ -74,7 +74,7 @@ export function CatalogOfferPicker({
   return (
     <section className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
       <div>
-        <p className="text-sm font-semibold text-teal-200">Catalog</p>
+        <p className="text-sm font-semibold text-amber-200">Catalog</p>
         <h2 className="mt-1 text-2xl font-black text-white">Track without a URL</h2>
         <p className="mt-2 text-sm leading-6 text-slate-400">
           Browse every catalog offer currently available. Search narrows this list instead of starting from a blank state.
@@ -88,7 +88,7 @@ export function CatalogOfferPicker({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search Pokemon products"
-            className="h-10 w-full rounded-lg border border-white/10 bg-slate-950/70 pl-9 pr-3 text-sm outline-none focus:border-teal-300"
+            className="h-10 w-full rounded-lg border border-white/10 bg-slate-950/70 pl-9 pr-3 text-sm outline-none focus:border-amber-300"
           />
         </label>
         <select value={sort} onChange={(event) => setSort(event.target.value as SortMode)} className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none">
@@ -101,7 +101,7 @@ export function CatalogOfferPicker({
       </div>
 
       <p className="mt-3 text-xs text-slate-500">{filtered.length} of {offers.length} catalog offers shown</p>
-      {message ? <p className="mt-3 rounded-lg border border-teal-300/20 bg-teal-300/10 p-3 text-sm text-teal-100">{message}</p> : null}
+      {message ? <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">{message}</p> : null}
 
       <div className="mt-4 grid max-h-[680px] gap-3 overflow-auto pr-1">
         {offers.length ? (
@@ -123,11 +123,11 @@ export function CatalogOfferPicker({
                     <span className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-[11px] text-slate-300">{stockLabel(offer.status)}</span>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-teal-200">{currency(offer.last_price ?? product?.msrp)}</p>
+                    <p className="text-sm font-semibold text-amber-200">{currency(offer.last_price ?? product?.msrp)}</p>
                     <button
                       disabled={alreadyTracked || isPending}
                       onClick={() => product ? track(product.id) : undefined}
-                      className="inline-flex h-9 items-center gap-2 rounded-lg bg-teal-300 px-3 text-xs font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-9 items-center gap-2 rounded-lg bg-amber-300 px-3 text-xs font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <BellPlus className="h-4 w-4" />
                       {alreadyTracked ? "Tracked" : offer.status === "in_stock" ? "Track this" : "Notify me"}
@@ -142,14 +142,14 @@ export function CatalogOfferPicker({
         ) : (
           <div className="rounded-lg border border-white/10 bg-white/5 p-5">
             <div className="flex gap-3">
-              <PackageSearch className="mt-1 h-5 w-5 shrink-0 text-teal-300" />
+              <PackageSearch className="mt-1 h-5 w-5 shrink-0 text-amber-300" />
               <div>
                 <p className="font-semibold text-white">Catalog is empty</p>
                 <p className="mt-2 text-sm leading-6 text-slate-400">
                   Pokemon products will appear here after catalog sync runs.
                 </p>
                 {isAdmin ? (
-                  <Link href="/admin" className="mt-4 inline-flex h-10 items-center rounded-lg bg-teal-300 px-4 text-sm font-semibold text-slate-950">
+                  <Link href="/admin" className="mt-4 inline-flex h-10 items-center rounded-lg bg-amber-300 px-4 text-sm font-semibold text-slate-950">
                     Run catalog sync
                   </Link>
                 ) : (
@@ -163,3 +163,4 @@ export function CatalogOfferPicker({
     </section>
   );
 }
+

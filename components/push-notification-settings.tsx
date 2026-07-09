@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { BellRing, Smartphone } from "lucide-react";
 
 function urlBase64ToUint8Array(base64String: string) {
@@ -17,14 +17,19 @@ function urlBase64ToUint8Array(base64String: string) {
 }
 
 export function PushNotificationSettings({ publicKey, subscriptionCount }: { publicKey?: string; subscriptionCount: number }) {
-  const [supported] = useState(() =>
-    typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window
-  );
-  const [permission, setPermission] = useState<NotificationPermission>(() =>
-    typeof window !== "undefined" && "Notification" in window ? Notification.permission : "default"
-  );
+  const [permission, setPermission] = useState<NotificationPermission>("default");
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      if (browserSupportsPush()) {
+        setPermission(Notification.permission);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, []);
 
   function enable() {
     startTransition(async () => {
@@ -35,7 +40,7 @@ export function PushNotificationSettings({ publicKey, subscriptionCount }: { pub
         return;
       }
 
-      if (!supported) {
+      if (!browserSupportsPush()) {
         setMessage("This browser does not support web push. On iPhone, install PackWatcher to the Home Screen and open it from there.");
         return;
       }
@@ -84,14 +89,14 @@ export function PushNotificationSettings({ publicKey, subscriptionCount }: { pub
   return (
     <section className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
       <div className="flex items-start gap-3">
-        <Smartphone className="mt-1 h-5 w-5 text-teal-300" />
+        <Smartphone className="mt-1 h-5 w-5 text-amber-300" />
         <div>
           <h2 className="font-bold text-white">Mobile notifications</h2>
           <p className="mt-1 text-sm leading-6 text-slate-400">Enable browser push for Android Chrome or iOS Safari after adding PackWatcher to your Home Screen.</p>
         </div>
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
-        <button disabled={isPending} onClick={enable} className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-300 px-4 text-sm font-semibold text-slate-950 disabled:opacity-60">
+        <button disabled={isPending} onClick={enable} className="inline-flex h-10 items-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-semibold text-slate-950 disabled:opacity-60">
           <BellRing className="h-4 w-4" />
           Enable this device
         </button>
@@ -104,3 +109,8 @@ export function PushNotificationSettings({ publicKey, subscriptionCount }: { pub
     </section>
   );
 }
+
+function browserSupportsPush() {
+  return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+}
+

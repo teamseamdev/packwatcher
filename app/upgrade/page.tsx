@@ -21,7 +21,7 @@ export default function UpgradePage() {
         <h1 className="text-4xl font-black text-white">Upgrade to PRO</h1>
         <p className="mt-4 text-slate-300">$2/month for unlimited products, instant alerts, and advanced analytics.</p>
         <div className="mt-7 flex flex-wrap gap-3">
-          <button onClick={checkout} disabled={isPending} className="h-12 rounded-lg bg-teal-300 px-5 text-sm font-semibold text-slate-950 disabled:opacity-60">
+          <button onClick={checkout} disabled={isPending} className="h-12 rounded-lg bg-amber-300 px-5 text-sm font-semibold text-slate-950 disabled:opacity-60">
             {isPending ? "Opening checkout..." : "Start checkout"}
           </button>
           <ButtonLink href="/dashboard" variant="secondary">Back to app</ButtonLink>
@@ -30,3 +30,4 @@ export default function UpgradePage() {
     </main>
   );
 }
+

@@ -16,7 +16,7 @@ export default async function AccountPage() {
 
   return (
     <div className="max-w-2xl">
-      <p className="text-sm font-semibold text-teal-200">Account</p>
+      <p className="text-sm font-semibold text-amber-200">Account</p>
       <h1 className="mt-1 text-3xl font-black text-white">Profile</h1>
       <section className="mt-6 rounded-lg border border-white/10 bg-white/[0.04] p-5">
         <dl className="space-y-4 text-sm">
@@ -29,10 +29,10 @@ export default async function AccountPage() {
         </form>
       </section>
       {profile?.plan === "admin" ? (
-        <section className="mt-6 rounded-lg border border-teal-300/20 bg-teal-300/10 p-5">
+        <section className="mt-6 rounded-lg border border-amber-300/20 bg-amber-300/10 p-5">
           <h2 className="font-bold text-white">Admin access</h2>
           <p className="mt-2 text-sm text-slate-300">Manage catalog imports, users, checks, and notification logs.</p>
-          <Link href="/admin" className="mt-4 inline-flex h-11 items-center rounded-lg bg-teal-300 px-4 text-sm font-semibold text-slate-950">
+          <Link href="/admin" className="mt-4 inline-flex h-11 items-center rounded-lg bg-amber-300 px-4 text-sm font-semibold text-slate-950">
             Open Admin
           </Link>
         </section>
@@ -43,3 +43,4 @@ export default async function AccountPage() {
     </div>
   );
 }
+
