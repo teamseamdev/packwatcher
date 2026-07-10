@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { AdminSyncPanel } from "@/components/admin-sync-panel";
 import { StatCard } from "@/components/stat-card";
 import { isAdmin, requireProfile } from "@/lib/auth";
-import { addCatalogOffer, adminCheckProduct, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, promoteAdmin } from "./actions";
+import { addCatalogOffer, adminCheckProduct, approveProductMatch, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, promoteAdmin, rejectProductMatch } from "./actions";
 
 export default async function AdminPage() {
   const { supabase, profile } = await requireProfile();
@@ -16,7 +16,10 @@ export default async function AdminPage() {
     { data: checks },
     { data: notifications },
     { data: products },
-    { data: users }
+    { data: users },
+    { data: connectorHealth },
+    { data: retailJobRuns },
+    { data: matchReviews }
   ] = await Promise.all([
     supabase.from("profiles").select("*", { count: "exact", head: true }),
     supabase.from("profiles").select("*", { count: "exact", head: true }).in("plan", ["pro", "admin"]),
@@ -25,7 +28,10 @@ export default async function AdminPage() {
     supabase.from("stock_checks").select("*").order("checked_at", { ascending: false }).limit(10),
     supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(10),
     supabase.from("tracked_products").select("id,name,store_name,status,last_checked_at").order("created_at", { ascending: false }).limit(10),
-    supabase.from("profiles").select("id,email,plan,created_at").order("created_at", { ascending: false }).limit(10)
+    supabase.from("profiles").select("id,email,plan,created_at").order("created_at", { ascending: false }).limit(10),
+    supabase.from("retailer_connector_health").select("*").order("updated_at", { ascending: false }).limit(12),
+    supabase.from("retail_job_runs").select("*").order("started_at", { ascending: false }).limit(10),
+    supabase.from("product_match_reviews").select("*").eq("status", "pending").order("created_at", { ascending: false }).limit(10)
   ]);
 
   const failedChecks = checks?.filter((check) => check.status === "unknown").length ?? 0;
@@ -146,6 +152,56 @@ export default async function AdminPage() {
           <h2 className="font-bold text-white">Recent checks</h2>
           <div className="mt-4 space-y-3 text-sm">
             {checks?.map((check) => <p key={check.id} className="rounded-lg bg-white/5 p-3">{check.status} - {check.raw_match_reason}</p>)}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+          <h2 className="font-bold text-white">Connector health</h2>
+          <div className="mt-4 space-y-3 text-sm">
+            {connectorHealth?.length ? connectorHealth.map((connector) => (
+              <div key={connector.retailer} className="rounded-lg bg-white/5 p-3">
+                <p className="font-medium">{connector.retailer} - {connector.state}</p>
+                <p className="mt-1 text-slate-400">
+                  Success {connector.success_count} / failures {connector.failure_count}
+                  {connector.last_error ? ` - ${connector.last_error}` : ""}
+                </p>
+              </div>
+            )) : <p className="text-sm text-slate-400">No connector health records yet.</p>}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+          <h2 className="font-bold text-white">Retail jobs</h2>
+          <div className="mt-4 space-y-3 text-sm">
+            {retailJobRuns?.length ? retailJobRuns.map((job) => (
+              <div key={job.id} className="rounded-lg bg-white/5 p-3">
+                <p className="font-medium">{job.job_type} - {job.status}</p>
+                <p className="mt-1 text-slate-400">{job.retailer ?? "all retailers"} - checked {job.checked_count}, changed {job.changed_count}, errors {job.error_count}</p>
+              </div>
+            )) : <p className="text-sm text-slate-400">No retail job runs recorded yet.</p>}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5 lg:col-span-2">
+          <h2 className="font-bold text-white">Uncertain product matches</h2>
+          <div className="mt-4 space-y-3 text-sm">
+            {matchReviews?.length ? matchReviews.map((review) => (
+              <div key={review.id} className="rounded-lg bg-white/5 p-3">
+                <p className="font-medium">{review.title}</p>
+                <p className="mt-1 text-slate-400">{review.retailer} - confidence {review.confidence} - {review.reason ?? "Manual review needed"}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <form action={approveProductMatch} className="flex gap-2">
+                    <input type="hidden" name="review_id" value={review.id} />
+                    <input name="product_id" placeholder="Canonical product ID" className="h-9 min-w-0 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-xs" />
+                    <button className="h-9 rounded-lg bg-amber-300 px-3 text-xs font-semibold text-slate-950">Approve link</button>
+                  </form>
+                  <form action={rejectProductMatch}>
+                    <input type="hidden" name="review_id" value={review.id} />
+                    <button className="h-9 rounded-lg border border-white/10 px-3 text-xs font-semibold text-slate-200">Reject</button>
+                  </form>
+                </div>
+              </div>
+            )) : <p className="text-sm text-slate-400">No pending match reviews.</p>}
           </div>
         </div>
 

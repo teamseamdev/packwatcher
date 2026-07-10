@@ -1,5 +1,15 @@
 export type Plan = "free" | "pro" | "admin";
-export type StockStatus = "unknown" | "in_stock" | "out_of_stock";
+export type StockStatus =
+  | "unknown"
+  | "in_stock"
+  | "out_of_stock"
+  | "preorder"
+  | "backorder"
+  | "limited_stock"
+  | "pickup_available"
+  | "shipping_available"
+  | "delivery_available"
+  | "unavailable";
 
 export type Profile = {
   id: string;
@@ -79,6 +89,13 @@ export type ProductAlert = {
   product_id: string;
   notify_push: boolean;
   notify_email: boolean;
+  max_price?: number | null;
+  preferred_retailers?: string[];
+  online_only?: boolean;
+  local_pickup?: boolean;
+  official_retailer_only?: boolean;
+  allow_third_party_sellers?: boolean;
+  cooldown_minutes?: number;
   created_at: string;
 };
 

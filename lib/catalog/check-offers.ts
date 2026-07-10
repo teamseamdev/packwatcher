@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendPushToUser } from "@/lib/push";
 import { getRetailerMonitor } from "@/lib/retailers";
+import { notificationEventKey, shouldSendRestockAlert } from "@/lib/retailers/shared/restock-events";
 import type { CatalogOffer, CatalogProduct, ProductAlert } from "@/lib/types";
 
 type OfferRow = CatalogOffer & {
@@ -53,6 +54,39 @@ export async function checkExistingCatalogOffers(supabase: SupabaseClient, limit
           .eq("product_id", productId);
 
         for (const alert of (alerts ?? []) as ProductAlert[]) {
+          const snapshot = {
+            retailerProductId: offer.retailer_product_id ?? offer.id,
+            retailer,
+            productId,
+            status: checked.status,
+            previousStatus: previousInStock ? "in_stock" as const : "out_of_stock" as const,
+            price: checked.price,
+            sellerName: typeof offer.metadata?.sellerName === "string" ? offer.metadata.sellerName : retailer,
+            officialRetailerSeller: typeof offer.metadata?.officialRetailerSeller === "boolean" ? offer.metadata.officialRetailerSeller : true,
+            availabilityType: "online" as const
+          };
+
+          if (!shouldSendRestockAlert(alert, snapshot)) continue;
+
+          const eventKey = notificationEventKey(alert.user_id, snapshot);
+          const { error: eventError } = await supabase.from("notification_events").insert({
+            user_id: alert.user_id,
+            product_id: productId,
+            event_key: eventKey,
+            status: checked.status,
+            price: checked.price,
+            retailer,
+            availability_type: "online",
+            metadata: {
+              offerId: offer.id,
+              url: offer.url,
+              previousInStock,
+              checkedAt
+            }
+          });
+
+          if (eventError?.code === "23505") continue;
+
           const productName = offer.catalog_products?.title ?? offer.catalog_products?.name ?? offer.title ?? "A tracked Pokemon product";
           const title = `${productName} is in stock`;
           const message = `${retailer} appears to have ${productName} in stock. Open the retailer page to confirm and purchase manually.`;

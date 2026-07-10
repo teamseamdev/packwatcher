@@ -4,6 +4,7 @@ import { ExternalLink } from "lucide-react";
 import { ProductTrackButton } from "@/components/product-track-button";
 import { requireProfile } from "@/lib/auth";
 import { currency } from "@/lib/profit";
+import { aggregatePrices } from "@/lib/retailers/shared/price-aggregation";
 import type { CatalogOffer, CatalogProduct } from "@/lib/types";
 
 function offerStatus(offer: CatalogOffer) {
@@ -30,6 +31,17 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
 
   const product = productRow as CatalogProduct;
   const offers = (offerRows ?? []) as CatalogOffer[];
+  const priceSummary = aggregatePrices(offers.map((offer) => ({
+    retailerProductId: offer.retailer_product_id ?? offer.id,
+    retailer: offer.retailer ?? offer.store_name,
+    status: offer.status,
+    price: offer.price ?? offer.last_price,
+    sellerName: typeof offer.metadata?.sellerName === "string" ? offer.metadata.sellerName : offer.store_name,
+    officialRetailerSeller: typeof offer.metadata?.officialRetailerSeller === "boolean" ? offer.metadata.officialRetailerSeller : true,
+    checkedAt: offer.last_checked_at
+  })));
+  const lastCheckedTimes = offers.flatMap((offer) => offer.last_checked_at ? [new Date(offer.last_checked_at).getTime()] : []);
+  const lastUpdated = lastCheckedTimes.length ? new Date(Math.max(...lastCheckedTimes)).toLocaleString() : "not yet";
 
   return (
     <div className="space-y-8">
@@ -50,6 +62,31 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
           <div className="mt-6">
             <ProductTrackButton productId={product.id} initialTracked={Boolean(alert)} />
           </div>
+        </div>
+      </section>
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+          <p className="text-xs text-slate-400">Average available price</p>
+          <p className="mt-2 text-2xl font-black text-white">{currency(priceSummary.averageAvailablePrice)}</p>
+          <p className="mt-1 text-xs text-slate-500">Based on {priceSummary.qualifyingListingCount} in-stock listing{priceSummary.qualifyingListingCount === 1 ? "" : "s"}</p>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+          <p className="text-xs text-slate-400">Lowest current price</p>
+          <p className="mt-2 text-2xl font-black text-white">{currency(priceSummary.lowestCurrentPrice)}</p>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+          <p className="text-xs text-slate-400">Retailer listings</p>
+          <p className="mt-2 text-2xl font-black text-white">{priceSummary.activeListingCount}</p>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+          <p className="text-xs text-slate-400">Currently in stock</p>
+          <p className="mt-2 text-2xl font-black text-white">{priceSummary.inStockListingCount}</p>
+          <p className="mt-1 text-xs text-slate-500">{priceSummary.retailerCount} retailer{priceSummary.retailerCount === 1 ? "" : "s"} carrying it</p>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+          <p className="text-xs text-slate-400">Last updated</p>
+          <p className="mt-2 text-sm font-semibold text-white">{lastUpdated}</p>
         </div>
       </section>
 

@@ -224,3 +224,44 @@ export async function importRetailerUrlsToCatalog(formData: FormData) {
   revalidatePath("/admin");
   revalidatePath("/watchlist");
 }
+
+export async function approveProductMatch(formData: FormData) {
+  const { supabase, profile, user } = await requireProfile();
+  if (!isAdmin(profile)) throw new Error("Admin access required.");
+
+  const reviewId = String(formData.get("review_id") ?? "");
+  const productId = String(formData.get("product_id") ?? "");
+  if (!reviewId || !productId) throw new Error("Review ID and product ID are required.");
+
+  await supabase
+    .from("product_match_reviews")
+    .update({
+      product_id: productId,
+      suggested_product_id: productId,
+      status: "approved",
+      reviewed_by: user.id,
+      reviewed_at: new Date().toISOString()
+    })
+    .eq("id", reviewId);
+
+  revalidatePath("/admin");
+}
+
+export async function rejectProductMatch(formData: FormData) {
+  const { supabase, profile, user } = await requireProfile();
+  if (!isAdmin(profile)) throw new Error("Admin access required.");
+
+  const reviewId = String(formData.get("review_id") ?? "");
+  if (!reviewId) throw new Error("Review ID is required.");
+
+  await supabase
+    .from("product_match_reviews")
+    .update({
+      status: "rejected",
+      reviewed_by: user.id,
+      reviewed_at: new Date().toISOString()
+    })
+    .eq("id", reviewId);
+
+  revalidatePath("/admin");
+}

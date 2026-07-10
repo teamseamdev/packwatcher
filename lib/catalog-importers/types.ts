@@ -1,3 +1,5 @@
+import type { StockStatus } from "@/lib/types";
+
 export type CatalogImportResult = {
   productsUpserted: number;
   offersUpserted: number;
@@ -28,7 +30,7 @@ export type ImportedCatalogOffer = ImportedCatalogProduct & {
   retailerProductId?: string | null;
   url: string;
   lastPrice: number | null;
-  status: "unknown" | "in_stock" | "out_of_stock";
+  status: StockStatus;
   availabilityText?: string | null;
   metadata?: Record<string, unknown>;
 };

@@ -31,9 +31,55 @@ function totals(sources: SourceResult[]) {
   );
 }
 
+async function startJobRun(supabase: SupabaseClient, jobType: string) {
+  const { data } = await supabase
+    .from("retail_job_runs")
+    .insert({ job_type: jobType, status: "running" })
+    .select("id")
+    .maybeSingle();
+  return data?.id as string | undefined;
+}
+
+async function finishJobRun(supabase: SupabaseClient, jobId: string | undefined, status: string, sources: SourceResult[]) {
+  if (!jobId) return;
+  const total = totals(sources);
+  await supabase
+    .from("retail_job_runs")
+    .update({
+      status,
+      finished_at: new Date().toISOString(),
+      checked_count: total.offersChecked,
+      changed_count: total.alertsTriggered,
+      error_count: total.errors,
+      metadata: { sources: sources.map((source) => ({ source: source.source, ok: source.ok, skipped: source.skipped, reason: source.reason })) }
+    })
+    .eq("id", jobId);
+}
+
+async function recordConnectorHealth(supabase: SupabaseClient, sources: SourceResult[]) {
+  const rows = sources
+    .filter((source) => !["tcgcsv", "tcgcsv-quick", "offer-checks"].includes(source.source))
+    .map((source) => ({
+      retailer: source.source,
+      state: source.skipped ? "not_supported" : source.ok ? "partially_supported" : "temporarily_unavailable",
+      success_count: source.ok ? 1 : 0,
+      failure_count: source.ok || source.skipped ? 0 : 1,
+      consecutive_failures: source.ok || source.skipped ? 0 : 1,
+      last_success_at: source.ok ? new Date().toISOString() : null,
+      last_failure_at: !source.ok && !source.skipped ? new Date().toISOString() : null,
+      last_error: source.errors[0] ?? source.reason ?? null,
+      updated_at: new Date().toISOString()
+    }));
+
+  if (rows.length) {
+    await supabase.from("retailer_connector_health").upsert(rows, { onConflict: "retailer" });
+  }
+}
+
 export async function syncAvailableCatalogs(supabase: SupabaseClient) {
   console.log("[catalog-sync] sync started");
   const sources: SourceResult[] = [];
+  const jobId = await startJobRun(supabase, "catalog_sync").catch(() => undefined);
 
   try {
     console.log("[catalog-sync] source started: tcgcsv");
@@ -151,6 +197,8 @@ export async function syncAvailableCatalogs(supabase: SupabaseClient) {
   });
 
   const total = totals(sources);
+  await recordConnectorHealth(supabase, sources).catch(() => undefined);
+  await finishJobRun(supabase, jobId, total.errors === 0 ? "complete" : "partial", sources).catch(() => undefined);
   console.log(`[catalog-sync] completed products=${total.productsImported} offers=${total.offersImported} checked=${total.offersChecked} alerts=${total.alertsTriggered} errors=${total.errors}`);
 
   return {

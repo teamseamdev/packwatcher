@@ -43,6 +43,10 @@ WALMART_SEARCH_QUERY=pokemon cards
 GAMESTOP_SEARCH_IMPORT=false
 GAMESTOP_SEARCH_QUERY=pokemon cards
 RETAILER_SEARCH_LIMIT=12
+SHOPPING_SEARCH_PROVIDER=
+SHOPPING_SEARCH_API_URL=
+SHOPPING_SEARCH_API_KEY=
+SHOPPING_SEARCH_QUERY=pokemon sealed product
 TCGCSV_MAX_GROUPS=250
 TCGCSV_MAX_PRODUCTS=5000
 TCGCSV_QUICK_MAX_GROUPS=40
@@ -117,6 +121,8 @@ Run `supabase/migrations/003_catalog_tracking_upgrade.sql` to add product-level 
 Run `supabase/migrations/add_packwatcher_clips.sql` to add PackWatcher Clips project tables, private Supabase Storage buckets, and per-user storage policies.
 
 If the `clip-source-videos` bucket already exists and uploads fail with "The object exceeded the maximum allowed size", run `supabase/migrations/006_raise_packwatcher_clips_upload_limit_5gb.sql` to raise Clips source/export uploads to 5 GB.
+
+Run `supabase/migrations/007_retail_aggregation_foundation.sql` to add normalized retail aggregation tables, alert filters, connector health, retail job runs, uncertain match reviews, and notification event dedupe.
 
 During local development, if Supabase Storage still enforces a lower project or plan upload cap, PackWatcher Clips falls back to `.local-clips/` for the raw source video and continues the review/export flow. `.local-clips/` is ignored by git and is intended for local testing only.
 
@@ -212,6 +218,16 @@ Retailer adapters live in `lib/stock-checkers/`:
 The catalog offer monitor interface lives in `lib/retailers/`. Best Buy, Target, Walmart, GameStop, and Pokemon Center currently use conservative URL checks; official catalog APIs can be added behind the same interface.
 
 Retailer search discovery lives in `lib/catalog-importers/retailer-search.ts`. It is intentionally conservative: it fetches configured public search result pages, extracts product links, checks those product pages, and upserts catalog offers. It does not automate accounts, carts, checkout, queue bypassing, CAPTCHA bypassing, or protected endpoints. Retailers may block server-side requests; blocked sources fail gracefully and do not stop the rest of catalog sync.
+
+Retail aggregation foundation:
+
+- Canonical products remain in `catalog_products`; retailer listings are normalized into `retailer_products` when migration `007` is applied.
+- Availability checks are stored as `availability_snapshots` with normalized status, price, shipping/pickup/delivery flags, seller, source metadata, and checked time.
+- Product matching in `lib/retailers/shared/product-matching.ts` uses UPC first, then normalized title, set, product type, release date, and conservative fuzzy matching. Low-confidence matches go to `product_match_reviews` instead of being merged automatically.
+- Price aggregation in `lib/retailers/shared/price-aggregation.ts` excludes unavailable listings, excludes third-party marketplace sellers by default, deduplicates listings, and uses median/trimmed average logic to avoid reseller outliers.
+- Restock alert filtering and dedupe live in `lib/retailers/shared/restock-events.ts`. Event keys include user, retailer listing, availability type, store, price bucket, and status.
+- Optional shopping-search discovery uses `SHOPPING_SEARCH_PROVIDER`, `SHOPPING_SEARCH_API_URL`, and `SHOPPING_SEARCH_API_KEY`. Shopping-search results are discovery and price hints only; PackWatcher still attempts retailer-specific verification before treating inventory as confirmed.
+- Background processing currently uses the existing Vercel Cron-compatible `/api/catalog/sync` path plus admin-triggered sync. The new job/health tables make it straightforward to move catalog sync, discovery, availability checks, aggregation, and notifications into Trigger.dev, Inngest, Upstash QStash, BullMQ, or a dedicated worker when check volume grows.
 
 Admin cron endpoints:
 

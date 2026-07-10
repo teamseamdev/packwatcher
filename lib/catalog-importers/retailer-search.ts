@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { ImportedCatalogOffer } from "@/lib/catalog-importers/types";
 import { fetchPageHtml } from "@/lib/fetch-page-html";
 import { fetchProductMetadata } from "@/lib/product-metadata";
+import { createConfiguredShoppingSearchProvider } from "@/lib/retailers/shopping-search/connector";
 import { getAdapter } from "@/lib/stock-checkers";
 
 type RetailerSearchSource = {
@@ -114,6 +115,50 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
   const perRetailerLimit = options.perRetailerLimit ?? Number(process.env.RETAILER_SEARCH_LIMIT ?? 12);
   const offers: ImportedCatalogOffer[] = [];
   const errors: string[] = [];
+  const shoppingSearch = createConfiguredShoppingSearchProvider();
+
+  if (shoppingSearch && (!options.sourceKeys || options.sourceKeys.includes("shopping-search"))) {
+    const query = options.query ?? process.env.SHOPPING_SEARCH_QUERY ?? "pokemon sealed product";
+    try {
+      const results = (await shoppingSearch.searchProducts(query)).slice(0, perRetailerLimit);
+      for (const result of results) {
+        const retailer = result.retailer || "Retailer";
+        const id = sourceProductId(result.productUrl);
+        const adapter = getAdapter(result.productUrl, retailer);
+        const check = await adapter.check({ id: result.productUrl, url: result.productUrl, storeName: retailer }).catch(() => null);
+
+        offers.push({
+          source: `shopping-search-${shoppingSearch.name}`,
+          sourceProductId: id,
+          title: result.title,
+          brand: "Pokemon",
+          tcg: "pokemon",
+          category: "Sealed Product",
+          setName: null,
+          seriesName: null,
+          productType: "Sealed Product",
+          imageUrl: result.imageUrl ?? check?.imageUrl ?? null,
+          msrp: result.price ?? check?.price ?? null,
+          storeName: retailer,
+          retailerProductId: id,
+          url: result.productUrl,
+          lastPrice: check?.price ?? result.price ?? null,
+          status: check?.status ?? "unknown",
+          availabilityText: check?.rawMatchReason ?? "Discovered by shopping-search provider; stock not verified",
+          metadata: {
+            discoverySource: "shopping-search",
+            provider: result.provider,
+            sourceUrl: result.sourceUrl,
+            retrievedAt: result.retrievedAt,
+            sourceConfidence: result.confidence,
+            verifiedByRetailerConnector: Boolean(check)
+          }
+        });
+      }
+    } catch (error) {
+      errors.push(`${shoppingSearch.name}: ${error instanceof Error ? error.message : "shopping search failed"}`);
+    }
+  }
 
   for (const source of SOURCES) {
     if (!isEnabled(source, options.sourceKeys)) continue;
