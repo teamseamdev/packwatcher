@@ -78,7 +78,7 @@ export function WatchlistGrid({ products }: { products: TrackedProduct[] }) {
         <p className="mt-3 text-xs text-slate-500">{filtered.length} of {products.length} tracked products shown</p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid max-h-[760px] gap-4 overflow-auto pr-1 md:grid-cols-2">
         {filtered.length ? filtered.map((product) => (
           <article key={product.id} className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
             <div className="relative aspect-[16/10] bg-slate-900">

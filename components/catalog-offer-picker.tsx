@@ -2,8 +2,9 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { BellPlus, PackageSearch, Search } from "lucide-react";
+import { BellPlus, Loader2, PackageSearch, Search } from "lucide-react";
 import { trackCatalogProduct } from "@/app/(app)/watchlist/actions";
 import { currency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, TrackedProduct } from "@/lib/types";
@@ -32,6 +33,7 @@ export function CatalogOfferPicker({
   trackedProductIds?: string[];
   isAdmin?: boolean;
 }) {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortMode>("name");
   const [message, setMessage] = useState("");
@@ -71,6 +73,37 @@ export function CatalogOfferPicker({
     });
   }
 
+  function discoverRetailers() {
+    const trimmed = query.trim();
+    if (trimmed.length < 3) {
+      setMessage("Search for at least 3 characters before checking retailer listings.");
+      return;
+    }
+
+    startTransition(async () => {
+      setMessage("");
+      try {
+        const response = await fetch("/api/catalog/discover", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ query: trimmed })
+        });
+        const result = await response.json() as { offersImported?: number; error?: string; errors?: string[]; discoveryErrors?: string[] };
+        if (!response.ok) throw new Error(result.error ?? "Retailer discovery failed.");
+
+        router.refresh();
+        const issueCount = (result.errors?.length ?? 0) + (result.discoveryErrors?.length ?? 0);
+        setMessage(
+          result.offersImported
+            ? `Retailer search saved ${result.offersImported} listing${result.offersImported === 1 ? "" : "s"} for "${trimmed}".${issueCount ? " Some sources could not be checked." : ""}`
+            : `Retailer search ran for "${trimmed}", but no new listings were saved.${issueCount ? " Some sources could not be checked." : ""}`
+        );
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Retailer discovery failed.");
+      }
+    });
+  }
+
   return (
     <section className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
       <div>
@@ -81,7 +114,7 @@ export function CatalogOfferPicker({
         </p>
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_140px]">
+      <div className="mt-5 grid gap-3 xl:grid-cols-[1fr_140px_180px]">
         <label className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <input
@@ -98,6 +131,15 @@ export function CatalogOfferPicker({
           <option value="price">Price</option>
           <option value="checked">Checked</option>
         </select>
+        <button
+          type="button"
+          disabled={isPending || query.trim().length < 3}
+          onClick={discoverRetailers}
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageSearch className="h-4 w-4" />}
+          Search retailers
+        </button>
       </div>
 
       <p className="mt-3 text-xs text-slate-500">{filtered.length} of {offers.length} catalog offers shown</p>

@@ -80,6 +80,11 @@ function sourceProductId(url: string) {
   return createHash("sha256").update(url).digest("hex").slice(0, 32);
 }
 
+function isExpectedRetailerBlock(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\bHTTP (401|403|429)\b/i.test(message);
+}
+
 async function buildOffer(source: RetailerSearchSource, url: string): Promise<ImportedCatalogOffer> {
   const metadata = await fetchProductMetadata(url).catch(() => null);
   const adapter = getAdapter(url, source.storeName);
@@ -173,11 +178,15 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
           offers.push(await buildOffer(source, url));
           await new Promise((resolve) => setTimeout(resolve, 300));
         } catch (error) {
-          errors.push(`${source.storeName} ${url}: ${error instanceof Error ? error.message : "product import failed"}`);
+          if (!isExpectedRetailerBlock(error)) {
+            errors.push(`${source.storeName} ${url}: ${error instanceof Error ? error.message : "product import failed"}`);
+          }
         }
       }
     } catch (error) {
-      errors.push(`${source.storeName} search: ${error instanceof Error ? error.message : "search import failed"}`);
+      if (!isExpectedRetailerBlock(error)) {
+        errors.push(`${source.storeName} search: ${error instanceof Error ? error.message : "search import failed"}`);
+      }
     }
   }
 
