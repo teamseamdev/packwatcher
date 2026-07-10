@@ -2,11 +2,11 @@ import { detectStockFromHtml, fetchWithRetry } from "@/lib/stock-checkers/generi
 import type { RetailerAdapter } from "@/lib/stock-checkers/types";
 import { extractProductMetadata } from "@/lib/product-metadata";
 
-async function walmartCheck(input: Parameters<RetailerAdapter["check"]>[0]) {
+async function gameStopCheck(input: Parameters<RetailerAdapter["check"]>[0]) {
   const html = await fetchWithRetry(input.url);
   const detected = detectStockFromHtml(html, {
-    inStock: ["add to cart", "pickup today", "shipping, arrives", "available for pickup", "available for delivery"],
-    outOfStock: ["out of stock", "sold out", "this item is unavailable", "not available"]
+    inStock: ["add to cart", "pick up at store", "ship to home", "available now"],
+    outOfStock: ["not available", "currently unavailable", "out of stock", "sold out"]
   });
   const metadata = extractProductMetadata(html, input.url);
 
@@ -19,8 +19,8 @@ async function walmartCheck(input: Parameters<RetailerAdapter["check"]>[0]) {
   };
 }
 
-export const walmartAdapter: RetailerAdapter = {
-  name: "walmart",
-  matches: (url, storeName) => /walmart\.com/i.test(url) || /walmart/i.test(storeName),
-  check: walmartCheck
+export const gameStopAdapter: RetailerAdapter = {
+  name: "gamestop",
+  matches: (url, storeName) => /gamestop\.com/i.test(url) || /gamestop/i.test(storeName),
+  check: gameStopCheck
 };

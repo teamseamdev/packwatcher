@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { checkExistingCatalogOffers } from "@/lib/catalog/check-offers";
 import { importPokemonFromBestBuy } from "@/lib/catalog-importers/bestbuy";
+import { importPokemonFromRetailerSearch } from "@/lib/catalog-importers/retailer-search";
 import { importPokemonSealedFromTcgCsv } from "@/lib/catalog-importers/tcgcsv";
 import type { CatalogImportResult } from "@/lib/catalog-importers/types";
 import { upsertImportedCatalog } from "@/lib/catalog-importers/upsert";
@@ -91,6 +92,45 @@ export async function syncAvailableCatalogs(supabase: SupabaseClient) {
       ok: false,
       skipped: true,
       reason: "BESTBUY_API_KEY missing",
+      ...emptyResult(),
+      errors: []
+    });
+  }
+
+  const retailerSearchEnabled = ["TARGET_SEARCH_IMPORT", "WALMART_SEARCH_IMPORT", "GAMESTOP_SEARCH_IMPORT"]
+    .some((key) => process.env[key] === "true");
+
+  if (retailerSearchEnabled) {
+    try {
+      console.log("[catalog-sync] source started: retailer-search");
+      const imported = await importPokemonFromRetailerSearch({
+        perRetailerLimit: Number(process.env.RETAILER_SEARCH_LIMIT ?? 12)
+      });
+      const result = await upsertImportedCatalog(supabase, imported);
+      sources.push({
+        source: "retailer-search",
+        enabled: true,
+        ok: result.errors.length === 0,
+        ...result,
+        errors: result.errors
+      });
+      console.log(`[catalog-sync] retailer-search products=${result.productsUpserted} offers=${result.offersUpserted}`);
+    } catch (error) {
+      sources.push({
+        source: "retailer-search",
+        enabled: true,
+        ok: false,
+        ...emptyResult(),
+        errors: [error instanceof Error ? error.message : "Retailer search import failed"]
+      });
+    }
+  } else {
+    sources.push({
+      source: "retailer-search",
+      enabled: false,
+      ok: false,
+      skipped: true,
+      reason: "TARGET_SEARCH_IMPORT, WALMART_SEARCH_IMPORT, and GAMESTOP_SEARCH_IMPORT are disabled",
       ...emptyResult(),
       errors: []
     });

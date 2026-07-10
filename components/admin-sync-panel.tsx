@@ -17,7 +17,7 @@ export function AdminSyncPanel() {
     <div className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-3">
       <p className="text-sm font-semibold text-white">Sync all available catalogs</p>
       <p className="mt-1 text-xs leading-5 text-slate-300">
-        Imports TCGCSV products, imports Best Buy when configured, checks existing offers, and triggers restock alerts.
+        Imports TCGCSV products, optional Best Buy/API and retailer search sources, checks existing offers, and triggers restock alerts.
       </p>
       <form action={action}>
         <button

@@ -36,6 +36,13 @@ FIREBASE_SERVER_KEY=
 BESTBUY_API_KEY=
 BESTBUY_IMPORT_QUERY=pokemon trading cards
 BESTBUY_IMPORT_PAGE_SIZE=100
+TARGET_SEARCH_IMPORT=false
+TARGET_SEARCH_QUERY=pokemon cards
+WALMART_SEARCH_IMPORT=false
+WALMART_SEARCH_QUERY=pokemon cards
+GAMESTOP_SEARCH_IMPORT=false
+GAMESTOP_SEARCH_QUERY=pokemon cards
+RETAILER_SEARCH_LIMIT=12
 TCGCSV_MAX_GROUPS=250
 TCGCSV_MAX_PRODUCTS=5000
 TCGCSV_QUICK_MAX_GROUPS=40
@@ -164,14 +171,15 @@ Catalog importers:
 
 - TCGCSV Pokemon sealed importer seeds shared Pokemon sealed products from server-side TCGCSV data.
 - Best Buy importer uses `BESTBUY_API_KEY` to import Pokemon-related Best Buy offers with API-backed availability.
+- Retailer search discovery can import public product pages from Target, Walmart, and GameStop search results when `TARGET_SEARCH_IMPORT`, `WALMART_SEARCH_IMPORT`, or `GAMESTOP_SEARCH_IMPORT` is set to `true`.
 - `POST /api/catalog/sync` imports every currently available catalog source using `x-admin-secret`.
 - `GET /api/catalog/sync` supports Vercel Cron using `Authorization: Bearer $CRON_SECRET`.
-- Catalog sync always attempts TCGCSV and only runs Best Buy when `BESTBUY_API_KEY` is configured.
+- Catalog sync always attempts TCGCSV, runs Best Buy when `BESTBUY_API_KEY` is configured, and runs retailer search discovery only for explicitly enabled retailers.
 - Imports use chunked upserts, so repeated syncs update the catalog without creating duplicate products or offers.
 - Existing catalog offers are checked after imports. Only an unavailable-to-available transition creates in-app and web push alerts.
 - Dashboard and Watchlist automatically attempt a quick TCGCSV sync if the catalog is empty, so users do not land on a blank catalog.
 - Pokemon Center and Amazon have retailer-specific safe monitoring adapters.
-- Walmart, Target, Pokemon Center, Amazon, Best Buy, and other product URLs can be added through the Admin bulk URL importer, then monitored by the safe stock checker.
+- Walmart, Target, GameStop, Pokemon Center, Amazon, Best Buy, and other product URLs can be added through the Admin bulk URL importer, then monitored by the safe stock checker.
 - Prefer official feeds/APIs where available. Use URL monitoring only for public product pages and never for checkout, queue, CAPTCHA, or account automation.
 
 Push notifications:
@@ -183,10 +191,12 @@ Push notifications:
 
 ## Stock Checking
 
-The MVP stock checker fetches public HTML and uses safe keyword matching:
+The MVP stock checker fetches public product HTML and uses schema.org availability plus safe keyword matching:
 
 - `in stock`
 - `add to cart`
+- `available to ship`
+- `pickup available`
 - `sold out`
 - `out of stock`
 
@@ -196,9 +206,12 @@ Retailer adapters live in `lib/stock-checkers/`:
 - `target.ts`
 - `walmart.ts`
 - `bestbuy.ts`
+- `gamestop.ts`
 - `generic.ts`
 
 The catalog offer monitor interface lives in `lib/retailers/`. Best Buy, Target, Walmart, GameStop, and Pokemon Center currently use conservative URL checks; official catalog APIs can be added behind the same interface.
+
+Retailer search discovery lives in `lib/catalog-importers/retailer-search.ts`. It is intentionally conservative: it fetches configured public search result pages, extracts product links, checks those product pages, and upserts catalog offers. It does not automate accounts, carts, checkout, queue bypassing, CAPTCHA bypassing, or protected endpoints. Retailers may block server-side requests; blocked sources fail gracefully and do not stop the rest of catalog sync.
 
 Admin cron endpoints:
 

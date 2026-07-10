@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { AdminSyncPanel } from "@/components/admin-sync-panel";
 import { StatCard } from "@/components/stat-card";
 import { isAdmin, requireProfile } from "@/lib/auth";
-import { addCatalogOffer, adminCheckProduct, importBestBuyPokemonCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, promoteAdmin } from "./actions";
+import { addCatalogOffer, adminCheckProduct, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, promoteAdmin } from "./actions";
 
 export default async function AdminPage() {
   const { supabase, profile } = await requireProfile();
@@ -64,6 +64,20 @@ export default async function AdminPage() {
                 <input name="page_size" placeholder="Page size" defaultValue="50" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm" />
               </div>
               <button className="mt-3 h-10 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Import Best Buy</button>
+            </form>
+            <form action={importRetailerSearchCatalog} className="rounded-lg bg-white/5 p-3">
+              <p className="text-sm font-semibold text-white">Retailer search discovery</p>
+              <p className="mt-1 text-xs leading-5 text-slate-400">Find public product pages from Target, Walmart, or GameStop search results, then check those product pages for stock.</p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                <select name="retailer" defaultValue="target" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm">
+                  <option value="target">Target</option>
+                  <option value="walmart">Walmart</option>
+                  <option value="gamestop">GameStop</option>
+                </select>
+                <input name="query" placeholder="Search query" defaultValue="pokemon cards" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm" />
+                <input name="limit" placeholder="Limit" defaultValue="8" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm" />
+              </div>
+              <button className="mt-3 h-10 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Import retailer search</button>
             </form>
             <form action={importRetailerUrlsToCatalog} className="rounded-lg bg-white/5 p-3">
               <p className="text-sm font-semibold text-white">Bulk retailer URLs</p>

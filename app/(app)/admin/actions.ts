@@ -6,6 +6,7 @@ import { z } from "zod";
 import { isAdmin, requireProfile } from "@/lib/auth";
 import type { ImportedCatalogOffer } from "@/lib/catalog-importers/types";
 import { importPokemonFromBestBuy } from "@/lib/catalog-importers/bestbuy";
+import { importPokemonFromRetailerSearch } from "@/lib/catalog-importers/retailer-search";
 import { syncAvailableCatalogs } from "@/lib/catalog-importers/sync-all";
 import { importPokemonSealedFromTcgCsv } from "@/lib/catalog-importers/tcgcsv";
 import { upsertImportedCatalog, upsertImportedOffers } from "@/lib/catalog-importers/upsert";
@@ -107,6 +108,26 @@ export async function importBestBuyPokemonCatalog(formData: FormData) {
 
   revalidatePath("/admin");
   revalidatePath("/watchlist");
+}
+
+export async function importRetailerSearchCatalog(formData: FormData) {
+  const { supabase, profile } = await requireProfile();
+  if (!isAdmin(profile)) throw new Error("Admin access required.");
+
+  const retailer = String(formData.get("retailer") ?? "target");
+  const query = String(formData.get("query") ?? "pokemon cards");
+  const limit = Number(formData.get("limit") ?? 8);
+
+  const imported = await importPokemonFromRetailerSearch({
+    perRetailerLimit: limit,
+    sourceKeys: [retailer],
+    query
+  });
+  await upsertImportedCatalog(supabase, imported);
+
+  revalidatePath("/admin");
+  revalidatePath("/watchlist");
+  revalidatePath("/dashboard");
 }
 
 export async function syncAllAvailableCatalogs() {
