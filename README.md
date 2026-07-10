@@ -43,6 +43,7 @@ WALMART_SEARCH_QUERY=pokemon cards
 GAMESTOP_SEARCH_IMPORT=false
 GAMESTOP_SEARCH_QUERY=pokemon cards
 RETAILER_SEARCH_LIMIT=12
+USER_DISCOVERY_RESULT_LIMIT=8
 SHOPPING_SEARCH_PROVIDER=
 SHOPPING_SEARCH_API_URL=
 SHOPPING_SEARCH_API_KEY=
@@ -227,6 +228,7 @@ Retail aggregation foundation:
 - Price aggregation in `lib/retailers/shared/price-aggregation.ts` excludes unavailable listings, excludes third-party marketplace sellers by default, deduplicates listings, and uses median/trimmed average logic to avoid reseller outliers.
 - Restock alert filtering and dedupe live in `lib/retailers/shared/restock-events.ts`. Event keys include user, retailer listing, availability type, store, price bucket, and status.
 - Optional shopping-search discovery uses `SHOPPING_SEARCH_PROVIDER`, `SHOPPING_SEARCH_API_URL`, and `SHOPPING_SEARCH_API_KEY`. Shopping-search results are discovery and price hints only; PackWatcher still attempts retailer-specific verification before treating inventory as confirmed.
+- Authenticated users can run search-triggered discovery from the catalog search box. The `/api/catalog/discover` route searches enabled retailer sources and the optional shopping-search provider for the entered pack/box name, saves discovered listings, records search interest when possible, and refreshes local catalog results. It is intentionally click-triggered, rate-limited, and bounded by `USER_DISCOVERY_RESULT_LIMIT`.
 - Background processing currently uses the existing Vercel Cron-compatible `/api/catalog/sync` path plus admin-triggered sync. The new job/health tables make it straightforward to move catalog sync, discovery, availability checks, aggregation, and notifications into Trigger.dev, Inngest, Upstash QStash, BullMQ, or a dedicated worker when check volume grows.
 
 Admin cron endpoints:

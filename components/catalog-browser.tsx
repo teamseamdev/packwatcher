@@ -2,8 +2,9 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { BellPlus, ExternalLink, PackageSearch, Search } from "lucide-react";
+import { BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
 import { trackCatalogOffer, trackCatalogProduct } from "@/app/(app)/watchlist/actions";
 import { currency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, StockStatus } from "@/lib/types";
@@ -69,11 +70,13 @@ function featuredScore(group: CatalogProductGroup) {
 }
 
 export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGroup[]; isAdmin: boolean }) {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<CatalogFilter>("all");
   const [expandedId, setExpandedId] = useState<string | null>(groups[0]?.product.id ?? null);
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [isDiscovering, startDiscoveryTransition] = useTransition();
 
   const filteredGroups = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -130,6 +133,47 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
     });
   }
 
+  function discoverRetailers() {
+    const trimmed = query.trim();
+    if (trimmed.length < 3) {
+      setMessage("Search for at least 3 characters before checking retailer listings.");
+      return;
+    }
+
+    startDiscoveryTransition(async () => {
+      setMessage("");
+      try {
+        const response = await fetch("/api/catalog/discover", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ query: trimmed })
+        });
+        const result = await response.json() as {
+          ok?: boolean;
+          offersImported?: number;
+          productsImported?: number;
+          error?: string;
+          errors?: string[];
+          discoveryErrors?: string[];
+        };
+
+        if (!response.ok) {
+          throw new Error(result.error ?? "Retailer discovery failed.");
+        }
+
+        router.refresh();
+        const issueCount = (result.errors?.length ?? 0) + (result.discoveryErrors?.length ?? 0);
+        setMessage(
+          result.offersImported
+            ? `Retailer search saved ${result.offersImported} listing${result.offersImported === 1 ? "" : "s"} for "${trimmed}".${issueCount ? " Some sources could not be checked." : ""}`
+            : `Retailer search ran for "${trimmed}", but no new listings were saved.${issueCount ? " Some sources could not be checked." : ""}`
+        );
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Retailer discovery failed.");
+      }
+    });
+  }
+
   if (!groups.length) {
     return (
       <section className="rounded-lg border border-white/10 bg-white/[0.04] p-6">
@@ -164,7 +208,7 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
       </div>
 
       <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
-        <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
+        <div className="grid gap-3 lg:grid-cols-[1fr_220px_190px]">
           <label className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
             <input
@@ -184,8 +228,19 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
             <option value="collection_box">Collection boxes</option>
             <option value="tin">Tins</option>
           </select>
+          <button
+            type="button"
+            disabled={isDiscovering || query.trim().length < 3}
+            onClick={discoverRetailers}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isDiscovering ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageSearch className="h-4 w-4" />}
+            Search retailers
+          </button>
         </div>
-        <p className="mt-3 text-xs text-slate-500">{filteredGroups.length} of {groups.length} catalog products shown</p>
+        <p className="mt-3 text-xs text-slate-500">
+          {filteredGroups.length} of {groups.length} catalog products shown. Retailer search saves listings in the background and refreshes this view.
+        </p>
       </div>
 
       {message ? <p className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">{message}</p> : null}
