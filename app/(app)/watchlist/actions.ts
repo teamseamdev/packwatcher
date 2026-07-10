@@ -72,7 +72,7 @@ export async function trackCatalogOffer(offerId: string) {
 
   const { data, error } = await supabase
     .from("catalog_offers")
-    .select("*, catalog_products(*)")
+    .select("*, catalog_products!catalog_offers_catalog_product_id_fkey(*)")
     .eq("id", offerId)
     .single();
 

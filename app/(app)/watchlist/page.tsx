@@ -11,7 +11,7 @@ export default async function WatchlistPage() {
   await ensureCatalogHasRows(supabase);
   const [{ data: products }, { data: offers }, { data: productAlerts }] = await Promise.all([
     supabase.from("tracked_products").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).returns<TrackedProduct[]>(),
-    supabase.from("catalog_offers").select("*, catalog_products(*)").order("created_at", { ascending: false }).limit(1000),
+    supabase.from("catalog_offers").select("*, catalog_products!catalog_offers_catalog_product_id_fkey(*)").order("created_at", { ascending: false }).limit(1000),
     supabase
       .from("product_alerts")
       .select("id,product_id,notify_push,catalog_products(id,name,title,set_name,product_type)")

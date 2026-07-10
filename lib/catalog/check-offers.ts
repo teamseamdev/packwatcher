@@ -12,7 +12,7 @@ export async function checkExistingCatalogOffers(supabase: SupabaseClient, limit
   const result = { offersChecked: 0, alertsTriggered: 0, errors: [] as string[] };
   const { data: offers, error } = await supabase
     .from("catalog_offers")
-    .select("*, catalog_products(*)")
+    .select("*, catalog_products!catalog_offers_catalog_product_id_fkey(*)")
     .not("url", "is", null)
     .order("last_checked_at", { ascending: true, nullsFirst: true })
     .limit(limit);
