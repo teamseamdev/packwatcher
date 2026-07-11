@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { BellPlus, Loader2, PackageSearch, Search } from "lucide-react";
+import { BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
 import { trackCatalogProduct } from "@/app/(app)/watchlist/actions";
 import { currency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, TrackedProduct } from "@/lib/types";
@@ -37,6 +37,7 @@ export function CatalogOfferPicker({
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortMode>("name");
   const [message, setMessage] = useState("");
+  const [expandedOfferId, setExpandedOfferId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const trackedUrls = useMemo(() => new Set(trackedProducts.map((product) => product.url)), [trackedProducts]);
   const trackedCatalogProducts = useMemo(() => new Set(trackedProductIds), [trackedProductIds]);
@@ -152,7 +153,12 @@ export function CatalogOfferPicker({
             const alreadyTracked = trackedUrls.has(offer.url) || (product ? trackedCatalogProducts.has(product.id) : false);
 
             return (
-              <article key={offer.id} className="grid grid-cols-[72px_1fr] gap-3 rounded-lg border border-white/10 bg-slate-950/60 p-3">
+              <article key={offer.id} className="rounded-lg border border-white/10 bg-slate-950/60 p-3">
+                <button
+                  type="button"
+                  onClick={() => setExpandedOfferId(expandedOfferId === offer.id ? null : offer.id)}
+                  className="grid w-full grid-cols-[72px_1fr] gap-3 text-left"
+                >
                 <div className="relative h-20 overflow-hidden rounded-lg bg-slate-900">
                   {product?.image_url ? <Image src={product.image_url} alt={product.name} fill sizes="72px" className="object-cover" /> : <div className="grid h-full place-items-center text-xs text-slate-600">No image</div>}
                 </div>
@@ -166,16 +172,40 @@ export function CatalogOfferPicker({
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-amber-200">{currency(offer.last_price ?? product?.msrp)}</p>
-                    <button
-                      disabled={alreadyTracked || isPending}
-                      onClick={() => product ? track(product.id) : undefined}
-                      className="inline-flex h-9 items-center gap-2 rounded-lg bg-amber-300 px-3 text-xs font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <BellPlus className="h-4 w-4" />
-                      {alreadyTracked ? "Tracked" : offer.status === "in_stock" ? "Track this" : "Notify me"}
-                    </button>
+                    <span className="text-xs text-slate-500">{expandedOfferId === offer.id ? "Hide details" : "Show details"}</span>
                   </div>
                 </div>
+                </button>
+                {expandedOfferId === offer.id ? (
+                  <div className="mt-3 border-t border-white/10 pt-3">
+                    <div className="grid gap-2 text-xs text-slate-300 sm:grid-cols-2">
+                      <p><span className="text-slate-500">Retailer:</span> {offer.retailer ?? offer.store_name}</p>
+                      <p><span className="text-slate-500">Status:</span> {offer.status.replaceAll("_", " ")}</p>
+                      <p><span className="text-slate-500">Price:</span> {currency(offer.last_price ?? offer.price ?? product?.msrp)}</p>
+                      <p><span className="text-slate-500">Checked:</span> {offer.last_checked_at ? new Date(offer.last_checked_at).toLocaleString() : "not yet"}</p>
+                      <p className="sm:col-span-2"><span className="text-slate-500">Product:</span> {product?.title ?? product?.name ?? offer.title ?? "Catalog product"}</p>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        disabled={alreadyTracked || isPending}
+                        onClick={() => product ? track(product.id) : undefined}
+                        className="inline-flex h-9 items-center gap-2 rounded-lg bg-amber-300 px-3 text-xs font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <BellPlus className="h-4 w-4" />
+                        {alreadyTracked ? "Tracked" : offer.status === "in_stock" ? "Track this" : "Notify me"}
+                      </button>
+                      {product ? (
+                        <Link href={`/catalog/${product.id}`} className="inline-flex h-9 items-center rounded-lg border border-white/10 px-3 text-xs font-semibold text-white">
+                          Product page
+                        </Link>
+                      ) : null}
+                      <a href={offer.url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1 rounded-lg border border-white/10 px-3 text-xs font-semibold text-white">
+                        <ExternalLink className="h-3 w-3" />
+                        Retailer
+                      </a>
+                    </div>
+                  </div>
+                ) : null}
               </article>
             );
           }) : (

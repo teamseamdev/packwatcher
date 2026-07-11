@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { ExternalLink } from "lucide-react";
 import { CatalogOfferPicker } from "@/components/catalog-offer-picker";
 import { WatchlistGrid } from "@/components/watchlist-grid";
 import { isAdmin, requireProfile } from "@/lib/auth";
 import { ensureCatalogHasRows } from "@/lib/catalog/ensure-catalog";
+import { currency } from "@/lib/profit";
 import type { CatalogOffer, TrackedProduct } from "@/lib/types";
 import { addProduct } from "./actions";
 
@@ -22,6 +24,7 @@ export default async function WatchlistPage() {
   const catalogAlertCount = productAlerts?.length ?? 0;
   const trackedUrlCount = trackedProducts.length;
   const inStockTrackedCount = trackedProducts.filter((product) => product.status === "in_stock").length;
+  const catalogOffers = (offers ?? []) as CatalogOffer[];
 
   return (
     <div className="space-y-6">
@@ -53,7 +56,7 @@ export default async function WatchlistPage() {
           <section className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
             <h2 className="text-xl font-black text-white">Tracked catalog alerts</h2>
             <p className="mt-2 text-sm text-slate-400">{catalogAlertCount} canonical product{catalogAlertCount === 1 ? "" : "s"} tracked.</p>
-            <div className="mt-4 max-h-80 space-y-3 overflow-auto pr-1">
+            <div className="mt-4 max-h-96 space-y-3 overflow-auto pr-1">
               {productAlerts?.length ? productAlerts.map((alert) => {
                 const related = alert.catalog_products as unknown as {
                   id: string;
@@ -63,13 +66,55 @@ export default async function WatchlistPage() {
                   product_type: string | null;
                 } | null;
                 if (!related) return null;
+                const relatedOffers = catalogOffers
+                  .filter((offer) => (offer.product_id ?? offer.catalog_product_id) === related.id)
+                  .sort((a, b) => {
+                    if (a.status === "in_stock" && b.status !== "in_stock") return -1;
+                    if (b.status === "in_stock" && a.status !== "in_stock") return 1;
+                    return (a.last_price ?? Number.MAX_SAFE_INTEGER) - (b.last_price ?? Number.MAX_SAFE_INTEGER);
+                  });
                 return (
-                  <Link key={alert.id} href={`/catalog/${related.id}`} className="block rounded-lg border border-amber-300/20 bg-amber-300/10 p-4">
-                    <p className="font-semibold text-white">{related.title ?? related.name}</p>
-                    <p className="mt-1 text-sm text-slate-300">
-                      {[related.product_type, related.set_name].filter(Boolean).join(" - ") || "Pokemon sealed product"} - Push alerts {alert.notify_push ? "on" : "off"}
-                    </p>
-                  </Link>
+                  <details key={alert.id} className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-4">
+                    <summary className="cursor-pointer list-none">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-white">{related.title ?? related.name}</p>
+                          <p className="mt-1 text-sm text-slate-300">
+                            {[related.product_type, related.set_name].filter(Boolean).join(" - ") || "Pokemon sealed product"} - Push alerts {alert.notify_push ? "on" : "off"}
+                          </p>
+                        </div>
+                        <span className="shrink-0 rounded-full bg-slate-950/70 px-2 py-1 text-[11px] text-amber-100">{relatedOffers.length} retailers</span>
+                      </div>
+                    </summary>
+                    <div className="mt-4 space-y-3 border-t border-amber-300/20 pt-4">
+                      <div className="grid grid-cols-2 gap-3 text-xs text-slate-300">
+                        <p><span className="text-slate-500">Type:</span> {related.product_type ?? "Sealed product"}</p>
+                        <p><span className="text-slate-500">Set:</span> {related.set_name ?? "Unknown"}</p>
+                      </div>
+                      <Link href={`/catalog/${related.id}`} className="inline-flex h-9 items-center rounded-lg border border-white/10 px-3 text-xs font-semibold text-white">
+                        Product page
+                      </Link>
+                      <div className="space-y-2">
+                        {relatedOffers.length ? relatedOffers.map((offer) => (
+                          <div key={offer.id} className="rounded-lg bg-slate-950/70 p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-semibold text-white">{offer.retailer ?? offer.store_name}</p>
+                                <p className="mt-1 text-xs text-slate-400">{offer.status.replaceAll("_", " ")} - {currency(offer.last_price ?? offer.price)}</p>
+                                <p className="mt-1 text-[11px] text-slate-500">Checked {offer.last_checked_at ? new Date(offer.last_checked_at).toLocaleString() : "not yet"}</p>
+                              </div>
+                              <a href={offer.url} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center gap-1 rounded-lg border border-white/10 px-2 text-xs text-slate-200">
+                                <ExternalLink className="h-3 w-3" />
+                                Store
+                              </a>
+                            </div>
+                          </div>
+                        )) : (
+                          <p className="rounded-lg bg-slate-950/70 p-3 text-sm text-slate-400">No retailer offers discovered yet.</p>
+                        )}
+                      </div>
+                    </div>
+                  </details>
                 );
               }) : (
                 <p className="rounded-lg border border-white/10 bg-white/[0.04] p-4 text-sm text-slate-400">
@@ -107,7 +152,7 @@ export default async function WatchlistPage() {
 
         <div id="catalog">
           <CatalogOfferPicker
-            offers={(offers ?? []) as CatalogOffer[]}
+            offers={catalogOffers}
             trackedProducts={trackedProducts}
             trackedProductIds={(productAlerts ?? []).map((alert) => alert.product_id)}
             isAdmin={isAdmin(profile)}
