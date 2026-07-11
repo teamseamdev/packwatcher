@@ -8,3 +8,5 @@ coverage/
 *.tsbuildinfo
 tools/ffmpeg.exe
 .local-clips/
+
+.vercel

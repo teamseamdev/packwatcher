@@ -5,6 +5,17 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       { protocol: "https", hostname: "**" }
     ]
+  },
+  outputFileTracingExcludes: {
+    "*": [
+      "./.git/**",
+      "./.next/**",
+      "./.vercel/**",
+      "./.local-clips/**",
+      "./tools/**",
+      "./dev-server*.log",
+      "./tsconfig.tsbuildinfo"
+    ]
   }
 };
 

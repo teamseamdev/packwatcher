@@ -1,0 +1,10 @@
+.git
+.next
+.vercel
+node_modules
+.local-clips
+tools
+*.log
+*.tsbuildinfo
+.env
+.env*.local
