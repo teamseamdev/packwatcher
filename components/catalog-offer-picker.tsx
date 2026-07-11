@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { BellOff, BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
 import { removeTrackedProduct, trackCatalogProduct, untrackCatalogProduct } from "@/app/(app)/watchlist/actions";
+import { isLikelyPokemonProduct } from "@/lib/catalog-importers/pokemon-product-filter";
 import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, TrackedProduct } from "@/lib/types";
 
@@ -61,6 +62,13 @@ export function CatalogOfferPicker({
     return offers
       .filter((offer) => {
         const product = productForOffer(offer);
+        if (!isLikelyPokemonProduct({
+          title: product?.title ?? product?.name ?? offer.title,
+          productUrl: offer.url,
+          storeName: offer.store_name
+        })) {
+          return false;
+        }
         const text = [product?.name, product?.tcg, product?.category, product?.set_name, offer.store_name, offer.status].join(" ").toLowerCase();
         return !normalized || text.includes(normalized);
       })

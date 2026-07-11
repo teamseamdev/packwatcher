@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { aggregatePrices } from "../lib/retailers/shared/price-aggregation.ts";
+import { isLikelyPokemonProduct, pokemonShoppingQuery } from "../lib/catalog-importers/pokemon-product-filter.ts";
 import { matchProduct } from "../lib/retailers/shared/product-matching.ts";
 import { freshnessLabel, normalizeAvailabilityStatus, normalizeTitle, normalizeUpc } from "../lib/retailers/shared/normalize.ts";
 import { notificationEventKey, shouldSendRestockAlert } from "../lib/retailers/shared/restock-events.ts";
@@ -88,4 +89,12 @@ test("deduplicates restock alerts by event key and respects max price", () => {
   assert.equal(shouldSendRestockAlert(alert, snapshot), true);
   assert.equal(notificationEventKey("user", snapshot), "user:rp1:online:online:4999:in_stock");
   assert.equal(shouldSendRestockAlert({ ...alert, max_price: 40 }, snapshot), false);
+});
+
+test("filters shopping discovery to Pokemon sealed/card products", () => {
+  assert.equal(pokemonShoppingQuery("Chaos Rising"), "pokemon sealed product Chaos Rising");
+  assert.equal(isLikelyPokemonProduct({ title: "Chaos Rising", storeName: "World of Books", productUrl: "https://example.com/book" }), false);
+  assert.equal(isLikelyPokemonProduct({ title: "Chaos Rising (Sword and Sorcery S20)", storeName: "Books A Million", productUrl: "https://example.com/book" }), false);
+  assert.equal(isLikelyPokemonProduct({ title: "Pokemon Chaos Rising Blister Pack", storeName: "TCGplayer", productUrl: "https://example.com/pokemon" }), true);
+  assert.equal(isLikelyPokemonProduct({ title: "Surging Sparks Elite Trainer Box", storeName: "Target", productUrl: "https://example.com/item" }), true);
 });

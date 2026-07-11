@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ImportedCatalogOffer } from "@/lib/catalog-importers/types";
+import { isLikelyPokemonProduct, pokemonShoppingQuery } from "@/lib/catalog-importers/pokemon-product-filter";
 import { fetchPageHtml } from "@/lib/fetch-page-html";
 import { fetchProductMetadata } from "@/lib/product-metadata";
 import { createConfiguredShoppingSearchProvider } from "@/lib/retailers/shopping-search/connector";
@@ -134,12 +135,16 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
   const offers: ImportedCatalogOffer[] = [];
   const errors: string[] = [];
   const shoppingSearch = createConfiguredShoppingSearchProvider();
+  const userQuery = options.query ?? process.env.SHOPPING_SEARCH_QUERY ?? "pokemon sealed product";
+  const discoveryQuery = pokemonShoppingQuery(userQuery);
 
   if (shoppingSearch && (!options.sourceKeys || options.sourceKeys.includes("shopping-search"))) {
-    const query = options.query ?? process.env.SHOPPING_SEARCH_QUERY ?? "pokemon sealed product";
     try {
-      const results = (await shoppingSearch.searchProducts(query, { postalCode: options.postalCode })).slice(0, perRetailerLimit);
+      const results = (await shoppingSearch.searchProducts(discoveryQuery, { postalCode: options.postalCode })).slice(0, perRetailerLimit * 2);
       for (const result of results) {
+        if (offers.length >= perRetailerLimit) break;
+        if (!isLikelyPokemonProduct({ title: result.title, productUrl: result.productUrl, storeName: result.retailer })) continue;
+
         const retailer = result.retailer || "Retailer";
         const id = sourceProductId(result.productUrl);
         const adapter = getAdapter(result.productUrl, retailer);
@@ -191,7 +196,7 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
   for (const source of SOURCES) {
     if (!isEnabled(source, options.sourceKeys)) continue;
 
-    const query = options.query ?? process.env[source.queryEnv] ?? source.defaultQuery;
+    const query = pokemonShoppingQuery(options.query ?? process.env[source.queryEnv] ?? source.defaultQuery);
     const localizedQuery = options.postalCode ? `${query} near ${options.postalCode}` : query;
     try {
       const html = await fetchPageHtml(source.searchUrl(localizedQuery), 1);
@@ -199,7 +204,10 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
 
       for (const url of urls) {
         try {
-          offers.push(await buildOffer(source, url));
+          const offer = await buildOffer(source, url);
+          if (isLikelyPokemonProduct({ title: offer.title, productUrl: offer.url, storeName: offer.storeName })) {
+            offers.push(offer);
+          }
           await new Promise((resolve) => setTimeout(resolve, 300));
         } catch (error) {
           if (!isExpectedRetailerBlock(error)) {

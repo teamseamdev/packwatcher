@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { BellOff, BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
 import { trackCatalogOffer, trackCatalogProduct, untrackCatalogProduct } from "@/app/(app)/watchlist/actions";
+import { isLikelyPokemonProduct } from "@/lib/catalog-importers/pokemon-product-filter";
 import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, StockStatus } from "@/lib/types";
 
@@ -97,6 +98,14 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
 
     return groups
       .filter((group) => {
+        if (!isLikelyPokemonProduct({
+          title: group.product.title ?? group.product.name,
+          productUrl: group.offers[0]?.url,
+          storeName: group.offers[0]?.store_name
+        })) {
+          return false;
+        }
+
         const status = groupStatus(group);
         const searchable = [
           group.product.name,
