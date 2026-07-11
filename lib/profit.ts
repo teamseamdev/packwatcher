@@ -23,3 +23,8 @@ export function currency(value: number | null | undefined) {
     currency: "USD"
   }).format(value ?? 0);
 }
+
+export function optionalCurrency(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "Price not found";
+  return currency(value);
+}

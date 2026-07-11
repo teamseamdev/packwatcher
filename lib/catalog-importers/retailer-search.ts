@@ -80,6 +80,18 @@ function sourceProductId(url: string) {
   return createHash("sha256").update(url).digest("hex").slice(0, 32);
 }
 
+function validPrice(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function firstValidPrice(...values: Array<number | null | undefined>) {
+  for (const value of values) {
+    const price = validPrice(value);
+    if (price !== null) return price;
+  }
+  return null;
+}
+
 function isExpectedRetailerBlock(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return /\bHTTP (401|403|429)\b/i.test(message);
@@ -90,6 +102,7 @@ async function buildOffer(source: RetailerSearchSource, url: string): Promise<Im
   const adapter = getAdapter(url, source.storeName);
   const check = await adapter.check({ id: url, url, storeName: source.storeName }).catch(() => null);
   const id = sourceProductId(url);
+  const price = firstValidPrice(check?.price, metadata?.price);
 
   return {
     source: `retailer-search-${source.key}`,
@@ -102,11 +115,11 @@ async function buildOffer(source: RetailerSearchSource, url: string): Promise<Im
     seriesName: null,
     productType: "Sealed Product",
     imageUrl: metadata?.imageUrl || check?.imageUrl || null,
-    msrp: metadata?.price ?? check?.price ?? null,
+    msrp: price,
     storeName: source.storeName,
     retailerProductId: id,
     url,
-    lastPrice: check?.price ?? metadata?.price ?? null,
+    lastPrice: price,
     status: check?.status ?? "unknown",
     availabilityText: check?.rawMatchReason ?? "Discovered from retailer search",
     metadata: {
@@ -131,6 +144,9 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
         const id = sourceProductId(result.productUrl);
         const adapter = getAdapter(result.productUrl, retailer);
         const check = await adapter.check({ id: result.productUrl, url: result.productUrl, storeName: retailer }).catch(() => null);
+        const price = firstValidPrice(result.price, check?.price);
+        const providerAvailability = [result.availabilityText, result.shippingText, result.pickupText].filter(Boolean).join(" | ");
+        const availabilityText = check?.rawMatchReason ?? (providerAvailability || "Discovered by shopping-search provider; stock not verified");
 
         offers.push({
           source: `shopping-search-${shoppingSearch.name}`,
@@ -143,13 +159,13 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
           seriesName: null,
           productType: "Sealed Product",
           imageUrl: result.imageUrl ?? check?.imageUrl ?? null,
-          msrp: result.price ?? check?.price ?? null,
+          msrp: price,
           storeName: retailer,
           retailerProductId: id,
           url: result.productUrl,
-          lastPrice: check?.price ?? result.price ?? null,
+          lastPrice: price,
           status: check?.status ?? "unknown",
-          availabilityText: check?.rawMatchReason ?? "Discovered by shopping-search provider; stock not verified",
+          availabilityText,
           metadata: {
             discoverySource: "shopping-search",
             provider: result.provider,
@@ -157,6 +173,11 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
             retrievedAt: result.retrievedAt,
             sourceConfidence: result.confidence,
             verifiedByRetailerConnector: Boolean(check),
+            providerPrice: result.price,
+            checkedPrice: check?.price ?? null,
+            availabilityText,
+            shippingText: result.shippingText ?? null,
+            pickupText: result.pickupText ?? null,
             postalCode: options.postalCode ?? null,
             localSearchRequested: Boolean(options.postalCode)
           }

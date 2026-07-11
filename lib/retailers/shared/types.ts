@@ -95,6 +95,9 @@ export type ShoppingSearchResult = {
   price: number | null;
   sellerName?: string | null;
   imageUrl?: string | null;
+  availabilityText?: string | null;
+  shippingText?: string | null;
+  pickupText?: string | null;
   sourceUrl: string;
   retrievedAt: string;
   confidence: number;

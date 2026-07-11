@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { BellOff, BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
 import { trackCatalogOffer, trackCatalogProduct, untrackCatalogProduct } from "@/app/(app)/watchlist/actions";
-import { currency } from "@/lib/profit";
+import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, StockStatus } from "@/lib/types";
 
 export type CatalogProductGroup = {
@@ -33,9 +33,22 @@ function groupStatus(group: CatalogProductGroup): StockStatus {
 function lowestPrice(group: CatalogProductGroup) {
   const prices = group.offers
     .map((offer) => offer.last_price)
-    .filter((price): price is number => typeof price === "number");
+    .filter((price): price is number => typeof price === "number" && Number.isFinite(price) && price > 0);
   if (prices.length) return Math.min(...prices);
   return group.product.msrp;
+}
+
+function metadataText(offer: CatalogOffer, key: string) {
+  const value = offer.metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function fulfillmentText(offer: CatalogOffer) {
+  return [
+    metadataText(offer, "shippingText"),
+    metadataText(offer, "pickupText"),
+    offer.availability_text
+  ].filter(Boolean).join(" | ");
 }
 
 function bestOffer(group: CatalogProductGroup) {
@@ -294,7 +307,7 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
                 <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <p className="text-slate-500">Lowest price</p>
-                    <p className="font-semibold text-white">{currency(lowestPrice(group))}</p>
+                    <p className="font-semibold text-white">{optionalCurrency(lowestPrice(group))}</p>
                   </div>
                   <div>
                     <p className="text-slate-500">Retailers</p>
@@ -337,7 +350,8 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <p className="text-sm font-semibold text-white">{item.store_name}</p>
-                              <p className="mt-1 text-xs text-slate-400">{statusLabel(item.status)} - {currency(item.last_price)}</p>
+                              <p className="mt-1 text-xs text-slate-400">{statusLabel(item.status)} - {optionalCurrency(item.last_price)}</p>
+                              {fulfillmentText(item) ? <p className="mt-1 line-clamp-2 text-[11px] text-slate-500">{fulfillmentText(item)}</p> : null}
                             </div>
                             <a href={item.url} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center gap-1 rounded-lg border border-white/10 px-2 text-xs text-slate-200">
                               <ExternalLink className="h-3 w-3" />

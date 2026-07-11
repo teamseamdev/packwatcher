@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ExternalLink } from "lucide-react";
 import { ProductTrackButton } from "@/components/product-track-button";
 import { requireProfile } from "@/lib/auth";
-import { currency } from "@/lib/profit";
+import { optionalCurrency } from "@/lib/profit";
 import { aggregatePrices } from "@/lib/retailers/shared/price-aggregation";
 import type { CatalogOffer, CatalogProduct } from "@/lib/types";
 
@@ -11,6 +11,11 @@ function offerStatus(offer: CatalogOffer) {
   if (offer.in_stock || offer.status === "in_stock") return "In stock";
   if (offer.status === "out_of_stock") return "Out of stock";
   return offer.availability_text ?? "Trackable";
+}
+
+function metadataText(offer: CatalogOffer, key: string) {
+  const value = offer.metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 export default async function CatalogProductPage({ params }: { params: Promise<{ id: string }> }) {
@@ -35,7 +40,7 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
     retailerProductId: offer.retailer_product_id ?? offer.id,
     retailer: offer.retailer ?? offer.store_name,
     status: offer.status,
-    price: offer.price ?? offer.last_price,
+    price: offer.price && offer.price > 0 ? offer.price : offer.last_price,
     sellerName: typeof offer.metadata?.sellerName === "string" ? offer.metadata.sellerName : offer.store_name,
     officialRetailerSeller: typeof offer.metadata?.officialRetailerSeller === "boolean" ? offer.metadata.officialRetailerSeller : true,
     checkedAt: offer.last_checked_at
@@ -68,12 +73,12 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
           <p className="text-xs text-slate-400">Average available price</p>
-          <p className="mt-2 text-2xl font-black text-white">{currency(priceSummary.averageAvailablePrice)}</p>
+          <p className="mt-2 text-2xl font-black text-white">{optionalCurrency(priceSummary.averageAvailablePrice)}</p>
           <p className="mt-1 text-xs text-slate-500">Based on {priceSummary.qualifyingListingCount} in-stock listing{priceSummary.qualifyingListingCount === 1 ? "" : "s"}</p>
         </div>
         <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
           <p className="text-xs text-slate-400">Lowest current price</p>
-          <p className="mt-2 text-2xl font-black text-white">{currency(priceSummary.lowestCurrentPrice)}</p>
+          <p className="mt-2 text-2xl font-black text-white">{optionalCurrency(priceSummary.lowestCurrentPrice)}</p>
         </div>
         <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
           <p className="text-xs text-slate-400">Retailer listings</p>
@@ -109,7 +114,10 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
                     {offerStatus(offer)}
                   </span>
                 </div>
-                <p className="mt-5 text-2xl font-black text-white">{currency(offer.price ?? offer.last_price)}</p>
+                <p className="mt-5 text-2xl font-black text-white">{optionalCurrency(offer.price ?? offer.last_price)}</p>
+                {metadataText(offer, "shippingText") ? <p className="mt-2 text-sm text-slate-300">Shipping: {metadataText(offer, "shippingText")}</p> : null}
+                {metadataText(offer, "pickupText") ? <p className="mt-1 text-sm text-slate-300">Pickup: {metadataText(offer, "pickupText")}</p> : null}
+                {offer.availability_text ? <p className="mt-2 text-xs text-slate-500">{offer.availability_text}</p> : null}
                 <p className="mt-2 text-xs text-slate-500">
                   Last checked {offer.last_checked_at ? new Date(offer.last_checked_at).toLocaleString() : "not yet"}
                 </p>

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { BellOff, BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
 import { removeTrackedProduct, trackCatalogProduct, untrackCatalogProduct } from "@/app/(app)/watchlist/actions";
-import { currency } from "@/lib/profit";
+import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, TrackedProduct } from "@/lib/types";
 
 type SortMode = "name" | "store" | "status" | "price" | "checked";
@@ -20,6 +20,19 @@ function stockLabel(status: string) {
   if (status === "in_stock") return "In stock";
   if (status === "out_of_stock") return "Out of stock";
   return "Trackable";
+}
+
+function metadataText(offer: CatalogOffer, key: string) {
+  const value = offer.metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function fulfillmentText(offer: CatalogOffer) {
+  return [
+    metadataText(offer, "shippingText"),
+    metadataText(offer, "pickupText"),
+    offer.availability_text
+  ].filter(Boolean).join(" | ");
 }
 
 export function CatalogOfferPicker({
@@ -206,9 +219,10 @@ export function CatalogOfferPicker({
                     <span className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-[11px] text-slate-300">{stockLabel(offer.status)}</span>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-amber-200">{currency(offer.last_price ?? product?.msrp)}</p>
+                    <p className="text-sm font-semibold text-amber-200">{optionalCurrency(offer.last_price ?? offer.price ?? product?.msrp)}</p>
                     <span className="text-xs text-slate-500">{expandedOfferId === offer.id ? "Hide details" : "Show details"}</span>
                   </div>
+                  {fulfillmentText(offer) ? <p className="mt-2 line-clamp-1 text-xs text-slate-500">{fulfillmentText(offer)}</p> : null}
                 </div>
                 </button>
                 {expandedOfferId === offer.id ? (
@@ -216,8 +230,11 @@ export function CatalogOfferPicker({
                     <div className="grid gap-2 text-xs text-slate-300 sm:grid-cols-2">
                       <p><span className="text-slate-500">Retailer:</span> {offer.retailer ?? offer.store_name}</p>
                       <p><span className="text-slate-500">Status:</span> {offer.status.replaceAll("_", " ")}</p>
-                      <p><span className="text-slate-500">Price:</span> {currency(offer.last_price ?? offer.price ?? product?.msrp)}</p>
+                      <p><span className="text-slate-500">Price:</span> {optionalCurrency(offer.last_price ?? offer.price ?? product?.msrp)}</p>
                       <p><span className="text-slate-500">Checked:</span> {offer.last_checked_at ? new Date(offer.last_checked_at).toLocaleString() : "not yet"}</p>
+                      {metadataText(offer, "shippingText") ? <p><span className="text-slate-500">Shipping:</span> {metadataText(offer, "shippingText")}</p> : null}
+                      {metadataText(offer, "pickupText") ? <p><span className="text-slate-500">Pickup:</span> {metadataText(offer, "pickupText")}</p> : null}
+                      {offer.availability_text ? <p className="sm:col-span-2"><span className="text-slate-500">Availability:</span> {offer.availability_text}</p> : null}
                       <p className="sm:col-span-2"><span className="text-slate-500">Product:</span> {product?.title ?? product?.name ?? offer.title ?? "Catalog product"}</p>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">

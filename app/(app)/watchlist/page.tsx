@@ -4,9 +4,14 @@ import { CatalogOfferPicker } from "@/components/catalog-offer-picker";
 import { WatchlistGrid } from "@/components/watchlist-grid";
 import { isAdmin, requireProfile } from "@/lib/auth";
 import { ensureCatalogHasRows } from "@/lib/catalog/ensure-catalog";
-import { currency } from "@/lib/profit";
+import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, TrackedProduct } from "@/lib/types";
 import { addProduct, untrackCatalogProduct } from "./actions";
+
+function metadataText(offer: CatalogOffer, key: string) {
+  const value = offer.metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
 
 export default async function WatchlistPage() {
   const { supabase, user, profile } = await requireProfile();
@@ -105,7 +110,10 @@ export default async function WatchlistPage() {
                             <div className="flex items-start justify-between gap-3">
                               <div>
                                 <p className="text-sm font-semibold text-white">{offer.retailer ?? offer.store_name}</p>
-                                <p className="mt-1 text-xs text-slate-400">{offer.status.replaceAll("_", " ")} - {currency(offer.last_price ?? offer.price)}</p>
+                                <p className="mt-1 text-xs text-slate-400">{offer.status.replaceAll("_", " ")} - {optionalCurrency(offer.last_price ?? offer.price)}</p>
+                                {metadataText(offer, "shippingText") ? <p className="mt-1 text-[11px] text-slate-500">Shipping: {metadataText(offer, "shippingText")}</p> : null}
+                                {metadataText(offer, "pickupText") ? <p className="mt-1 text-[11px] text-slate-500">Pickup: {metadataText(offer, "pickupText")}</p> : null}
+                                {offer.availability_text ? <p className="mt-1 text-[11px] text-slate-500">{offer.availability_text}</p> : null}
                                 <p className="mt-1 text-[11px] text-slate-500">Checked {offer.last_checked_at ? new Date(offer.last_checked_at).toLocaleString() : "not yet"}</p>
                               </div>
                               <a href={offer.url} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center gap-1 rounded-lg border border-white/10 px-2 text-xs text-slate-200">

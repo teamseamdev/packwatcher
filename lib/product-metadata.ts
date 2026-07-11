@@ -47,8 +47,26 @@ function priceFromHtml(html: string) {
     metaContent(html, "product:price:amount") ??
     metaContent(html, "og:price:amount") ??
     metaContent(html, "twitter:data1");
-  const priceMatch = (metaPrice ?? html).replace(/,/g, "").match(/\$?\s?(\d{1,5}(?:\.\d{2})?)/);
-  return priceMatch ? Number(priceMatch[1]) : null;
+  const metaMatch = metaPrice?.replace(/,/g, "").match(/\$?\s?(\d{1,5}(?:\.\d{2})?)/);
+  const metaValue = metaMatch ? Number(metaMatch[1]) : null;
+  if (typeof metaValue === "number" && Number.isFinite(metaValue) && metaValue > 0) return metaValue;
+
+  const structuredPatterns = [
+    /"currentPrice"\s*:\s*\{[^}]*"price"\s*:\s*(\d{1,5}(?:\.\d{1,2})?)/i,
+    /"price"\s*:\s*"?(\d{1,5}(?:\.\d{1,2})?)"?\s*,\s*"priceCurrency"\s*:\s*"USD"/i,
+    /"priceCurrency"\s*:\s*"USD"\s*,\s*"price"\s*:\s*"?(\d{1,5}(?:\.\d{1,2})?)"?/i,
+    /"salePrice"\s*:\s*(\d{1,5}(?:\.\d{1,2})?)/i,
+    /"priceInfo"\s*:\s*\{[^}]*"linePrice"\s*:\s*"?\$?(\d{1,5}(?:\.\d{1,2})?)"?/i
+  ];
+
+  const compact = html.replace(/,/g, "").replace(/\s+/g, " ");
+  for (const pattern of structuredPatterns) {
+    const match = compact.match(pattern);
+    const value = match?.[1] ? Number(match[1]) : null;
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  }
+
+  return null;
 }
 
 function storeFromUrl(url: string) {

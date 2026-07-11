@@ -14,6 +14,11 @@ type ProviderResponseItem = {
   imageUrl?: string;
   image_url?: string;
   thumbnail?: string;
+  delivery?: string;
+  shipping?: string;
+  pickup?: string;
+  availability?: string;
+  extensions?: string[];
   sourceUrl?: string;
   source_url?: string;
   product_link?: string;
@@ -21,10 +26,21 @@ type ProviderResponseItem = {
 };
 
 function parsePrice(value: number | string | null | undefined) {
-  if (typeof value === "number") return value;
+  if (typeof value === "number") return Number.isFinite(value) && value > 0 ? value : null;
   if (!value) return null;
   const match = value.replace(/,/g, "").match(/(\d+(?:\.\d{2})?)/);
-  return match ? Number(match[1]) : null;
+  const parsed = match ? Number(match[1]) : null;
+  return typeof parsed === "number" && Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function textOrNull(value: unknown) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function joinedExtensions(item: ProviderResponseItem) {
+  return Array.isArray(item.extensions) ? item.extensions.filter(Boolean).join(" | ") : null;
 }
 
 export function createConfiguredShoppingSearchProvider(): ShoppingSearchProvider | null {
@@ -83,9 +99,12 @@ export function createConfiguredShoppingSearchProvider(): ShoppingSearchProvider
           title: item.title,
           retailer,
           productUrl,
-          price: item.extracted_price ?? parsePrice(item.price),
+          price: parsePrice(item.extracted_price) ?? parsePrice(item.price),
           sellerName: item.sellerName ?? item.seller_name ?? null,
           imageUrl: item.imageUrl ?? item.image_url ?? item.thumbnail ?? null,
+          availabilityText: textOrNull(item.availability) ?? joinedExtensions(item),
+          shippingText: textOrNull(item.delivery) ?? textOrNull(item.shipping),
+          pickupText: textOrNull(item.pickup),
           sourceUrl: item.sourceUrl ?? item.source_url ?? productUrl,
           retrievedAt,
           confidence: item.confidence ?? 0.6

@@ -23,6 +23,10 @@ const outOfStockPhrases = [
   "coming soon"
 ];
 
+function validPrice(value: number | null) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
 export async function fetchWithRetry(url: string, retries = 2) {
   return fetchPageHtml(url, retries);
 }
@@ -39,7 +43,7 @@ export function detectStockFromHtml(
   const outMatch = outPhrases.find((phrase) => normalized.includes(phrase));
   const inMatch = inPhrases.find((phrase) => normalized.includes(phrase));
   const priceMatch = normalized.match(/\$\s?(\d{1,5}(?:\.\d{2})?)/);
-  const price = priceMatch ? Number(priceMatch[1]) : null;
+  const price = validPrice(priceMatch ? Number(priceMatch[1]) : null);
 
   const schemaAvailability = availability ?? jsonAvailability;
   if (schemaAvailability) {
@@ -69,7 +73,7 @@ export async function genericCheck(input: StockCheckInput): Promise<StockCheckRe
 
   return {
     ...detected,
-    price: detected.price ?? metadata.price,
+    price: validPrice(detected.price) ?? validPrice(metadata.price),
     title: metadata.title,
     imageUrl: metadata.imageUrl,
     checkedAt: new Date().toISOString()

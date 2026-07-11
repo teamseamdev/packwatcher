@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useMemo, useState, useTransition } from "react";
 import { Bell, BellOff, ExternalLink, Trash2 } from "lucide-react";
 import { checkOwnProduct, removeTrackedProduct, toggleProductAlerts } from "@/app/(app)/watchlist/actions";
-import { currency } from "@/lib/profit";
+import { optionalCurrency } from "@/lib/profit";
 import type { StockStatus, TrackedProduct } from "@/lib/types";
 
 type StatusFilter = "all" | StockStatus;
@@ -95,7 +95,7 @@ export function WatchlistGrid({ products }: { products: TrackedProduct[] }) {
                 <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-slate-200">{product.status.replaceAll("_", " ")}</span>
               </div>
               <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                <div><p className="text-slate-500">Last price</p><p>{currency(product.last_price)}</p></div>
+                <div><p className="text-slate-500">Last price</p><p>{optionalCurrency(product.last_price)}</p></div>
                 <div><p className="text-slate-500">Last checked</p><p>{product.last_checked_at ? new Date(product.last_checked_at).toLocaleDateString() : "Never"}</p></div>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
