@@ -317,11 +317,3 @@ supabase/schema.sql
 
 
 
-1. Start the dev server.
-2. Go to `/clips`.
-3. Upload a short test video.
-4. Enter the product name, total cost, and pack count.
-5. Review extracted moments and manually enter card values.
-6. Export and download a vertical MP4.
-
-Catalog importers:
