@@ -6,7 +6,7 @@ import { isAdmin, requireProfile } from "@/lib/auth";
 import { ensureCatalogHasRows } from "@/lib/catalog/ensure-catalog";
 import { currency } from "@/lib/profit";
 import type { CatalogOffer, TrackedProduct } from "@/lib/types";
-import { addProduct } from "./actions";
+import { addProduct, untrackCatalogProduct } from "./actions";
 
 export default async function WatchlistPage() {
   const { supabase, user, profile } = await requireProfile();
@@ -94,6 +94,11 @@ export default async function WatchlistPage() {
                       <Link href={`/catalog/${related.id}`} className="inline-flex h-9 items-center rounded-lg border border-white/10 px-3 text-xs font-semibold text-white">
                         Product page
                       </Link>
+                      <form action={untrackCatalogProduct.bind(null, related.id)} className="inline-block">
+                        <button className="ml-2 inline-flex h-9 items-center rounded-lg border border-red-300/30 px-3 text-xs font-semibold text-red-100 hover:bg-red-400/10">
+                          Untrack
+                        </button>
+                      </form>
                       <div className="space-y-2">
                         {relatedOffers.length ? relatedOffers.map((offer) => (
                           <div key={offer.id} className="rounded-lg bg-slate-950/70 p-3">

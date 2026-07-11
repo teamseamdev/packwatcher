@@ -176,11 +176,40 @@ export async function trackCatalogProduct(productId: string) {
   revalidatePath(`/catalog/${productId}`);
 }
 
+export async function untrackCatalogProduct(productId: string) {
+  const { supabase, user } = await requireUser();
+  const { error } = await supabase
+    .from("product_alerts")
+    .delete()
+    .eq("user_id", user.id)
+    .eq("product_id", productId);
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/watchlist");
+  revalidatePath("/dashboard");
+  revalidatePath(`/catalog/${productId}`);
+}
+
 export async function checkOwnProduct(productId: string) {
   const { supabase, user } = await requireUser();
   const { data: product } = await supabase.from("tracked_products").select("id").eq("id", productId).eq("user_id", user.id).single();
   if (!product) throw new Error("Product not found.");
   await runProductCheck(productId, { enforceRateLimit: true });
+  revalidatePath("/watchlist");
+  revalidatePath("/dashboard");
+}
+
+export async function removeTrackedProduct(productId: string) {
+  const { supabase, user } = await requireUser();
+  const { error } = await supabase
+    .from("tracked_products")
+    .delete()
+    .eq("id", productId)
+    .eq("user_id", user.id);
+
+  if (error) throw new Error(error.message);
+
   revalidatePath("/watchlist");
   revalidatePath("/dashboard");
 }

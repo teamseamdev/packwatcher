@@ -2,8 +2,8 @@
 
 import Image from "next/image";
 import { useMemo, useState, useTransition } from "react";
-import { Bell, BellOff, ExternalLink } from "lucide-react";
-import { checkOwnProduct, toggleProductAlerts } from "@/app/(app)/watchlist/actions";
+import { Bell, BellOff, ExternalLink, Trash2 } from "lucide-react";
+import { checkOwnProduct, removeTrackedProduct, toggleProductAlerts } from "@/app/(app)/watchlist/actions";
 import { currency } from "@/lib/profit";
 import type { StockStatus, TrackedProduct } from "@/lib/types";
 
@@ -17,6 +17,7 @@ export function WatchlistGrid({ products }: { products: TrackedProduct[] }) {
   const [alerts, setAlerts] = useState<AlertFilter>("all");
   const [sort, setSort] = useState<SortMode>("newest");
   const [isPending, startTransition] = useTransition();
+  const [message, setMessage] = useState("");
 
   const filtered = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -77,6 +78,7 @@ export function WatchlistGrid({ products }: { products: TrackedProduct[] }) {
         </div>
         <p className="mt-3 text-xs text-slate-500">{filtered.length} of {products.length} tracked products shown</p>
       </div>
+      {message ? <p className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">{message}</p> : null}
 
       <div className="grid max-h-[760px] gap-4 overflow-auto pr-1 md:grid-cols-2">
         {filtered.length ? filtered.map((product) => (
@@ -112,6 +114,25 @@ export function WatchlistGrid({ products }: { products: TrackedProduct[] }) {
                   <ExternalLink className="h-4 w-4" />
                   Open store
                 </a>
+                <button
+                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-red-300/30 px-4 text-sm text-red-100 disabled:opacity-60"
+                  disabled={isPending}
+                  onClick={() => {
+                    if (!window.confirm(`Untrack ${product.name}?`)) return;
+                    startTransition(async () => {
+                      setMessage("");
+                      try {
+                        await removeTrackedProduct(product.id);
+                        setMessage("Product removed from your tracked URLs.");
+                      } catch (error) {
+                        setMessage(error instanceof Error ? error.message : "Could not untrack this product.");
+                      }
+                    });
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Untrack
+                </button>
               </div>
             </div>
           </article>

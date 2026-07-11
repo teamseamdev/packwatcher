@@ -40,16 +40,23 @@ export function createConfiguredShoppingSearchProvider(): ShoppingSearchProvider
 
   return {
     name: providerName,
-    async searchProducts(query: string): Promise<ShoppingSearchResult[]> {
+    async searchProducts(query: string, options?: { postalCode?: string | null }): Promise<ShoppingSearchResult[]> {
       const url = new URL(endpoint);
       url.searchParams.set("q", query);
+      const postalCode = options?.postalCode?.trim();
       if (providerName === "serpapi") {
         url.searchParams.set("engine", "google_shopping");
         url.searchParams.set("api_key", apiKey);
+        url.searchParams.set("gl", "us");
+        url.searchParams.set("hl", "en");
+        if (postalCode) url.searchParams.set("location", postalCode);
       }
       if (providerName === "searchapi") {
         url.searchParams.set("engine", "google_shopping");
         url.searchParams.set("api_key", apiKey);
+        url.searchParams.set("gl", "us");
+        url.searchParams.set("hl", "en");
+        if (postalCode) url.searchParams.set("location", postalCode);
       }
 
       const response = await fetch(url, {

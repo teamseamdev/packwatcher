@@ -4,8 +4,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
-import { trackCatalogOffer, trackCatalogProduct } from "@/app/(app)/watchlist/actions";
+import { BellOff, BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
+import { trackCatalogOffer, trackCatalogProduct, untrackCatalogProduct } from "@/app/(app)/watchlist/actions";
 import { currency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, StockStatus } from "@/lib/types";
 
@@ -72,6 +72,7 @@ function featuredScore(group: CatalogProductGroup) {
 export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGroup[]; isAdmin: boolean }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
+  const [postalCode, setPostalCode] = useState("");
   const [filter, setFilter] = useState<CatalogFilter>("all");
   const [expandedId, setExpandedId] = useState<string | null>(groups[0]?.product.id ?? null);
   const [message, setMessage] = useState("");
@@ -133,6 +134,18 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
     });
   }
 
+  function untrackProduct(productId: string) {
+    startTransition(async () => {
+      setMessage("");
+      try {
+        await untrackCatalogProduct(productId);
+        setMessage("Tracking removed for this product.");
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Could not untrack this product.");
+      }
+    });
+  }
+
   function discoverRetailers() {
     const trimmed = query.trim();
     if (trimmed.length < 3) {
@@ -146,7 +159,7 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
         const response = await fetch("/api/catalog/discover", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ query: trimmed })
+          body: JSON.stringify({ query: trimmed, postalCode: postalCode.trim() || undefined })
         });
         const result = await response.json() as {
           ok?: boolean;
@@ -208,7 +221,7 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
       </div>
 
       <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
-        <div className="grid gap-3 lg:grid-cols-[1fr_220px_190px]">
+        <div className="grid gap-3 lg:grid-cols-[1fr_130px_220px_190px]">
           <label className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
             <input
@@ -218,6 +231,13 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
               className="h-11 w-full rounded-lg border border-white/10 bg-slate-950/70 pl-9 pr-3 text-sm outline-none focus:border-amber-300"
             />
           </label>
+          <input
+            value={postalCode}
+            onChange={(event) => setPostalCode(event.target.value)}
+            inputMode="numeric"
+            placeholder="ZIP optional"
+            className="h-11 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300"
+          />
           <select value={filter} onChange={(event) => setFilter(event.target.value as CatalogFilter)} className="h-11 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none">
             <option value="all">All products</option>
             <option value="in_stock">In stock</option>
@@ -239,7 +259,7 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
           </button>
         </div>
         <p className="mt-3 text-xs text-slate-500">
-          {filteredGroups.length} of {groups.length} catalog products shown. Retailer search saves listings in the background and refreshes this view.
+          {filteredGroups.length} of {groups.length} catalog products shown. Add a ZIP code to bias retailer discovery toward local results.
         </p>
       </div>
 
@@ -282,14 +302,25 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
                   </div>
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    disabled={alreadyTracked || isPending}
-                    onClick={() => trackProduct(group.product.id)}
-                    className="inline-flex h-10 items-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <BellPlus className="h-4 w-4" />
-                    {alreadyTracked ? "Tracking" : status === "in_stock" ? "Track this" : "Notify me"}
-                  </button>
+                  {group.isProductTracked ? (
+                    <button
+                      disabled={isPending}
+                      onClick={() => untrackProduct(group.product.id)}
+                      className="inline-flex h-10 items-center gap-2 rounded-lg border border-red-300/30 px-4 text-sm font-semibold text-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <BellOff className="h-4 w-4" />
+                      Untrack
+                    </button>
+                  ) : (
+                    <button
+                      disabled={isPending}
+                      onClick={() => trackProduct(group.product.id)}
+                      className="inline-flex h-10 items-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <BellPlus className="h-4 w-4" />
+                      {alreadyTracked ? "Tracking URL" : status === "in_stock" ? "Track this" : "Notify me"}
+                    </button>
+                  )}
                   <button onClick={() => setExpandedId(isExpanded ? null : group.product.id)} className="h-10 rounded-lg border border-white/10 px-4 text-sm font-semibold text-slate-200">
                     {isExpanded ? "Hide offers" : "View offers"}
                   </button>

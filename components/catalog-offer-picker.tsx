@@ -4,8 +4,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
-import { trackCatalogProduct } from "@/app/(app)/watchlist/actions";
+import { BellOff, BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
+import { removeTrackedProduct, trackCatalogProduct, untrackCatalogProduct } from "@/app/(app)/watchlist/actions";
 import { currency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, TrackedProduct } from "@/lib/types";
 
@@ -35,11 +35,11 @@ export function CatalogOfferPicker({
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
+  const [postalCode, setPostalCode] = useState("");
   const [sort, setSort] = useState<SortMode>("name");
   const [message, setMessage] = useState("");
   const [expandedOfferId, setExpandedOfferId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const trackedUrls = useMemo(() => new Set(trackedProducts.map((product) => product.url)), [trackedProducts]);
   const trackedCatalogProducts = useMemo(() => new Set(trackedProductIds), [trackedProductIds]);
 
   const filtered = useMemo(() => {
@@ -74,6 +74,30 @@ export function CatalogOfferPicker({
     });
   }
 
+  function untrack(productId: string) {
+    startTransition(async () => {
+      setMessage("");
+      try {
+        await untrackCatalogProduct(productId);
+        setMessage("Tracking removed for this product.");
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Could not untrack this product.");
+      }
+    });
+  }
+
+  function untrackUrl(productId: string) {
+    startTransition(async () => {
+      setMessage("");
+      try {
+        await removeTrackedProduct(productId);
+        setMessage("Tracked retailer URL removed.");
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Could not untrack this retailer URL.");
+      }
+    });
+  }
+
   function discoverRetailers() {
     const trimmed = query.trim();
     if (trimmed.length < 3) {
@@ -87,7 +111,7 @@ export function CatalogOfferPicker({
         const response = await fetch("/api/catalog/discover", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ query: trimmed })
+          body: JSON.stringify({ query: trimmed, postalCode: postalCode.trim() || undefined })
         });
         const result = await response.json() as { offersImported?: number; error?: string; errors?: string[]; discoveryErrors?: string[] };
         if (!response.ok) throw new Error(result.error ?? "Retailer discovery failed.");
@@ -115,7 +139,7 @@ export function CatalogOfferPicker({
         </p>
       </div>
 
-      <div className="mt-5 grid gap-3 xl:grid-cols-[1fr_140px_180px]">
+      <div className="mt-5 grid gap-3 xl:grid-cols-[1fr_120px_140px_180px]">
         <label className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <input
@@ -125,6 +149,13 @@ export function CatalogOfferPicker({
             className="h-10 w-full rounded-lg border border-white/10 bg-slate-950/70 pl-9 pr-3 text-sm outline-none focus:border-amber-300"
           />
         </label>
+        <input
+          value={postalCode}
+          onChange={(event) => setPostalCode(event.target.value)}
+          inputMode="numeric"
+          placeholder="ZIP optional"
+          className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300"
+        />
         <select value={sort} onChange={(event) => setSort(event.target.value as SortMode)} className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none">
           <option value="name">Name</option>
           <option value="store">Store</option>
@@ -143,14 +174,18 @@ export function CatalogOfferPicker({
         </button>
       </div>
 
-      <p className="mt-3 text-xs text-slate-500">{filtered.length} of {offers.length} catalog offers shown</p>
+      <p className="mt-3 text-xs text-slate-500">
+        {filtered.length} of {offers.length} catalog offers shown. Add a ZIP code to bias Google Shopping discovery toward local retailers; retailer stock still needs verification.
+      </p>
       {message ? <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">{message}</p> : null}
 
       <div className="mt-4 grid max-h-[680px] gap-3 overflow-auto pr-1">
         {offers.length ? (
           filtered.length ? filtered.map((offer) => {
             const product = productForOffer(offer);
-            const alreadyTracked = trackedUrls.has(offer.url) || (product ? trackedCatalogProducts.has(product.id) : false);
+            const trackedUrlProduct = trackedProducts.find((trackedProduct) => trackedProduct.url === offer.url);
+            const isUrlTracked = Boolean(trackedUrlProduct);
+            const isCatalogTracked = product ? trackedCatalogProducts.has(product.id) : false;
 
             return (
               <article key={offer.id} className="rounded-lg border border-white/10 bg-slate-950/60 p-3">
@@ -186,14 +221,34 @@ export function CatalogOfferPicker({
                       <p className="sm:col-span-2"><span className="text-slate-500">Product:</span> {product?.title ?? product?.name ?? offer.title ?? "Catalog product"}</p>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        disabled={alreadyTracked || isPending}
-                        onClick={() => product ? track(product.id) : undefined}
-                        className="inline-flex h-9 items-center gap-2 rounded-lg bg-amber-300 px-3 text-xs font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <BellPlus className="h-4 w-4" />
-                        {alreadyTracked ? "Tracked" : offer.status === "in_stock" ? "Track this" : "Notify me"}
-                      </button>
+                      {isCatalogTracked && product ? (
+                        <button
+                          disabled={isPending}
+                          onClick={() => untrack(product.id)}
+                          className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-300/30 px-3 text-xs font-semibold text-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <BellOff className="h-4 w-4" />
+                          Untrack
+                        </button>
+                      ) : isUrlTracked && trackedUrlProduct ? (
+                        <button
+                          disabled={isPending}
+                          onClick={() => untrackUrl(trackedUrlProduct.id)}
+                          className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-300/30 px-3 text-xs font-semibold text-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <BellOff className="h-4 w-4" />
+                          Untrack URL
+                        </button>
+                      ) : (
+                        <button
+                          disabled={isPending || !product}
+                          onClick={() => product ? track(product.id) : undefined}
+                          className="inline-flex h-9 items-center gap-2 rounded-lg bg-amber-300 px-3 text-xs font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <BellPlus className="h-4 w-4" />
+                          {offer.status === "in_stock" ? "Track this" : "Notify me"}
+                        </button>
+                      )}
                       {product ? (
                         <Link href={`/catalog/${product.id}`} className="inline-flex h-9 items-center rounded-lg border border-white/10 px-3 text-xs font-semibold text-white">
                           Product page

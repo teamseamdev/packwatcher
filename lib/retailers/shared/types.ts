@@ -102,5 +102,5 @@ export type ShoppingSearchResult = {
 
 export type ShoppingSearchProvider = {
   name: string;
-  searchProducts(query: string): Promise<ShoppingSearchResult[]>;
+  searchProducts(query: string, options?: { postalCode?: string | null }): Promise<ShoppingSearchResult[]>;
 };

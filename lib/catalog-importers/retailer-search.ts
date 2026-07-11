@@ -116,7 +116,7 @@ async function buildOffer(source: RetailerSearchSource, url: string): Promise<Im
   };
 }
 
-export async function importPokemonFromRetailerSearch(options: { perRetailerLimit?: number; sourceKeys?: string[]; query?: string } = {}) {
+export async function importPokemonFromRetailerSearch(options: { perRetailerLimit?: number; sourceKeys?: string[]; query?: string; postalCode?: string | null } = {}) {
   const perRetailerLimit = options.perRetailerLimit ?? Number(process.env.RETAILER_SEARCH_LIMIT ?? 12);
   const offers: ImportedCatalogOffer[] = [];
   const errors: string[] = [];
@@ -125,7 +125,7 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
   if (shoppingSearch && (!options.sourceKeys || options.sourceKeys.includes("shopping-search"))) {
     const query = options.query ?? process.env.SHOPPING_SEARCH_QUERY ?? "pokemon sealed product";
     try {
-      const results = (await shoppingSearch.searchProducts(query)).slice(0, perRetailerLimit);
+      const results = (await shoppingSearch.searchProducts(query, { postalCode: options.postalCode })).slice(0, perRetailerLimit);
       for (const result of results) {
         const retailer = result.retailer || "Retailer";
         const id = sourceProductId(result.productUrl);
@@ -156,7 +156,9 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
             sourceUrl: result.sourceUrl,
             retrievedAt: result.retrievedAt,
             sourceConfidence: result.confidence,
-            verifiedByRetailerConnector: Boolean(check)
+            verifiedByRetailerConnector: Boolean(check),
+            postalCode: options.postalCode ?? null,
+            localSearchRequested: Boolean(options.postalCode)
           }
         });
       }
@@ -169,8 +171,9 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
     if (!isEnabled(source, options.sourceKeys)) continue;
 
     const query = options.query ?? process.env[source.queryEnv] ?? source.defaultQuery;
+    const localizedQuery = options.postalCode ? `${query} near ${options.postalCode}` : query;
     try {
-      const html = await fetchPageHtml(source.searchUrl(query), 1);
+      const html = await fetchPageHtml(source.searchUrl(localizedQuery), 1);
       const urls = extractProductUrls(html, source, perRetailerLimit);
 
       for (const url of urls) {
