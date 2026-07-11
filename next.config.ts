@@ -9,7 +9,6 @@ const nextConfig: NextConfig = {
   outputFileTracingExcludes: {
     "*": [
       "./.git/**",
-      "./.next/**",
       "./.vercel/**",
       "./.local-clips/**",
       "./tools/**",
