@@ -32,36 +32,53 @@ export default async function WatchlistPage() {
   const catalogOffers = (offers ?? []) as CatalogOffer[];
 
   return (
-    <div className="space-y-6">
-      <div>
-        <p className="text-sm font-semibold text-amber-200">Watchlist</p>
-        <h1 className="mt-1 text-3xl font-black text-white">Tracked products and catalog</h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-          Browse the catalog, search retailer listings, and manage the products you are tracking for restock alerts.
-        </p>
+    <div className="space-y-4">
+      <header className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-200">Watchlist</p>
+            <h1 className="mt-1 text-2xl font-black text-white">Find and track sealed Pokemon</h1>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <a href="#tracked" className="rounded-lg bg-slate-950/70 px-3 py-2 transition hover:bg-slate-900">
+              <p className="text-lg font-black text-white">{catalogAlertCount + trackedUrlCount}</p>
+              <p className="text-[11px] text-slate-500">Tracked</p>
+            </a>
+            <a href="#tracked" className="rounded-lg bg-slate-950/70 px-3 py-2 transition hover:bg-slate-900">
+              <p className="text-lg font-black text-white">{inStockTrackedCount}</p>
+              <p className="text-[11px] text-slate-500">In stock</p>
+            </a>
+            <a href="#add-url" className="rounded-lg bg-slate-950/70 px-3 py-2 transition hover:bg-slate-900">
+              <p className="text-lg font-black text-white">{trackedUrlCount}</p>
+              <p className="text-[11px] text-slate-500">URLs</p>
+            </a>
+          </div>
+        </div>
+      </header>
+
+      <div id="catalog">
+        <CatalogOfferPicker
+          offers={catalogOffers}
+          trackedProducts={trackedProducts}
+          trackedProductIds={(productAlerts ?? []).map((alert) => alert.product_id)}
+          isAdmin={isAdmin(profile)}
+        />
       </div>
 
-      <section className="grid gap-3 sm:grid-cols-3">
-        <a href="#tracked" className="rounded-lg border border-white/10 bg-white/[0.04] p-4 transition hover:border-amber-300/30">
-          <p className="text-sm text-slate-400">Tracked items</p>
-          <p className="mt-2 text-3xl font-black text-white">{catalogAlertCount + trackedUrlCount}</p>
-        </a>
-        <a href="#tracked" className="rounded-lg border border-white/10 bg-white/[0.04] p-4 transition hover:border-amber-300/30">
-          <p className="text-sm text-slate-400">Tracked URLs</p>
-          <p className="mt-2 text-3xl font-black text-white">{trackedUrlCount}</p>
-        </a>
-        <a href="#catalog" className="rounded-lg border border-white/10 bg-white/[0.04] p-4 transition hover:border-amber-300/30">
-          <p className="text-sm text-slate-400">In stock tracked</p>
-          <p className="mt-2 text-3xl font-black text-white">{inStockTrackedCount}</p>
-        </a>
-      </section>
+      <section id="tracked" className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+        <details open>
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-black text-white">Tracked products</h2>
+              <p className="text-sm text-slate-400">{catalogAlertCount + trackedUrlCount} item{catalogAlertCount + trackedUrlCount === 1 ? "" : "s"} being watched</p>
+            </div>
+            <span className="rounded-full bg-amber-300 px-3 py-1 text-xs font-semibold text-slate-950">Manage</span>
+          </summary>
 
-      <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
-        <div className="space-y-6">
-          <section className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
-            <h2 className="text-xl font-black text-white">Tracked catalog alerts</h2>
-            <p className="mt-2 text-sm text-slate-400">{catalogAlertCount} canonical product{catalogAlertCount === 1 ? "" : "s"} tracked.</p>
-            <div className="mt-4 max-h-96 space-y-3 overflow-auto pr-1">
+          <div className="mt-4 grid gap-4 xl:grid-cols-[360px_1fr]">
+            <div>
+              <h3 className="text-sm font-semibold text-amber-200">Catalog alerts</h3>
+              <div className="mt-3 max-h-[520px] space-y-3 overflow-auto pr-1">
               {productAlerts?.length ? productAlerts.map((alert) => {
                 const related = alert.catalog_products as unknown as {
                   id: string;
@@ -134,51 +151,55 @@ export default async function WatchlistPage() {
                   No catalog products tracked yet. Choose a product from the catalog to start alerts.
                 </p>
               )}
+              </div>
             </div>
-          </section>
 
-        <section className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
-          <h2 className="text-2xl font-black text-white">Add by URL</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-400">Use this when the catalog does not have the product yet. PackWatcher will pull safe public metadata when available.</p>
-          <form action={addProduct} className="mt-5 space-y-3">
-            {[
-              ["url", "Product URL"],
-              ["name", "Product name optional"],
-              ["store_name", "Store name optional"],
-              ["category", "Category"],
-              ["set_name", "Set name"],
-              ["image_url", "Product image URL optional"],
-              ["msrp", "MSRP"],
-              ["target_price", "Target price"]
-            ].map(([name, label]) => (
-              <input key={name} name={name} placeholder={label} className="h-11 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm outline-none focus:border-amber-300" />
-            ))}
+            <div>
+              <h3 className="text-sm font-semibold text-amber-200">Tracked URLs</h3>
+              <div className="mt-3">
+                <WatchlistGrid products={trackedProducts} />
+              </div>
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <section id="add-url" className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+        <details>
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-black text-white">Add a retailer URL</h2>
+              <p className="text-sm text-slate-400">Use this only when search cannot find the product.</p>
+            </div>
+            <span className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-200">Manual</span>
+          </summary>
+
+          <form action={addProduct} className="mt-4 space-y-3">
+            <input name="url" placeholder="Product URL" className="h-11 w-full rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300" />
+            <details className="rounded-lg border border-white/10 bg-slate-950/40 p-3">
+              <summary className="cursor-pointer list-none text-sm font-semibold text-slate-200">Optional details</summary>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {[
+                  ["name", "Product name"],
+                  ["store_name", "Store name"],
+                  ["category", "Category"],
+                  ["set_name", "Set name"],
+                  ["image_url", "Image URL"],
+                  ["msrp", "MSRP"],
+                  ["target_price", "Target price"]
+                ].map(([name, label]) => (
+                  <input key={name} name={name} placeholder={label} className="h-10 rounded-lg border border-white/10 bg-white/5 px-3 text-sm outline-none focus:border-amber-300" />
+                ))}
+              </div>
+              <textarea name="notes" placeholder="Notes" className="mt-3 min-h-20 w-full rounded-lg border border-white/10 bg-white/5 p-3 text-sm outline-none focus:border-amber-300" />
+            </details>
             <label className="flex items-center gap-3 text-sm text-slate-300">
               <input name="alerts_enabled" value="true" type="checkbox" defaultChecked className="h-4 w-4" />
               Alerts enabled
             </label>
-            <textarea name="notes" placeholder="Notes" className="min-h-24 w-full rounded-lg border border-white/10 bg-white/5 p-3 text-sm outline-none focus:border-amber-300" />
             <button className="h-11 w-full rounded-lg bg-amber-300 font-semibold text-slate-950">Add to watchlist</button>
           </form>
-        </section>
-        </div>
-
-        <div id="catalog">
-          <CatalogOfferPicker
-            offers={catalogOffers}
-            trackedProducts={trackedProducts}
-            trackedProductIds={(productAlerts ?? []).map((alert) => alert.product_id)}
-            isAdmin={isAdmin(profile)}
-          />
-        </div>
-      </div>
-
-      <section id="tracked" className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
-        <div className="mb-4">
-          <p className="text-sm font-semibold text-amber-200">Tracked URLs</p>
-          <h2 className="mt-1 text-2xl font-black text-white">Products added by URL</h2>
-        </div>
-        <WatchlistGrid products={trackedProducts} />
+        </details>
       </section>
     </div>
   );

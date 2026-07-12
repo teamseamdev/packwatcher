@@ -151,22 +151,22 @@ export function CatalogOfferPicker({
   }
 
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
-      <div>
-        <p className="text-sm font-semibold text-amber-200">Catalog</p>
-        <h2 className="mt-1 text-2xl font-black text-white">Track without a URL</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-400">
-          Browse every catalog offer currently available. Search narrows this list instead of starting from a blank state.
-        </p>
+    <section className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-amber-200">Discover</p>
+          <h2 className="mt-1 text-xl font-black text-white">Search Pokemon products</h2>
+        </div>
+        <p className="text-xs text-slate-500">{filtered.length} shown</p>
       </div>
 
-      <div className="mt-5 grid gap-3 xl:grid-cols-[1fr_120px_140px_180px]">
-        <label className="relative">
+      <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-[1fr_120px_140px_180px]">
+        <label className="relative col-span-2 lg:col-span-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search Pokemon products"
+            placeholder="Search set, box, pack..."
             className="h-10 w-full rounded-lg border border-white/10 bg-slate-950/70 pl-9 pr-3 text-sm outline-none focus:border-amber-300"
           />
         </label>
@@ -174,7 +174,7 @@ export function CatalogOfferPicker({
           value={postalCode}
           onChange={(event) => setPostalCode(event.target.value)}
           inputMode="numeric"
-          placeholder="ZIP optional"
+          placeholder="ZIP"
           className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300"
         />
         <select value={sort} onChange={(event) => setSort(event.target.value as SortMode)} className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none">
@@ -188,19 +188,17 @@ export function CatalogOfferPicker({
           type="button"
           disabled={isPending || query.trim().length < 3}
           onClick={discoverRetailers}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+          className="col-span-2 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50 lg:col-span-1"
         >
           {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageSearch className="h-4 w-4" />}
           Search retailers
         </button>
       </div>
 
-      <p className="mt-3 text-xs text-slate-500">
-        {filtered.length} of {offers.length} catalog offers shown. Add a ZIP code to bias Google Shopping discovery toward local retailers; retailer stock still needs verification.
-      </p>
+      <p className="mt-2 text-xs text-slate-500">Optional ZIP biases local results. Retailer stock still needs confirmation.</p>
       {message ? <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">{message}</p> : null}
 
-      <div className="mt-4 grid max-h-[680px] gap-3 overflow-auto pr-1">
+      <div className="mt-3 grid max-h-[64vh] gap-2 overflow-auto pr-1">
         {offers.length ? (
           filtered.length ? filtered.map((offer) => {
             const product = productForOffer(offer);
@@ -209,7 +207,7 @@ export function CatalogOfferPicker({
             const isCatalogTracked = product ? trackedCatalogProducts.has(product.id) : false;
 
             return (
-              <article key={offer.id} className="rounded-lg border border-white/10 bg-slate-950/60 p-3">
+              <article key={offer.id} className="rounded-lg border border-white/10 bg-slate-950/60 p-3 transition hover:border-amber-300/30">
                 <button
                   type="button"
                   onClick={() => setExpandedOfferId(expandedOfferId === offer.id ? null : offer.id)}

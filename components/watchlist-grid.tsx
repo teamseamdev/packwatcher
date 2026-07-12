@@ -48,9 +48,12 @@ export function WatchlistGrid({ products }: { products: TrackedProduct[] }) {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
-        <div className="grid gap-3 md:grid-cols-[1fr_150px_150px_150px]">
+    <div className="space-y-3">
+      <details className="rounded-lg border border-white/10 bg-slate-950/50 p-3">
+        <summary className="cursor-pointer list-none text-sm font-semibold text-slate-200">
+          Filters <span className="ml-2 text-xs font-normal text-slate-500">{filtered.length} of {products.length}</span>
+        </summary>
+        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_140px_140px_140px]">
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -76,11 +79,10 @@ export function WatchlistGrid({ products }: { products: TrackedProduct[] }) {
             <option value="checked">Last checked</option>
           </select>
         </div>
-        <p className="mt-3 text-xs text-slate-500">{filtered.length} of {products.length} tracked products shown</p>
-      </div>
+      </details>
       {message ? <p className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">{message}</p> : null}
 
-      <div className="grid max-h-[760px] gap-4 overflow-auto pr-1 md:grid-cols-2">
+      <div className="grid max-h-[520px] gap-3 overflow-auto pr-1 md:grid-cols-2">
         {filtered.length ? filtered.map((product) => (
           <article key={product.id} className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
             <div className="relative aspect-[16/10] bg-slate-900">
