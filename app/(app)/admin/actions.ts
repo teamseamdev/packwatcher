@@ -11,8 +11,10 @@ import { syncAvailableCatalogs } from "@/lib/catalog-importers/sync-all";
 import { importPokemonSealedFromTcgCsv } from "@/lib/catalog-importers/tcgcsv";
 import { upsertImportedCatalog, upsertImportedOffers } from "@/lib/catalog-importers/upsert";
 import { fetchProductMetadata } from "@/lib/product-metadata";
+import { sendPushToUser } from "@/lib/push";
 import { getAdapter } from "@/lib/stock-checkers";
 import { runProductCheck } from "@/lib/stock-checkers/run-check";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const CatalogOfferSchema = z.object({
   name: z.string().min(1),
@@ -26,6 +28,18 @@ const CatalogOfferSchema = z.object({
   last_price: z.coerce.number().optional()
 });
 
+const UserPlanSchema = z.object({
+  user_id: z.string().uuid(),
+  plan: z.enum(["free", "pro", "admin"])
+});
+
+const TestNotificationSchema = z.object({
+  user_id: z.string().min(1),
+  title: z.string().trim().min(1).max(120),
+  message: z.string().trim().min(1).max(500),
+  send_push: z.coerce.boolean().optional()
+});
+
 export async function adminCheckProduct(productId: string) {
   const { profile } = await requireProfile();
   if (!isAdmin(profile)) throw new Error("Admin access required.");
@@ -33,12 +47,73 @@ export async function adminCheckProduct(productId: string) {
   revalidatePath("/admin");
 }
 
-export async function promoteAdmin(formData: FormData) {
+export async function updateUserPlan(formData: FormData) {
+  const { supabase, profile, user } = await requireProfile();
+  if (!isAdmin(profile)) throw new Error("Admin access required.");
+  const parsed = UserPlanSchema.parse(Object.fromEntries(formData));
+
+  if (parsed.user_id === user.id && parsed.plan !== "admin") {
+    throw new Error("You cannot remove your own admin access from this panel.");
+  }
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({ plan: parsed.plan })
+    .eq("id", parsed.user_id);
+
+  if (error) throw new Error(error.message);
+
+  const admin = createAdminClient();
+  const { error: billingError } = await admin
+    .from("billing_status")
+    .upsert({
+      user_id: parsed.user_id,
+      plan: parsed.plan,
+      status: parsed.plan === "free" ? "inactive" : "active"
+    }, { onConflict: "user_id" });
+
+  if (billingError) throw new Error(billingError.message);
+
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
+  revalidatePath("/account");
+}
+
+export async function sendAdminTestNotification(formData: FormData) {
   const { supabase, profile } = await requireProfile();
   if (!isAdmin(profile)) throw new Error("Admin access required.");
-  const userId = String(formData.get("user_id") ?? "");
-  await supabase.from("profiles").update({ plan: "admin" }).eq("id", userId);
+  const parsed = TestNotificationSchema.parse(Object.fromEntries(formData));
+
+  const { data: recipients } = parsed.user_id === "all"
+    ? await supabase.from("profiles").select("id").order("created_at", { ascending: false }).limit(100)
+    : await supabase.from("profiles").select("id").eq("id", parsed.user_id).limit(1);
+
+  const recipientIds = (recipients ?? []).map((recipient) => recipient.id as string);
+  if (!recipientIds.length) throw new Error("No notification recipients found.");
+
+  const rows = recipientIds.map((userId) => ({
+    user_id: userId,
+    tracked_product_id: null,
+    type: "admin_test",
+    title: parsed.title,
+    message: parsed.message
+  }));
+
+  const { error } = await supabase.from("notifications").insert(rows);
+  if (error) throw new Error(error.message);
+
+  if (parsed.send_push) {
+    for (const userId of recipientIds) {
+      await sendPushToUser(userId, {
+        title: parsed.title,
+        body: parsed.message,
+        url: "/alerts"
+      });
+    }
+  }
+
   revalidatePath("/admin");
+  revalidatePath("/alerts");
 }
 
 export async function addCatalogOffer(formData: FormData) {

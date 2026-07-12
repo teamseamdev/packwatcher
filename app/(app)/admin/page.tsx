@@ -2,7 +2,10 @@ import { redirect } from "next/navigation";
 import { AdminSyncPanel } from "@/components/admin-sync-panel";
 import { StatCard } from "@/components/stat-card";
 import { isAdmin, requireProfile } from "@/lib/auth";
-import { addCatalogOffer, adminCheckProduct, approveProductMatch, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, promoteAdmin, rejectProductMatch } from "./actions";
+import { addCatalogOffer, adminCheckProduct, approveProductMatch, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, rejectProductMatch, sendAdminTestNotification, updateUserPlan } from "./actions";
+
+const panelClass = "rounded-lg border border-white/10 bg-white/[0.04] p-5";
+const scrollPanelClass = `${panelClass} max-h-[680px] overflow-y-auto overscroll-contain pr-4`;
 
 export default async function AdminPage() {
   const { supabase, profile } = await requireProfile();
@@ -28,7 +31,7 @@ export default async function AdminPage() {
     supabase.from("stock_checks").select("*").order("checked_at", { ascending: false }).limit(10),
     supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(10),
     supabase.from("tracked_products").select("id,name,store_name,status,last_checked_at").order("created_at", { ascending: false }).limit(10),
-    supabase.from("profiles").select("id,email,plan,created_at").order("created_at", { ascending: false }).limit(10),
+    supabase.from("profiles").select("id,email,plan,created_at").order("created_at", { ascending: false }).limit(50),
     supabase.from("retailer_connector_health").select("*").order("updated_at", { ascending: false }).limit(12),
     supabase.from("retail_job_runs").select("*").order("started_at", { ascending: false }).limit(10),
     supabase.from("product_match_reviews").select("*").eq("status", "pending").order("created_at", { ascending: false }).limit(10)
@@ -51,7 +54,7 @@ export default async function AdminPage() {
         <StatCard title="Failed checks" value={failedChecks} />
       </section>
       <section className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+        <div className={scrollPanelClass}>
           <h2 className="font-bold text-white">Catalog importers</h2>
           <div className="mt-4 grid gap-3">
             <AdminSyncPanel />
@@ -95,7 +98,7 @@ export default async function AdminPage() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+        <div className={scrollPanelClass}>
           <h2 className="font-bold text-white">Add catalog offer</h2>
           <form action={addCatalogOffer} className="mt-4 grid gap-3">
             {[
@@ -115,7 +118,7 @@ export default async function AdminPage() {
           </form>
         </div>
 
-        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+        <div className={scrollPanelClass}>
           <h2 className="font-bold text-white">Trigger checks</h2>
           <div className="mt-4 space-y-3">
             {products?.map((product) => (
@@ -132,30 +135,55 @@ export default async function AdminPage() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+        <div className={scrollPanelClass}>
           <h2 className="font-bold text-white">Manage users</h2>
-          <form action={promoteAdmin} className="mt-4 flex gap-2">
-            <input name="user_id" placeholder="User ID" className="h-10 min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-3 text-sm" />
-            <button className="h-10 rounded-lg bg-white px-3 text-sm font-semibold text-slate-950">Promote</button>
-          </form>
           <div className="mt-4 space-y-3">
             {users?.map((user) => (
               <div key={user.id} className="rounded-lg bg-white/5 p-3 text-sm">
-                <p className="break-all font-medium">{user.email}</p>
-                <p className="text-slate-400">{user.plan} - {user.id}</p>
+                <p className="break-all font-medium text-white">{user.email ?? "No email"}</p>
+                <p className="mt-1 break-all text-xs text-slate-500">{user.id}</p>
+                <form action={updateUserPlan} className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <input type="hidden" name="user_id" value={user.id} />
+                  <select name="plan" defaultValue={user.plan} className="h-9 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm">
+                    <option value="free">Free</option>
+                    <option value="pro">Pro</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  <button className="h-9 rounded-lg bg-amber-300 px-3 text-xs font-semibold text-slate-950">Update</button>
+                </form>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+        <div className={scrollPanelClass}>
+          <h2 className="font-bold text-white">Send test notification</h2>
+          <form action={sendAdminTestNotification} className="mt-4 grid gap-3">
+            <select name="user_id" defaultValue="" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm">
+              <option value="" disabled>Choose recipient</option>
+              <option value="all">All recent users</option>
+              {users?.map((user) => (
+                <option key={user.id} value={user.id}>{user.email ?? user.id}</option>
+              ))}
+            </select>
+            <input name="title" placeholder="Notification title" defaultValue="PackWatcher test alert" className="h-10 rounded-lg border border-white/10 bg-white/5 px-3 text-sm outline-none focus:border-amber-300" />
+            <textarea name="message" placeholder="Notification message" defaultValue="This is a PackWatcher test notification." className="min-h-24 rounded-lg border border-white/10 bg-white/5 p-3 text-sm outline-none focus:border-amber-300" />
+            <label className="flex items-center gap-3 text-sm text-slate-300">
+              <input name="send_push" value="true" type="checkbox" className="h-4 w-4" />
+              Also send browser push to subscribed devices
+            </label>
+            <button className="h-10 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Send test notification</button>
+          </form>
+        </div>
+
+        <div className={scrollPanelClass}>
           <h2 className="font-bold text-white">Recent checks</h2>
           <div className="mt-4 space-y-3 text-sm">
             {checks?.map((check) => <p key={check.id} className="rounded-lg bg-white/5 p-3">{check.status} - {check.raw_match_reason}</p>)}
           </div>
         </div>
 
-        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+        <div className={scrollPanelClass}>
           <h2 className="font-bold text-white">Connector health</h2>
           <div className="mt-4 space-y-3 text-sm">
             {connectorHealth?.length ? connectorHealth.map((connector) => (
@@ -170,7 +198,7 @@ export default async function AdminPage() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+        <div className={scrollPanelClass}>
           <h2 className="font-bold text-white">Retail jobs</h2>
           <div className="mt-4 space-y-3 text-sm">
             {retailJobRuns?.length ? retailJobRuns.map((job) => (
@@ -182,7 +210,7 @@ export default async function AdminPage() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5 lg:col-span-2">
+        <div className={`${scrollPanelClass} lg:col-span-2`}>
           <h2 className="font-bold text-white">Uncertain product matches</h2>
           <div className="mt-4 space-y-3 text-sm">
             {matchReviews?.length ? matchReviews.map((review) => (
@@ -205,7 +233,7 @@ export default async function AdminPage() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5 lg:col-span-2">
+        <div className={`${scrollPanelClass} lg:col-span-2`}>
           <h2 className="font-bold text-white">Notification logs</h2>
           <div className="mt-4 space-y-3 text-sm">
             {notifications?.map((item) => <p key={item.id} className="rounded-lg bg-white/5 p-3">{item.title}</p>)}
