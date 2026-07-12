@@ -62,11 +62,14 @@ CLIPS_ENABLE_OPENAI=false
 CLIPS_LOCAL_ANALYSIS=true
 CLIPS_MAX_UPLOAD_MB=5120
 CLIPS_OPENAI_MODEL=gpt-4o-mini
+CLIPS_TCGCSV_MAX_GROUPS=40
 ```
 
 `FFMPEG_PATH` is optional when `ffmpeg` is already available on your system `PATH`. On Windows, install FFmpeg and set this to the full binary path if needed, for example `C:\ffmpeg\bin\ffmpeg.exe`.
 
 `OPENAI_API_KEY` is optional for PackWatcher Clips. Keep `CLIPS_ENABLE_OPENAI=false` to force free local/manual mode. If OpenAI is unavailable or quota-limited, the Clips workflow still works with FFmpeg thumbnails and manual confirmation.
+
+When `CLIPS_ENABLE_OPENAI=true`, Clips sends extracted reveal thumbnails to OpenAI for card-name recognition. Recognized card names are priced through the free TCGCSV data source. `CLIPS_TCGCSV_MAX_GROUPS` limits how many Pokemon set groups the value lookup scans per processing run.
 
 ## Supabase Setup
 
@@ -136,7 +139,9 @@ What V1 includes:
 - Upload MP4/MOV/WEBM raw pack-opening footage up to 5 GB into the private `clip-source-videos` Supabase Storage bucket.
 - Create a clip project with product name, total cost paid, pack count, and notes.
 - Use local FFmpeg assist to extract thumbnails every two seconds and create likely review moments.
-- Review candidate moments, include/exclude them, edit start/end timestamps, and manually enter card names/values.
+- Optionally use OpenAI vision to identify visible Pokemon cards from extracted reveal frames.
+- Look up recognized card values through free TCGCSV pricing data and prefill the review screen.
+- Review candidate moments, include/exclude them, edit start/end timestamps, and confirm or correct card names/values.
 - Automatically calculate total pull value, profit/loss, ROI percentage, and average value per pack.
 - Render a 1080x1920 MP4 with blurred background or center crop plus readable cost/pull/profit/card overlays.
 - Store thumbnails in `clip-thumbnails` and exports in `clip-exports`.
@@ -163,7 +168,7 @@ Optional tools for future upgrades:
 
 - PySceneDetect for richer scene detection.
 - faster-whisper or whisper.cpp for reaction/audio moment detection.
-- OpenAI API key for optional AI card-recognition assistance.
+- OpenAI API key for optional AI card-recognition assistance. TCGCSV pricing lookup does not require a key.
 
 How to test Clips:
 
@@ -171,7 +176,7 @@ How to test Clips:
 2. Go to `/clips`.
 3. Upload a short test video.
 4. Enter the product name, total cost, and pack count.
-5. Review extracted moments and manually enter card values.
+5. Review extracted moments. If OpenAI is enabled and recognized a card, confirm or correct the prefilled card name/value. Otherwise manually enter the card values.
 6. Export and download a vertical MP4.
 
 Catalog importers:
@@ -313,7 +318,6 @@ lib/
 public/
 supabase/schema.sql
 ```
-
 
 
 

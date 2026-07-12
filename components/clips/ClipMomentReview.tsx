@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, Sparkles } from "lucide-react";
 import { currency, type ClipMomentWithCard } from "@/lib/clips/types";
 
 type EditableMoment = {
@@ -17,6 +17,9 @@ type EditableMoment = {
   estimatedValue: string;
   thumbnailUrl: string | null;
   confidence: number;
+  recognitionSource: string;
+  pricingSource: string;
+  cardConfidence: number;
 };
 
 export function ClipMomentReview({
@@ -42,7 +45,10 @@ export function ClipMomentReview({
     variant: moment.card?.variant ?? "",
     estimatedValue: String(moment.card?.estimated_value ?? 0),
     thumbnailUrl: moment.signedThumbnailUrl ?? null,
-    confidence: moment.confidence
+    confidence: moment.confidence,
+    recognitionSource: moment.card?.recognition_source ?? "manual",
+    pricingSource: moment.card?.pricing_source ?? "manual",
+    cardConfidence: moment.card?.confidence ?? 0
   })));
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -107,6 +113,17 @@ export function ClipMomentReview({
         <Summary label="Pull value" value={currency(totals.totalPulls)} />
         <Summary label="Profit/loss" value={currency(totals.profit)} tone={totals.profit >= 0 ? "positive" : "negative"} />
       </section>
+      <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+        <div className="flex items-start gap-3">
+          <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+          <div>
+            <p className="font-semibold text-white">Review the scan</p>
+            <p className="mt-1 text-sm leading-6 text-slate-400">
+              PackWatcher fills card names and values when recognition is confident. Confirm the hits, fix misses, and remove moments that are not pulls.
+            </p>
+          </div>
+        </div>
+      </div>
       <div className="space-y-4">
         {items.map((item, index) => (
           <article key={item.momentId} className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
@@ -130,7 +147,16 @@ export function ClipMomentReview({
                     />
                     Include in export
                   </label>
-                  <span className="text-xs text-slate-400">{Math.round(item.confidence * 100)}% local confidence</span>
+                  <span className="text-xs text-slate-400">{Math.round(item.confidence * 100)}% moment confidence</span>
+                </div>
+                <div className={`rounded-lg border p-3 text-xs ${item.cardName ? "border-amber-300/20 bg-amber-300/10 text-amber-100" : "border-white/10 bg-slate-950/50 text-slate-400"}`}>
+                  {item.cardName ? (
+                    <p>
+                      Auto scan: {Math.round(item.cardConfidence * 100)}% card confidence · recognition {item.recognitionSource} · pricing {item.pricingSource}
+                    </p>
+                  ) : (
+                    <p>No card identified yet. Type the card name and value if this is a pull.</p>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Start" value={item.timestampStart} onChange={(value) => updateItem(index, { timestampStart: value })} type="number" step="0.01" />

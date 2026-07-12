@@ -9,7 +9,7 @@ export type CardRecognitionCandidate = {
 
 export type CardRecognitionProvider = {
   name: string;
-  recognize(input: { imageUrl?: string | null; notes?: string | null }): Promise<CardRecognitionCandidate[]>;
+  recognize(input: { imageUrl?: string | null; imageBase64?: string | null; mimeType?: string | null; notes?: string | null }): Promise<CardRecognitionCandidate[]>;
 };
 
 export class ManualCardRecognitionProvider implements CardRecognitionProvider {
@@ -28,6 +28,82 @@ export class PokemonTCGProvider implements CardRecognitionProvider {
   }
 }
 
+export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
+  name = "openai_vision";
+
+  constructor(
+    private readonly apiKey = process.env.OPENAI_API_KEY,
+    private readonly model = process.env.CLIPS_OPENAI_MODEL ?? "gpt-4o-mini"
+  ) {}
+
+  async recognize(input: { imageBase64?: string | null; mimeType?: string | null; notes?: string | null }): Promise<CardRecognitionCandidate[]> {
+    if (process.env.CLIPS_ENABLE_OPENAI !== "true" || !this.apiKey || !input.imageBase64) return [];
+
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${this.apiKey}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        model: this.model,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content:
+              "You identify Pokemon cards from pack-opening video frames. Return JSON only. Do not guess. If the card text is not readable, return an empty candidates array."
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text:
+                  "Identify the main Pokemon card in this frame. Return {\"candidates\":[{\"cardName\":\"\",\"setName\":null,\"cardNumber\":null,\"variant\":null,\"confidence\":0.0}]}. Use confidence 0-1. Include set/card number only if visible."
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:${input.mimeType ?? "image/jpeg"};base64,${input.imageBase64}`
+                }
+              }
+            ]
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`OpenAI card recognition failed with HTTP ${response.status}${body ? `: ${body.slice(0, 240)}` : ""}`);
+    }
+
+    const json = await response.json() as { choices?: Array<{ message?: { content?: string | null } }> };
+    const content = json.choices?.[0]?.message?.content;
+    if (!content) return [];
+
+    const parsed = JSON.parse(content) as {
+      candidates?: Array<Partial<CardRecognitionCandidate>>;
+    };
+
+    return (parsed.candidates ?? []).flatMap((candidate) => {
+      const cardName = String(candidate.cardName ?? "").trim();
+      const confidence = Number(candidate.confidence ?? 0);
+      if (!cardName || !Number.isFinite(confidence) || confidence < 0.35) return [];
+      return [{
+        cardName,
+        setName: stringOrNull(candidate.setName),
+        cardNumber: stringOrNull(candidate.cardNumber),
+        variant: stringOrNull(candidate.variant),
+        confidence: Math.min(1, Math.max(0, confidence)),
+        source: this.name
+      }];
+    });
+  }
+}
+
 export class XimilarProvider implements CardRecognitionProvider {
   name = "ximilar_placeholder";
 
@@ -42,4 +118,9 @@ export class PokeTraceProvider implements CardRecognitionProvider {
   async recognize(): Promise<CardRecognitionCandidate[]> {
     return [];
   }
+}
+
+function stringOrNull(value: unknown) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text || null;
 }
