@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, Boxes, CreditCard, LayoutDashboard, ListChecks, Scissors, Shield, User } from "lucide-react";
+import { Bell, Boxes, CreditCard, LayoutDashboard, ListChecks, ScanLine, Shield, User } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import type { Plan } from "@/lib/types";
 
@@ -10,13 +10,13 @@ const desktopItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/watchlist", label: "Watchlist", icon: ListChecks },
   { href: "/inventory", label: "Inventory", icon: Boxes },
-  { href: "/clips", label: "Clips", icon: Scissors },
+  { href: "/scanner", label: "Scanner", icon: ScanLine },
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/pricing", label: "Pricing", icon: CreditCard },
   { href: "/account", label: "Account", icon: User }
 ];
 
-const mobileItems = desktopItems.filter((item) => ["Dashboard", "Watchlist", "Inventory", "Clips", "Account"].includes(item.label));
+const mobileItems = desktopItems.filter((item) => ["Dashboard", "Watchlist", "Inventory", "Scanner", "Account"].includes(item.label));
 
 export function AppNav({ plan }: { plan: Plan }) {
   const pathname = usePathname();

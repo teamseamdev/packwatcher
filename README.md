@@ -12,7 +12,7 @@ PackWatcher does not implement auto-checkout, CAPTCHA bypassing, queue bypassing
 - Supabase Auth and Postgres
 - Supabase Storage for PackWatcher Clips raw videos, thumbnails, and exports
 - FFmpeg for local video analysis, clipping, and export
-- Optional OpenAI vision analysis for future PackWatcher Clips autofill
+- Optional OpenAI vision analysis for PackWatcher Scanner card recognition
 - Stripe skeleton
 - Web push / FCM-ready environment placeholders
 - Cron-ready admin check APIs
@@ -131,9 +131,24 @@ Run `supabase/migrations/007_retail_aggregation_foundation.sql` to add normalize
 
 During local development, if Supabase Storage still enforces a lower project or plan upload cap, PackWatcher Clips stores the raw source video in the OS temp directory and continues the review/export flow. Set `CLIPS_LOCAL_STORAGE_DIR` to a writable folder if you want to control where local source videos are saved.
 
-## PackWatcher Clips
+## PackWatcher Scanner
 
-PackWatcher Clips lives at `/clips` after sign-in.
+PackWatcher Scanner lives at `/scanner` after sign-in. The old `/clips` and `/clips/new` entry points redirect to Scanner while video-editing work is paused.
+
+What V1 includes:
+
+- Single-card camera scan.
+- Multi-card camera scan with a green confirmation after each scan, a Next scan action, and an End scan action.
+- Browser-side video frame scanning for uploaded MP4/MOV/WEBM files. Raw video is not stored for Scanner.
+- Ordered card list with estimated values.
+- Manual card add fallback when AI recognition is unavailable or cannot read the card.
+- PDF export of the scan results and total estimated value.
+
+Scanner pricing uses the free TCGCSV data source. Camera/image recognition uses OpenAI only when `CLIPS_ENABLE_OPENAI=true` and `OPENAI_API_KEY` are configured. If OpenAI is unavailable or quota-limited, users can still manually add card names and get TCGCSV pricing.
+
+## PackWatcher Clips Legacy
+
+The legacy PackWatcher Clips implementation remains in the codebase for later video-editing work, but the user-facing entry point now redirects to Scanner.
 
 What V1 includes:
 
@@ -319,5 +334,3 @@ lib/
 public/
 supabase/schema.sql
 ```
-
-
