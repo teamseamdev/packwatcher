@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { LegalFooter } from "@/components/legal-footer";
+import { MobileViewportLock } from "@/components/mobile-viewport-lock";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -18,13 +19,17 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   themeColor: "#090b10",
   width: "device-width",
-  initialScale: 1
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
+        <MobileViewportLock />
         {children}
         <LegalFooter />
       </body>
