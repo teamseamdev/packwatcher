@@ -73,9 +73,17 @@ export function CardScanner() {
   const [scanPhase, setScanPhase] = useState<ScanPhase>("idle");
   const [successFlash, setSuccessFlash] = useState(false);
   const [packOptions, setPackOptions] = useState<string[]>(FALLBACK_PACK_OPTIONS);
+  const [packOptionsOpen, setPackOptionsOpen] = useState(false);
   const [cardReady, setCardReady] = useState(false);
 
   const totalValue = useMemo(() => cards.reduce((sum, card) => sum + card.estimatedValue, 0), [cards]);
+  const visiblePackOptions = useMemo(() => {
+    const query = packHint.trim().toLowerCase();
+    const options = query
+      ? packOptions.filter((option) => option.toLowerCase().includes(query))
+      : packOptions;
+    return options.slice(0, 40);
+  }, [packHint, packOptions]);
 
   useEffect(() => {
     return () => {
@@ -359,11 +367,11 @@ export function CardScanner() {
     return null;
   }
 
-  async function scanManualCard(cardName: string, setName: string) {
+  async function scanManualCard(cardName: string, setName: string, cardNumber?: string | null) {
     const response = await fetch("/api/scanner/scan", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cardName, setName: setName || undefined, language, packHint: packHint.trim() || undefined })
+      body: JSON.stringify({ cardName, setName: setName || undefined, cardNumber: cardNumber || undefined, language, packHint: packHint.trim() || undefined })
     });
     return handleScanResponse(response);
   }
@@ -466,7 +474,7 @@ export function CardScanner() {
     setIsScanning(true);
     setScanPhase("pricing");
     setError(null);
-    const scanned = await scanManualCard(card.cardName, card.setName ?? "");
+    const scanned = await scanManualCard(card.cardName, card.setName ?? "", card.cardNumber);
     setIsScanning(false);
     setScanPhase("idle");
     if (!scanned) return;
@@ -501,16 +509,38 @@ export function CardScanner() {
     <div className="space-y-5">
       <section className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
         <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_220px]">
-          <input
-            list="packwatcher-pack-options"
-            value={packHint}
-            onChange={(event) => setPackHint(event.target.value)}
-            placeholder="Choose pack, box, or set"
-            className="h-12 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-slate-100 outline-none focus:border-amber-300"
-          />
-          <datalist id="packwatcher-pack-options">
-            {packOptions.map((option) => <option key={option} value={option} />)}
-          </datalist>
+          <div className="relative">
+            <input
+              value={packHint}
+              onChange={(event) => {
+                setPackHint(event.target.value);
+                setPackOptionsOpen(true);
+              }}
+              onFocus={() => setPackOptionsOpen(true)}
+              onBlur={() => window.setTimeout(() => setPackOptionsOpen(false), 120)}
+              placeholder="Choose pack, box, or set"
+              autoComplete="off"
+              className="h-12 w-full rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-slate-100 outline-none focus:border-amber-300"
+            />
+            {packOptionsOpen && visiblePackOptions.length ? (
+              <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-30 max-h-56 overflow-y-auto rounded-lg border border-white/10 bg-slate-950 p-1 shadow-2xl">
+                {visiblePackOptions.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      setPackHint(option);
+                      setPackOptionsOpen(false);
+                    }}
+                    className="block w-full rounded-md px-3 py-2 text-left text-sm text-slate-100 hover:bg-white/10"
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <select
             value={language}
             onChange={(event) => setLanguage(event.target.value as ScannerLanguage)}
@@ -608,7 +638,7 @@ export function CardScanner() {
                 />
               ) : <div className="grid h-20 w-16 place-items-center rounded-md bg-white/5 text-xs text-slate-500">Manual</div>}
               <div className="min-w-0">
-                <div className="grid gap-2 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_120px]">
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_110px_120px]">
                   <input
                     value={card.cardName}
                     onChange={(event) => updateCard(card.id, { cardName: event.target.value })}
@@ -621,6 +651,13 @@ export function CardScanner() {
                     placeholder="Set"
                     className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-slate-100 outline-none focus:border-amber-300"
                     aria-label={`Card ${card.order} set`}
+                  />
+                  <input
+                    value={card.cardNumber ?? ""}
+                    onChange={(event) => updateCard(card.id, { cardNumber: event.target.value || null })}
+                    placeholder="Number"
+                    className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-slate-100 outline-none focus:border-amber-300"
+                    aria-label={`Card ${card.order} number`}
                   />
                   <input
                     value={String(card.estimatedValue || 0)}

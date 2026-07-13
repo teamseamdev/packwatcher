@@ -87,9 +87,9 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
                     "For Japanese, Chinese, or Korean cards, translate or normalize the cardName to the closest English card name for pricing when possible.",
                     "If the card name, attacks, or collector text are readable in English, return language \"English\" and originalName null unless a distinct localized printed name is visible.",
                     "If only the card border/art/card shape is visible, return Unknown Pokemon card with confidence 0.08-0.3.",
-                    "Include setName, cardNumber, and variant when visible. If a card number like 063/068 is visible and a set hint is provided, use that pair to identify the card."
+                    "Include setName, cardNumber, and variant when visible. Only return cardNumber when it is directly readable on the current card image; otherwise return null."
                   ].join(" ")
-              },
+                },
               {
                 type: "image_url",
                 image_url: {

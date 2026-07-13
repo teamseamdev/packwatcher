@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     ? {
         cardName: parsed.cardName,
         setName: parsed.setName || null,
-        cardNumber: parsed.cardNumber || null,
+        cardNumber: normalizeCardNumber(parsed.cardNumber, parsed.packHint, parsed.setName),
         variant: parsed.variant || null,
         language: parsed.language,
         originalName: null,
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
         ? {
             cardName: candidate.cardName,
             setName: candidate.setName ?? null,
-            cardNumber: candidate.cardNumber ?? null,
+            cardNumber: normalizeCardNumber(candidate.cardNumber, parsed.packHint, candidate.setName),
             variant: candidate.variant ?? null,
             language: normalizeDetectedLanguage(candidate.language ?? parsed.language, candidate.cardName, candidate.originalName, parsed.language),
             originalName: normalizeOriginalName(candidate.originalName, candidate.cardName),
@@ -136,9 +136,11 @@ export async function POST(request: Request) {
 function scannerScanNotes(language: z.infer<typeof ScanSchema>["language"], packHint?: string) {
   return [
     scannerLanguageLabel(language),
-    packHint ? `User pack/set hint: ${packHint}. Use this as context for likely set, expansion, language, and card numbering. If a collector number is visible, combine it with this pack/set hint to identify the exact card.` : null,
+    packHint ? `User pack/set hint: ${packHint}. Use this as context for likely set, expansion, language, and card numbering. If a collector number is clearly visible, combine that exact visible number with this pack/set hint to identify the exact card.` : null,
     "Prioritize the card name/title text near the top edge of the card.",
-    "Prioritize the collector number, set code, rarity, and regulation mark near the lower-left or lower edge. Return cardNumber whenever visible because it is a primary lookup key.",
+    "Prioritize the collector number, set code, rarity, and regulation mark near the lower-left or lower edge.",
+    "Only return cardNumber when you can read the number directly on this card image. Do not infer, reuse, copy from another card, or invent a collector number. If the number is blurry or blocked, return null.",
+    "Do not use example collector numbers in your response.",
     "Ignore fingers, sleeves, playmats, pack wrappers, and background objects unless they clarify the set."
   ].filter(Boolean).join(" ");
 }
@@ -178,4 +180,27 @@ function normalizeOriginalName(originalName: string | null | undefined, cardName
   const readable = (text.match(/[a-z0-9\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/gi) ?? []).length;
   if (readable < Math.max(2, text.length * 0.35)) return null;
   return text;
+}
+
+function normalizeCardNumber(cardNumber: string | null | undefined, packHint?: string, setName?: string | null) {
+  const text = typeof cardNumber === "string" ? cardNumber.trim() : "";
+  if (!text) return null;
+
+  const match = text.match(/\b([A-Z]{0,4}\s*#?\s*)?(\d{1,4})\s*\/\s*(\d{1,4})\b/i);
+  if (!match) return null;
+
+  const prefix = (match[1] ?? "").replace(/[#\s]/g, "").toUpperCase();
+  const numerator = match[2].padStart(match[2].length < 3 ? 3 : match[2].length, "0");
+  const denominator = match[3].padStart(match[3].length < 3 ? 3 : match[3].length, "0");
+  const expectedDenominator = expectedSetSize(packHint, setName);
+
+  if (expectedDenominator && denominator !== expectedDenominator) return null;
+
+  return `${prefix ? `${prefix} ` : ""}${numerator}/${denominator}`;
+}
+
+function expectedSetSize(packHint?: string, setName?: string | null) {
+  const text = `${packHint ?? ""} ${setName ?? ""}`.toLowerCase();
+  if (/\bchaos rising\b/.test(text)) return "086";
+  return null;
 }
