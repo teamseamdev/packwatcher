@@ -1,6 +1,7 @@
 import { fetchPageHtml } from "@/lib/fetch-page-html";
 import type { RetailerAdapter, StockCheckInput, StockCheckResult } from "@/lib/stock-checkers/types";
 import { extractProductMetadata } from "@/lib/product-metadata";
+import { statusForInStockMatch } from "@/lib/stock-checkers/fulfillment";
 
 const inStockPhrases = [
   "in stock",
@@ -60,7 +61,7 @@ export function detectStockFromHtml(
   }
 
   if (inMatch) {
-    return { status: "in_stock", rawMatchReason: `Matched "${inMatch}"`, price };
+    return { status: statusForInStockMatch(inMatch), rawMatchReason: `Matched "${inMatch}"`, price };
   }
 
   return { status: "unknown", rawMatchReason: "No known stock indicator matched", price };

@@ -7,7 +7,7 @@ import { useMemo, useState, useTransition } from "react";
 import { BellOff, BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
 import { removeTrackedProduct, trackCatalogProduct, untrackCatalogProduct } from "@/app/(app)/watchlist/actions";
 import { isLikelyPokemonProduct } from "@/lib/catalog-importers/pokemon-product-filter";
-import { compareCatalogOffers, fulfillmentText, metadataText } from "@/lib/catalog/offer-ranking";
+import { compareCatalogOffers, fulfillmentLabel, fulfillmentText, fulfillmentTone, metadataText } from "@/lib/catalog/offer-ranking";
 import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
 import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, TrackedProduct } from "@/lib/types";
@@ -17,12 +17,6 @@ type SortMode = "recommended" | "name" | "store" | "status" | "price" | "checked
 function productForOffer(offer: CatalogOffer) {
   const related = offer.catalog_products as CatalogProduct | CatalogProduct[] | null;
   return Array.isArray(related) ? related[0] ?? null : related;
-}
-
-function stockLabel(status: string) {
-  if (status === "in_stock") return "In stock";
-  if (status === "out_of_stock") return "Out of stock";
-  return "Trackable";
 }
 
 export function CatalogOfferPicker({
@@ -215,7 +209,7 @@ export function CatalogOfferPicker({
                       <h3 className="line-clamp-2 text-sm font-bold text-white">{product?.name ?? "Catalog product"}</h3>
                       <p className="mt-1 text-xs text-slate-400">{offer.store_name} - {product?.set_name ?? product?.tcg ?? "TCG"}</p>
                     </div>
-                    <span className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-[11px] text-slate-300">{stockLabel(offer.status)}</span>
+                    <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${fulfillmentTone(offer)}`}>{fulfillmentLabel(offer)}</span>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-amber-200">{optionalCurrency(offer.last_price ?? offer.price ?? product?.msrp)}</p>
@@ -228,7 +222,8 @@ export function CatalogOfferPicker({
                   <div className="mt-3 border-t border-white/10 pt-3">
                     <div className="grid gap-2 text-xs text-slate-300 sm:grid-cols-2">
                       <p><span className="text-slate-500">Retailer:</span> {offer.retailer ?? offer.store_name}</p>
-                      <p><span className="text-slate-500">Status:</span> {offer.status.replaceAll("_", " ")}</p>
+                      <p><span className="text-slate-500">Fulfillment:</span> {fulfillmentLabel(offer)}</p>
+                      <p><span className="text-slate-500">Raw status:</span> {offer.status.replaceAll("_", " ")}</p>
                       <p><span className="text-slate-500">Price:</span> {optionalCurrency(offer.last_price ?? offer.price ?? product?.msrp)}</p>
                       <p><span className="text-slate-500">Checked:</span> {offer.last_checked_at ? new Date(offer.last_checked_at).toLocaleString() : "not yet"}</p>
                       {metadataText(offer, "shippingText") ? <p><span className="text-slate-500">Shipping:</span> {metadataText(offer, "shippingText")}</p> : null}

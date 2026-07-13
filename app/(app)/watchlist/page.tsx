@@ -4,7 +4,7 @@ import { CatalogOfferPicker } from "@/components/catalog-offer-picker";
 import { WatchlistGrid } from "@/components/watchlist-grid";
 import { isAdmin, requireProfile } from "@/lib/auth";
 import { ensureCatalogHasRows } from "@/lib/catalog/ensure-catalog";
-import { compareCatalogOffers, metadataText } from "@/lib/catalog/offer-ranking";
+import { compareCatalogOffers, fulfillmentLabel, fulfillmentTone, metadataText } from "@/lib/catalog/offer-ranking";
 import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
 import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, TrackedProduct } from "@/lib/types";
@@ -121,12 +121,15 @@ export default async function WatchlistPage() {
                             <div className="flex items-start justify-between gap-3">
                               <div>
                                 <p className="text-sm font-semibold text-white">{offer.retailer ?? offer.store_name}</p>
-                                <p className="mt-1 text-xs text-slate-400">{offer.status.replaceAll("_", " ")} - {optionalCurrency(offer.last_price ?? offer.price)}</p>
+                                <p className="mt-1 text-xs text-slate-400">{fulfillmentLabel(offer)} - {optionalCurrency(offer.last_price ?? offer.price)}</p>
                                 {metadataText(offer, "shippingText") ? <p className="mt-1 text-[11px] text-slate-500">Shipping: {metadataText(offer, "shippingText")}</p> : null}
                                 {metadataText(offer, "pickupText") ? <p className="mt-1 text-[11px] text-slate-500">Pickup: {metadataText(offer, "pickupText")}</p> : null}
                                 {offer.availability_text ? <p className="mt-1 text-[11px] text-slate-500">{offer.availability_text}</p> : null}
                                 <p className="mt-1 text-[11px] text-slate-500">Checked {offer.last_checked_at ? new Date(offer.last_checked_at).toLocaleString() : "not yet"}</p>
                               </div>
+                              <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${fulfillmentTone(offer)}`}>
+                                {fulfillmentLabel(offer)}
+                              </span>
                               <a
                                 href={resolveRetailerUrl(offer.url, offer.retailer ?? offer.store_name, offer.title ?? related.title ?? related.name)}
                                 target="_blank"

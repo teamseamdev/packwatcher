@@ -3,14 +3,14 @@ import { notFound } from "next/navigation";
 import { ExternalLink } from "lucide-react";
 import { ProductTrackButton } from "@/components/product-track-button";
 import { requireProfile } from "@/lib/auth";
-import { compareCatalogOffers, metadataText } from "@/lib/catalog/offer-ranking";
+import { compareCatalogOffers, fulfillmentLabel, fulfillmentTone, metadataText } from "@/lib/catalog/offer-ranking";
 import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
 import { optionalCurrency } from "@/lib/profit";
 import { aggregatePrices } from "@/lib/retailers/shared/price-aggregation";
 import type { CatalogOffer, CatalogProduct } from "@/lib/types";
 
 function offerStatus(offer: CatalogOffer) {
-  if (offer.in_stock || offer.status === "in_stock") return "In stock";
+  if (offer.in_stock || offer.status === "in_stock") return fulfillmentLabel(offer);
   if (offer.status === "out_of_stock") return "Out of stock";
   return offer.availability_text ?? "Trackable";
 }
@@ -107,7 +107,7 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
                     <h3 className="font-bold text-white">{offer.retailer ?? offer.store_name}</h3>
                     <p className="mt-1 text-sm text-slate-400">{offer.title ?? product.title ?? product.name}</p>
                   </div>
-                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${inStock ? "bg-amber-300 text-slate-950" : "bg-white/10 text-slate-300"}`}>
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${inStock ? fulfillmentTone(offer) : "bg-white/10 text-slate-300"}`}>
                     {offerStatus(offer)}
                   </span>
                 </div>

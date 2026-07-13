@@ -17,6 +17,26 @@ export function fulfillmentText(offer: CatalogOffer) {
   ].filter(Boolean).join(" | ");
 }
 
+export function fulfillmentLabel(offer: CatalogOffer) {
+  if (isLocalOffer(offer)) return "Pickup available";
+  if (isShippingOnlyOffer(offer)) return "Shipping only";
+  if (offer.status === "delivery_available") return "Delivery available";
+  if (offer.status === "out_of_stock" || offer.status === "unavailable") return "Out of stock";
+  if (offer.status === "preorder") return "Preorder";
+  if (offer.status === "backorder") return "Backorder";
+  if (offer.status === "limited_stock") return "Limited stock";
+  if (isAvailableStatus(offer.status) || offer.in_stock === true) return "Availability found";
+  return "Check retailer";
+}
+
+export function fulfillmentTone(offer: CatalogOffer) {
+  if (isLocalOffer(offer)) return "bg-emerald-300 text-slate-950";
+  if (isShippingOnlyOffer(offer)) return "bg-sky-300 text-slate-950";
+  if (offer.status === "out_of_stock" || offer.status === "unavailable") return "bg-red-400/20 text-red-100";
+  if (isAvailableStatus(offer.status) || offer.in_stock === true) return "bg-white/10 text-slate-200";
+  return "bg-white/10 text-slate-300";
+}
+
 export function compareCatalogOffers(a: CatalogOffer, b: CatalogOffer, postalCode?: string | null) {
   const rankDifference = offerPriority(a, postalCode) - offerPriority(b, postalCode);
   if (rankDifference !== 0) return rankDifference;

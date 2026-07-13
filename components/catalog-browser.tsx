@@ -7,7 +7,7 @@ import { useMemo, useState, useTransition } from "react";
 import { BellOff, BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
 import { trackCatalogOffer, trackCatalogProduct, untrackCatalogProduct } from "@/app/(app)/watchlist/actions";
 import { isLikelyPokemonProduct } from "@/lib/catalog-importers/pokemon-product-filter";
-import { compareCatalogOffers, fulfillmentText } from "@/lib/catalog/offer-ranking";
+import { compareCatalogOffers, fulfillmentLabel, fulfillmentText, fulfillmentTone } from "@/lib/catalog/offer-ranking";
 import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
 import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, StockStatus } from "@/lib/types";
@@ -347,9 +347,12 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <p className="text-sm font-semibold text-white">{item.store_name}</p>
-                              <p className="mt-1 text-xs text-slate-400">{statusLabel(item.status)} - {optionalCurrency(item.last_price)}</p>
+                              <p className="mt-1 text-xs text-slate-400">{fulfillmentLabel(item)} - {optionalCurrency(item.last_price)}</p>
                               {fulfillmentText(item) ? <p className="mt-1 line-clamp-2 text-[11px] text-slate-500">{fulfillmentText(item)}</p> : null}
                             </div>
+                            <span className={`mt-2 inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${fulfillmentTone(item)}`}>
+                              {fulfillmentLabel(item)}
+                            </span>
                             <a
                               href={resolveRetailerUrl(item.url, item.retailer ?? item.store_name, item.title ?? group.product.title ?? group.product.name)}
                               target="_blank"

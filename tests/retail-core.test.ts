@@ -6,6 +6,7 @@ import { isGoogleUrl, resolveRetailerUrl } from "../lib/catalog/retailer-url.ts"
 import { matchProduct } from "../lib/retailers/shared/product-matching.ts";
 import { freshnessLabel, normalizeAvailabilityStatus, normalizeTitle, normalizeUpc } from "../lib/retailers/shared/normalize.ts";
 import { notificationEventKey, shouldSendRestockAlert } from "../lib/retailers/shared/restock-events.ts";
+import { statusForInStockMatch } from "../lib/stock-checkers/fulfillment.ts";
 import type { ProductAlert } from "../lib/types.ts";
 
 test("normalizes titles and UPCs", () => {
@@ -59,6 +60,11 @@ test("normalizes availability and freshness", () => {
   assert.equal(normalizeAvailabilityStatus("Sold Out"), "out_of_stock");
   assert.equal(freshnessLabel(new Date(Date.now() - 5 * 60000).toISOString()), "fresh");
   assert.equal(freshnessLabel(new Date(Date.now() - 180 * 60000).toISOString()), "stale");
+});
+
+test("classifies shipping and pickup fulfillment separately", () => {
+  assert.equal(statusForInStockMatch("shipping available"), "shipping_available");
+  assert.equal(statusForInStockMatch("pickup available"), "pickup_available");
 });
 
 test("deduplicates restock alerts by event key and respects max price", () => {
