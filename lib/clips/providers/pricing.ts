@@ -4,6 +4,7 @@ export type PricingCandidate = {
   source: string;
   confidence: number;
   label?: string | null;
+  imageUrl?: string | null;
 };
 
 export type PricingProvider = {
@@ -60,6 +61,9 @@ type TcgCsvProduct = {
   name: string;
   cleanName?: string | null;
   groupName?: string | null;
+  imageUrl?: string | null;
+  image_url?: string | null;
+  image?: string | null;
 };
 
 type TcgCsvPrice = {
@@ -100,7 +104,8 @@ async function searchTcgCsvPrice(input: { cardName: string; setName?: string | n
       currency: "USD",
       source: thisSource(product, group),
       confidence: scoreProduct(product, input),
-      label: product.cleanName ?? product.name
+      label: product.cleanName ?? product.name,
+      imageUrl: productImageUrl(product)
     });
 
     if (candidates.length >= 3) break;
@@ -200,4 +205,8 @@ function firstPositive(...values: Array<number | null | undefined>) {
 
 function thisSource(product: TcgCsvProduct, group: TcgCsvGroup) {
   return `tcgcsv:${group.groupId}:${product.productId}`;
+}
+
+function productImageUrl(product: TcgCsvProduct) {
+  return product.imageUrl ?? product.image_url ?? product.image ?? null;
 }

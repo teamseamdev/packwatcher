@@ -1,7 +1,7 @@
 "use client";
 
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCircle2, FileDown, Images, Loader2, Plus, ScanLine, Search, Sparkles, Trash2, UploadCloud, X } from "lucide-react";
+import { Check, CheckCircle2, FileDown, Images, Loader2, Plus, ScanLine, Search, Trash2, UploadCloud, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/browser";
 
 type ScannerMode = "scanner" | "video";
@@ -21,6 +21,7 @@ type ScannerCard = {
   recognitionSource: string;
   pricingSource: string;
   imageDataUrl?: string | null;
+  referenceImageUrl?: string | null;
 };
 
 type ScanResponse = {
@@ -33,6 +34,7 @@ type ScanResponse = {
 const MAX_VIDEO_SCAN_FRAMES = 96;
 const MIN_VIDEO_SCAN_FRAMES = 18;
 const CONTACT_SHEET_FRAME_COUNT = 24;
+const AUTO_CAPTURE_DELAY_MS = 5200;
 const FALLBACK_PACK_OPTIONS = [
   "Pokemon 151",
   "Prismatic Evolutions",
@@ -55,6 +57,8 @@ export function CardScanner() {
   const streamRef = useRef<MediaStream | null>(null);
   const successFlashTimeoutRef = useRef<number | null>(null);
   const cardHideTimeoutRef = useRef<number | null>(null);
+  const autoCaptureTimeoutRef = useRef<number | null>(null);
+  const autoCaptureScanRef = useRef<(() => void) | null>(null);
   const [mode, setMode] = useState<ScannerMode>("scanner");
   const [cards, setCards] = useState<ScannerCard[]>([]);
   const [lastCard, setLastCard] = useState<ScannerCard | null>(null);
@@ -94,6 +98,23 @@ export function CardScanner() {
       document.body.style.overflow = previousOverflow;
     };
   }, [isCameraReady, mode]);
+
+  useEffect(() => {
+    autoCaptureScanRef.current = () => {
+      void scanCameraFrame();
+    };
+  });
+
+  useEffect(() => {
+    if (!isCameraReady || mode !== "scanner" || isScanning || lastCard) return;
+    autoCaptureTimeoutRef.current = window.setTimeout(() => {
+      autoCaptureScanRef.current?.();
+    }, AUTO_CAPTURE_DELAY_MS);
+    return () => {
+      if (autoCaptureTimeoutRef.current) window.clearTimeout(autoCaptureTimeoutRef.current);
+      autoCaptureTimeoutRef.current = null;
+    };
+  }, [isCameraReady, isScanning, lastCard, mode]);
 
   useEffect(() => {
     let ignore = false;
@@ -150,6 +171,8 @@ export function CardScanner() {
   }
 
   function stopCamera() {
+    if (autoCaptureTimeoutRef.current) window.clearTimeout(autoCaptureTimeoutRef.current);
+    autoCaptureTimeoutRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     setIsCameraReady(false);
@@ -187,7 +210,7 @@ export function CardScanner() {
       const frames = await captureCameraBurst(videoRef.current);
       const scanFailures: string[] = [];
       let scanned: Omit<ScannerCard, "id" | "order" | "imageDataUrl"> | null = null;
-      let scannedImage = frames[0];
+      const scannedImage = frames[Math.floor(frames.length / 2)] ?? frames[0];
 
       const focusedFrames = await buildRecognitionFrames(frames);
       const contactSheet = await buildContactSheet(focusedFrames);
@@ -200,7 +223,6 @@ export function CardScanner() {
             if (message && !scanFailures.includes(message)) scanFailures.push(message);
           }
         });
-        if (scanned) scannedImage = contactSheet;
       }
 
       for (let index = 0; !scanned && index < focusedFrames.length; index += 1) {
@@ -213,7 +235,6 @@ export function CardScanner() {
             if (message && !scanFailures.includes(message)) scanFailures.push(message);
           }
         });
-        if (scanned) scannedImage = focusedFrames[index];
       }
 
       if (!scanned) {
@@ -262,7 +283,7 @@ export function CardScanner() {
         const key = normalizeCardKey(contactSheetScan.cardName, contactSheetScan.setName);
         if (seen.has(key)) continue;
         seen.add(key);
-        addCard(contactSheetScan, contactSheet);
+        addCard(contactSheetScan, frames[sheetIndex * CONTACT_SHEET_FRAME_COUNT] ?? null);
       }
 
       for (let index = 0; index < frames.length; index += 1) {
@@ -393,6 +414,10 @@ export function CardScanner() {
     if (lastCard?.id === id) setLastCard(null);
   }
 
+  function removeCardFromScanner(id: string) {
+    removeCard(id);
+  }
+
   async function lookupCard(card: ScannerCard) {
     if (!card.cardName.trim()) {
       setError("Enter a card name before looking up value.");
@@ -417,7 +442,8 @@ export function CardScanner() {
       estimatedValue: scanned.estimatedValue,
       confidence: scanned.confidence,
       recognitionSource: scanned.recognitionSource,
-      pricingSource: scanned.pricingSource
+      pricingSource: scanned.pricingSource,
+      referenceImageUrl: scanned.referenceImageUrl
     });
   }
 
@@ -529,11 +555,11 @@ export function CardScanner() {
         <div className="mt-4 max-h-[520px] space-y-3 overflow-y-auto pr-1">
           {cards.length ? cards.map((card) => (
             <div key={card.id} className="grid gap-3 rounded-lg bg-slate-950/50 p-3 sm:grid-cols-[64px_1fr]">
-              {card.imageDataUrl ? (
+              {card.referenceImageUrl || card.imageDataUrl ? (
                 <div
                   aria-hidden="true"
                   className="h-20 w-16 rounded-md bg-cover bg-center"
-                  style={{ backgroundImage: `url(${card.imageDataUrl})` }}
+                  style={{ backgroundImage: `url(${card.referenceImageUrl ?? card.imageDataUrl})` }}
                 />
               ) : <div className="grid h-20 w-16 place-items-center rounded-md bg-white/5 text-xs text-slate-500">Manual</div>}
               <div className="min-w-0">
@@ -600,6 +626,7 @@ export function CardScanner() {
             stopCamera();
             void scanUploadedVideo(file);
           }}
+          onRemove={removeCardFromScanner}
           onClose={() => {
             setIsComplete(true);
             stopCamera();
@@ -628,6 +655,7 @@ function FullScreenScanner({
   notice,
   onScan,
   onUpload,
+  onRemove,
   onClose,
   onEnd
 }: {
@@ -642,11 +670,19 @@ function FullScreenScanner({
   notice: string | null;
   onScan: () => void;
   onUpload: (file: File) => void;
+  onRemove: (id: string) => void;
   onClose: () => void;
   onEnd: () => void;
 }) {
   return (
     <div className="fixed inset-0 z-[100] overflow-hidden bg-black text-white">
+      <style>{`
+        @keyframes packwatcherScannerTrack {
+          0%, 100% { transform: translate3d(-2%, -1%, 0) scale(0.98); }
+          35% { transform: translate3d(2%, 1.5%, 0) scale(1.02); }
+          70% { transform: translate3d(0, -2%, 0) scale(1); }
+        }
+      `}</style>
       <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/45 via-transparent to-black/95" />
       {successFlash ? <div className="pointer-events-none absolute inset-0 bg-emerald-400/35" /> : null}
@@ -655,21 +691,13 @@ function FullScreenScanner({
         <button onClick={onClose} className="grid h-12 w-12 place-items-center rounded-full bg-white text-slate-950 shadow-lg">
           <X className="h-6 w-6" />
         </button>
-        <div className="flex overflow-hidden rounded-2xl border border-white/10 bg-black/45 p-1 text-sm font-bold shadow-lg backdrop-blur">
-          <span className="rounded-xl bg-white/20 px-4 py-2">Recognition</span>
-          <span className="px-4 py-2 text-white/80">AI Mode</span>
+        <div className="rounded-full bg-black/50 px-4 py-2 text-sm font-bold text-emerald-200 shadow-lg backdrop-blur">
+          Auto capture on
         </div>
-        <button className="grid h-12 w-12 place-items-center rounded-full bg-black/45 text-white shadow-lg backdrop-blur">
-          <Sparkles className="h-5 w-5" />
-        </button>
+        <div className="w-12" />
       </div>
 
-      <div className="absolute inset-x-0 top-[calc(env(safe-area-inset-top)+86px)] flex justify-center gap-3 px-4 text-xs font-bold">
-        <div className="rounded-full bg-black/45 px-4 py-2 text-white/80 backdrop-blur">Auto Capture</div>
-        <div className="rounded-full bg-emerald-400/18 px-4 py-2 text-emerald-300 backdrop-blur">Auto Cropping</div>
-      </div>
-
-      <div className="pointer-events-none absolute inset-x-8 top-[26vh] mx-auto max-w-[340px]">
+      <div className="pointer-events-none absolute inset-x-8 top-[24vh] mx-auto max-w-[340px]" style={{ animation: "packwatcherScannerTrack 4.6s ease-in-out infinite" }}>
         <div className="relative aspect-[63/88] rounded-[10px] border-[5px] border-emerald-400 shadow-[0_0_30px_rgba(74,222,128,0.5)]">
           <div className="absolute -left-3 -top-3 h-6 w-6 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" />
           <div className="absolute -right-3 -top-3 h-6 w-6 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" />
@@ -698,10 +726,17 @@ function FullScreenScanner({
 
         {cards.length ? (
           <div className="mb-6 flex gap-3 overflow-x-auto pb-1">
-            {cards.slice(-8).map((card) => (
-              <div key={card.id} className="flex min-w-[228px] items-center gap-3 rounded-2xl bg-white/12 p-3 shadow-lg backdrop-blur">
-                {card.imageDataUrl ? (
-                  <div className="h-20 w-14 shrink-0 rounded-lg bg-cover bg-center" style={{ backgroundImage: `url(${card.imageDataUrl})` }} />
+            {cards.slice().reverse().slice(0, 8).map((card) => (
+              <div key={card.id} className="relative flex min-w-[228px] items-center gap-3 rounded-2xl bg-white/12 p-3 shadow-lg backdrop-blur">
+                <button
+                  onClick={() => onRemove(card.id)}
+                  className="absolute -right-2 -top-2 grid h-8 w-8 place-items-center rounded-full bg-black/80 text-white shadow-lg"
+                  aria-label={`Remove ${card.cardName}`}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+                {card.referenceImageUrl || card.imageDataUrl ? (
+                  <div className="h-20 w-14 shrink-0 rounded-lg bg-cover bg-center" style={{ backgroundImage: `url(${card.referenceImageUrl ?? card.imageDataUrl})` }} />
                 ) : <div className="grid h-20 w-14 shrink-0 place-items-center rounded-lg bg-white/10 text-[10px] text-white/50">Manual</div>}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-black">{card.cardName}</p>

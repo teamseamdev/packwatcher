@@ -126,7 +126,8 @@ export async function POST(request: Request) {
       estimatedValue: price?.value ?? 0,
       priceLabel: price?.label ?? null,
       pricingSource: price?.source ?? "manual",
-      pricingConfidence: price?.confidence ?? 0
+      pricingConfidence: price?.confidence ?? 0,
+      referenceImageUrl: price?.imageUrl ?? null
     },
     messages
   });
