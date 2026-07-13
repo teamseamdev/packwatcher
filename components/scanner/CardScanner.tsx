@@ -1,7 +1,8 @@
 "use client";
 
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
-import { Camera, CheckCircle2, FileDown, Loader2, Plus, ScanLine, Search, Trash2, UploadCloud, Video, X } from "lucide-react";
+import { Check, CheckCircle2, FileDown, Images, Loader2, Plus, ScanLine, Search, Sparkles, Trash2, UploadCloud, X } from "lucide-react";
+import { createClient } from "@/lib/supabase/browser";
 
 type ScannerMode = "scanner" | "video";
 type ScannerLanguage = "auto" | "english" | "japanese" | "chinese_simplified" | "chinese_traditional" | "korean";
@@ -32,6 +33,22 @@ type ScanResponse = {
 const MAX_VIDEO_SCAN_FRAMES = 96;
 const MIN_VIDEO_SCAN_FRAMES = 18;
 const CONTACT_SHEET_FRAME_COUNT = 24;
+const FALLBACK_PACK_OPTIONS = [
+  "Pokemon 151",
+  "Prismatic Evolutions",
+  "Surging Sparks",
+  "Journey Together",
+  "Destined Rivals",
+  "Twilight Masquerade",
+  "Temporal Forces",
+  "Paldean Fates",
+  "Obsidian Flames",
+  "Scarlet & Violet",
+  "Crown Zenith",
+  "Japanese Pokemon",
+  "Chinese Pokemon",
+  "Korean Pokemon"
+];
 
 export function CardScanner() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -52,6 +69,7 @@ export function CardScanner() {
   const [language, setLanguage] = useState<ScannerLanguage>("auto");
   const [scanPhase, setScanPhase] = useState<ScanPhase>("idle");
   const [successFlash, setSuccessFlash] = useState(false);
+  const [packOptions, setPackOptions] = useState<string[]>(FALLBACK_PACK_OPTIONS);
 
   const totalValue = useMemo(() => cards.reduce((sum, card) => sum + card.estimatedValue, 0), [cards]);
 
@@ -76,6 +94,35 @@ export function CardScanner() {
       document.body.style.overflow = previousOverflow;
     };
   }, [isCameraReady, mode]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadPackOptions() {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("catalog_products")
+        .select("name,title,set_name,product_type")
+        .eq("tcg", "pokemon")
+        .order("tracking_count", { ascending: false })
+        .limit(400);
+
+      if (ignore || !data?.length) return;
+      const names = new Set<string>();
+      for (const product of data) {
+        const name = cleanOption(product.title || product.name);
+        if (name) names.add(name);
+        const setName = cleanOption(product.set_name);
+        if (setName) names.add(setName);
+      }
+      setPackOptions(Array.from(new Set([...Array.from(names), ...FALLBACK_PACK_OPTIONS])).slice(0, 500));
+    }
+
+    void loadPackOptions();
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   async function startCamera(nextMode = mode) {
     setError(null);
@@ -388,23 +435,17 @@ export function CardScanner() {
   return (
     <div className="space-y-5">
       <section className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
-        <div className="grid gap-2 md:grid-cols-[1fr_1fr_220px]">
-          <ModeButton active={mode === "scanner"} icon={ScanLine} label="Scanner" onClick={() => { resetSession("scanner"); void startCamera("scanner"); }} />
-          <label className={`flex h-12 cursor-pointer items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold ${mode === "video" ? "border-amber-300 bg-amber-300 text-slate-950" : "border-white/10 bg-slate-950/50 text-slate-200"}`}>
-            <Video className="h-4 w-4" />
-            Upload video
-            <input
-              type="file"
-              accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
-              className="sr-only"
-              disabled={isScanning}
-              onChange={(event) => {
-                const selected = event.target.files?.[0];
-                if (selected) void scanUploadedVideo(selected);
-                event.currentTarget.value = "";
-              }}
-            />
-          </label>
+        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_220px]">
+          <input
+            list="packwatcher-pack-options"
+            value={packHint}
+            onChange={(event) => setPackHint(event.target.value)}
+            placeholder="Choose pack, box, or set"
+            className="h-12 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-slate-100 outline-none focus:border-amber-300"
+          />
+          <datalist id="packwatcher-pack-options">
+            {packOptions.map((option) => <option key={option} value={option} />)}
+          </datalist>
           <select
             value={language}
             onChange={(event) => setLanguage(event.target.value as ScannerLanguage)}
@@ -418,82 +459,42 @@ export function CardScanner() {
             <option value="korean">Korean</option>
           </select>
         </div>
-        <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_220px]">
-          <input
-            value={packHint}
-            onChange={(event) => setPackHint(event.target.value)}
-            placeholder="Optional pack/set hint, e.g. Prismatic Evolutions, 151, Terastal Festival"
-            className="h-12 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-slate-100 outline-none focus:border-amber-300"
-          />
+        <div className="mt-3">
           <p className="rounded-lg border border-white/10 bg-slate-950/40 px-3 py-2 text-xs text-slate-400">
-            Helps match top name and bottom card number.
+            Helps match card names, numbers, and set context.
           </p>
         </div>
       </section>
 
       <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
-          <div className="relative overflow-hidden rounded-lg bg-slate-950">
-            {isCameraReady && mode !== "video" ? (
-              <div className="grid aspect-[3/4] w-full place-items-center p-6 text-center text-sm text-slate-400 sm:aspect-video">
-                Camera is open full screen.
-              </div>
-            ) : (
-              <video ref={videoRef} autoPlay playsInline muted className="aspect-[3/4] w-full object-cover sm:aspect-video" />
-            )}
-            {!isCameraReady && mode !== "video" ? (
-              <div className="absolute inset-0 grid place-items-center p-6 text-center text-sm text-slate-400">
-                Start scanner to use your camera.
-              </div>
-            ) : null}
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => {
+                if (isCameraReady) {
+                  setIsComplete(true);
+                  stopCamera();
+                  setScanPhase("idle");
+                } else {
+                  void startCamera("scanner");
+                }
+              }}
+              disabled={isScanning}
+              className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-black text-slate-950 disabled:opacity-50 sm:flex-none"
+            >
+              <ScanLine className="h-4 w-4" />
+              {isCameraReady ? "Stop scanning" : "Start scanner"}
+            </button>
+            <label className="inline-flex h-12 flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/10 bg-slate-950/50 px-4 text-sm font-semibold text-slate-200 sm:flex-none">
+              <UploadCloud className="h-4 w-4" />
+              Upload video
+              <input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" className="sr-only" onChange={(event) => {
+                const selected = event.target.files?.[0];
+                if (selected) void scanUploadedVideo(selected);
+                event.currentTarget.value = "";
+              }} />
+            </label>
           </div>
-
-          <div className="mt-4 flex flex-wrap gap-3">
-            {mode !== "video" ? (
-              <>
-                <button
-                  onClick={() => {
-                    if (isCameraReady) {
-                      setIsComplete(true);
-                      stopCamera();
-                      setScanPhase("idle");
-                    } else {
-                      void startCamera("scanner");
-                    }
-                  }}
-                  disabled={isScanning}
-                  className="inline-flex h-11 items-center gap-2 rounded-lg border border-white/10 px-4 text-sm font-semibold text-slate-200"
-                >
-                  <Camera className="h-4 w-4" />
-                  {isCameraReady ? "Stop scanning" : "Start scanner"}
-                </button>
-                <button onClick={() => void scanCameraFrame()} disabled={!isCameraReady || isScanning} className="inline-flex h-11 items-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-bold text-slate-950 disabled:opacity-50">
-                  {isScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />}
-                  Scan card
-                </button>
-              </>
-            ) : (
-              <label className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-bold text-slate-950">
-                <UploadCloud className="h-4 w-4" />
-                Choose video
-                <input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" className="sr-only" onChange={(event) => {
-                  const selected = event.target.files?.[0];
-                  if (selected) void scanUploadedVideo(selected);
-                  event.currentTarget.value = "";
-                }} />
-              </label>
-            )}
-          </div>
-
-          {lastCard ? (
-            <div className="mt-4 flex items-center gap-3 rounded-lg border border-emerald-300/30 bg-emerald-400/10 p-3">
-              <CheckCircle2 className="h-6 w-6 shrink-0 text-emerald-300" />
-              <div>
-                <p className="font-bold text-white">{lastCard.cardName}</p>
-                <p className="text-sm text-emerald-100">{currency(lastCard.estimatedValue)} estimated value</p>
-              </div>
-            </div>
-          ) : null}
 
           {notice ? <p className="mt-4 rounded-lg border border-amber-300/30 bg-amber-300/10 p-3 text-sm text-amber-100">{notice}</p> : null}
           {error ? <p className="mt-4 rounded-lg border border-rose-300/30 bg-rose-500/10 p-3 text-sm text-rose-100">{error}</p> : null}
@@ -586,8 +587,8 @@ export function CardScanner() {
       {isCameraReady && mode !== "video" ? (
         <FullScreenScanner
           videoRef={videoRef}
+          cards={cards}
           isScanning={isScanning}
-          scanPhase={scanPhase}
           successFlash={successFlash}
           lastCard={lastCard}
           totalCards={cards.length}
@@ -595,6 +596,10 @@ export function CardScanner() {
           error={error}
           notice={notice}
           onScan={() => void scanCameraFrame()}
+          onUpload={(file) => {
+            stopCamera();
+            void scanUploadedVideo(file);
+          }}
           onClose={() => {
             setIsComplete(true);
             stopCamera();
@@ -613,8 +618,8 @@ export function CardScanner() {
 
 function FullScreenScanner({
   videoRef,
+  cards,
   isScanning,
-  scanPhase,
   successFlash,
   lastCard,
   totalCards,
@@ -622,12 +627,13 @@ function FullScreenScanner({
   error,
   notice,
   onScan,
+  onUpload,
   onClose,
   onEnd
 }: {
   videoRef: RefObject<HTMLVideoElement | null>;
+  cards: ScannerCard[];
   isScanning: boolean;
-  scanPhase: ScanPhase;
   successFlash: boolean;
   lastCard: ScannerCard | null;
   totalCards: number;
@@ -635,76 +641,94 @@ function FullScreenScanner({
   error: string | null;
   notice: string | null;
   onScan: () => void;
+  onUpload: (file: File) => void;
   onClose: () => void;
   onEnd: () => void;
 }) {
-  const phaseText = scanPhase === "capturing"
-    ? "Capturing"
-    : scanPhase === "recognizing"
-      ? "Checking"
-      : scanPhase === "pricing"
-        ? "Checking"
-        : "Ready";
-
   return (
-    <div className="fixed inset-0 z-[100] bg-black text-white">
+    <div className="fixed inset-0 z-[100] overflow-hidden bg-black text-white">
       <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0,transparent_42%,rgba(0,0,0,0.72)_72%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/45 via-transparent to-black/95" />
       {successFlash ? <div className="pointer-events-none absolute inset-0 bg-emerald-400/35" /> : null}
-      <div className="pointer-events-none absolute inset-x-8 top-[16vh] mx-auto max-w-[340px]">
-        <div className="relative aspect-[63/88] rounded-2xl border-2 border-amber-300/90 shadow-[0_0_0_999px_rgba(0,0,0,0.22)]">
-          <div className="absolute left-4 right-4 top-5 rounded border border-amber-200/70 bg-black/30 px-2 py-1 text-center text-[10px] font-bold uppercase tracking-wide text-amber-100">
-            Card name area
-          </div>
-          <div className="absolute bottom-5 left-4 w-24 rounded border border-amber-200/70 bg-black/30 px-2 py-1 text-center text-[10px] font-bold uppercase tracking-wide text-amber-100">
-            Card #
-          </div>
-          {isScanning ? <div className="absolute inset-x-2 top-6 h-1 animate-pulse rounded-full bg-amber-300 shadow-[0_0_18px_rgba(252,211,77,0.9)]" /> : null}
-        </div>
-      </div>
 
-      <div className="absolute left-0 right-0 top-0 flex items-center justify-between p-4 pt-[calc(env(safe-area-inset-top)+12px)]">
-        <div className="rounded-full bg-black/55 px-3 py-2 text-xs font-bold uppercase tracking-wide text-amber-100">
-          Scanner - {phaseText}
+      <div className="absolute left-0 right-0 top-0 flex items-center justify-between px-5 pt-[calc(env(safe-area-inset-top)+14px)]">
+        <button onClick={onClose} className="grid h-12 w-12 place-items-center rounded-full bg-white text-slate-950 shadow-lg">
+          <X className="h-6 w-6" />
+        </button>
+        <div className="flex overflow-hidden rounded-2xl border border-white/10 bg-black/45 p-1 text-sm font-bold shadow-lg backdrop-blur">
+          <span className="rounded-xl bg-white/20 px-4 py-2">Recognition</span>
+          <span className="px-4 py-2 text-white/80">AI Mode</span>
         </div>
-        <button onClick={onClose} className="grid h-11 w-11 place-items-center rounded-full bg-black/55 text-white">
-          <X className="h-5 w-5" />
+        <button className="grid h-12 w-12 place-items-center rounded-full bg-black/45 text-white shadow-lg backdrop-blur">
+          <Sparkles className="h-5 w-5" />
         </button>
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 space-y-3 bg-gradient-to-t from-black via-black/88 to-transparent p-4 pb-[calc(env(safe-area-inset-bottom)+16px)]">
+      <div className="absolute inset-x-0 top-[calc(env(safe-area-inset-top)+86px)] flex justify-center gap-3 px-4 text-xs font-bold">
+        <div className="rounded-full bg-black/45 px-4 py-2 text-white/80 backdrop-blur">Auto Capture</div>
+        <div className="rounded-full bg-emerald-400/18 px-4 py-2 text-emerald-300 backdrop-blur">Auto Cropping</div>
+      </div>
+
+      <div className="pointer-events-none absolute inset-x-8 top-[26vh] mx-auto max-w-[340px]">
+        <div className="relative aspect-[63/88] rounded-[10px] border-[5px] border-emerald-400 shadow-[0_0_30px_rgba(74,222,128,0.5)]">
+          <div className="absolute -left-3 -top-3 h-6 w-6 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" />
+          <div className="absolute -right-3 -top-3 h-6 w-6 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" />
+          <div className="absolute -bottom-3 -left-3 h-6 w-6 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" />
+          <div className="absolute -bottom-3 -right-3 h-6 w-6 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" />
+          <div className="absolute left-1/2 top-7 -translate-x-1/2 rounded-full bg-emerald-400/65 px-5 py-3 text-sm font-black shadow-lg backdrop-blur">
+            {isScanning ? <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Checking</span> : <span className="inline-flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> Ready to capture</span>}
+          </div>
+          {isScanning ? <div className="absolute inset-x-3 top-1/2 h-1 animate-pulse rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(74,222,128,0.9)]" /> : null}
+        </div>
+      </div>
+
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/88 to-transparent px-4 pb-[calc(env(safe-area-inset-bottom)+16px)] pt-24">
         {lastCard ? (
-          <div className="rounded-2xl border border-emerald-300/40 bg-emerald-400/15 p-4">
-            <div className="flex items-center gap-3">
-              <CheckCircle2 className="h-7 w-7 shrink-0 text-emerald-300" />
-              <div className="min-w-0">
-                <p className="truncate text-lg font-black">{lastCard.cardName}</p>
-                <p className="text-sm text-emerald-100">{currency(lastCard.estimatedValue)} estimated value</p>
+          <div className="mx-auto mb-3 max-w-sm rounded-full bg-emerald-400/25 px-4 py-2 text-center text-sm font-black text-emerald-100 backdrop-blur">
+            {lastCard.cardName} - {currency(lastCard.estimatedValue)}
+          </div>
+        ) : null}
+        {error ? <p className="mb-3 rounded-xl border border-rose-300/30 bg-rose-500/20 p-3 text-sm text-rose-100">{error}</p> : null}
+        {!error && notice ? <p className="mb-3 rounded-xl border border-white/10 bg-black/35 p-3 text-center text-sm text-white/85 backdrop-blur">{notice}</p> : null}
+
+        <div className="mb-3 flex items-center justify-between text-base font-bold">
+          <div>{totalCards} card{totalCards === 1 ? "" : "s"} scanned</div>
+          <div className="text-white/80">Total <span className="text-emerald-300">{currency(totalValue)}</span></div>
+        </div>
+
+        {cards.length ? (
+          <div className="mb-6 flex gap-3 overflow-x-auto pb-1">
+            {cards.slice(-8).map((card) => (
+              <div key={card.id} className="flex min-w-[228px] items-center gap-3 rounded-2xl bg-white/12 p-3 shadow-lg backdrop-blur">
+                {card.imageDataUrl ? (
+                  <div className="h-20 w-14 shrink-0 rounded-lg bg-cover bg-center" style={{ backgroundImage: `url(${card.imageDataUrl})` }} />
+                ) : <div className="grid h-20 w-14 shrink-0 place-items-center rounded-lg bg-white/10 text-[10px] text-white/50">Manual</div>}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-black">{card.cardName}</p>
+                  <p className="truncate text-xs text-white/60">{[card.cardNumber, card.setName].filter(Boolean).join(" - ") || "No set details"}</p>
+                  <p className="mt-1 text-base font-black text-emerald-300">{currency(card.estimatedValue)}</p>
+                </div>
               </div>
-            </div>
+            ))}
           </div>
         ) : null}
 
-        {error ? <p className="rounded-xl border border-rose-300/30 bg-rose-500/20 p-3 text-sm text-rose-100">{error}</p> : null}
-        {!error && notice ? <p className="rounded-xl border border-amber-300/30 bg-amber-300/15 p-3 text-sm text-amber-100">{notice}</p> : null}
-
-        <div className="grid grid-cols-2 gap-3 text-center text-sm">
-          <div className="rounded-xl bg-white/10 p-3">
-            <p className="text-slate-300">Cards</p>
-            <p className="text-xl font-black">{totalCards}</p>
-          </div>
-          <div className="rounded-xl bg-white/10 p-3">
-            <p className="text-slate-300">Total</p>
-            <p className="text-xl font-black text-amber-200">{currency(totalValue)}</p>
-          </div>
-        </div>
-
-        <div className="flex gap-3">
-          <button onClick={onScan} disabled={isScanning} className="h-14 flex-[2] rounded-2xl bg-amber-300 text-base font-black text-slate-950 disabled:opacity-60">
-            {isScanning ? <span className="inline-flex items-center gap-2"><Loader2 className="h-5 w-5 animate-spin" /> Checking</span> : "Scan"}
+        <div className="grid grid-cols-[1fr_96px_1fr] items-end gap-4">
+          <label className="grid cursor-pointer justify-items-center gap-1 text-xs font-semibold text-white/85">
+            <span className="grid h-14 w-14 place-items-center rounded-2xl bg-black/40 backdrop-blur"><Images className="h-7 w-7" /></span>
+            Gallery
+            <input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" className="sr-only" onChange={(event) => {
+              const selected = event.target.files?.[0];
+              if (selected) onUpload(selected);
+              event.currentTarget.value = "";
+            }} />
+          </label>
+          <button onClick={onScan} disabled={isScanning} className="grid h-24 w-24 place-items-center rounded-full border-[5px] border-emerald-400 bg-emerald-400 text-slate-950 shadow-[0_0_24px_rgba(74,222,128,0.7)] disabled:opacity-70">
+            {isScanning ? <Loader2 className="h-10 w-10 animate-spin" /> : <Check className="h-12 w-12 stroke-[3]" />}
           </button>
-          <button onClick={onEnd} className="h-14 flex-1 rounded-2xl border border-amber-300/50 bg-black/40 text-base font-bold text-amber-100">
-            Stop scanning
+          <button onClick={onEnd} className="grid justify-items-center gap-1 text-xs font-semibold text-white/85">
+            <span className="grid h-14 w-14 place-items-center rounded-full bg-white text-slate-950"><Check className="h-8 w-8 stroke-[3]" /></span>
+            Done
           </button>
         </div>
       </div>
@@ -714,15 +738,6 @@ function FullScreenScanner({
 
 function reorderCards(cards: ScannerCard[]) {
   return cards.map((card, index) => ({ ...card, order: index + 1 }));
-}
-
-function ModeButton({ active, icon: Icon, label, onClick }: { active: boolean; icon: typeof ScanLine; label: string; onClick: () => void }) {
-  return (
-    <button onClick={onClick} className={`inline-flex h-12 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold ${active ? "border-amber-300 bg-amber-300 text-slate-950" : "border-white/10 bg-slate-950/50 text-slate-200"}`}>
-      <Icon className="h-4 w-4" />
-      {label}
-    </button>
-  );
 }
 
 function captureVideoFrame(video: HTMLVideoElement) {
@@ -942,6 +957,12 @@ function currency(value: number) {
 function languageLabel(language: string | null) {
   if (!language || language === "auto") return null;
   return language.replace(/_/g, " ");
+}
+
+function cleanOption(value: string | null | undefined) {
+  const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  if (!text || text.length < 2) return null;
+  return text;
 }
 
 function exportResultsPdf(cards: ScannerCard[], totalValue: number) {
