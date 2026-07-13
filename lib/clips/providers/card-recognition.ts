@@ -60,7 +60,8 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
                 "Cards may be English, Japanese, Simplified Chinese, Traditional Chinese, Korean, or another localized Pokemon TCG language.",
                 "Use the artwork, Pokemon/card name, HP, attacks, rarity marks, card number, regulation mark, set code, and visible text.",
                 "For non-English cards, return cardName as the best English/Tcgplayer-compatible card name when you can infer it. Put the printed/localized name in originalName.",
-                "Do not guess. If the card is too blurry, too small, or not a Pokemon card, return an empty candidates array.",
+                "If a Pokemon card is clearly visible but exact identity is uncertain, return cardName \"Unknown Pokemon card\" with low confidence instead of an empty list.",
+                "Return an empty candidates array only when no Pokemon card is visible.",
                 "Return JSON only."
               ].join(" ")
           },
@@ -76,6 +77,7 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
                     "Return {\"candidates\":[{\"cardName\":\"English pricing name\",\"originalName\":null,\"language\":null,\"setName\":null,\"cardNumber\":null,\"variant\":null,\"confidence\":0.0}]}",
                     "Use confidence 0-1.",
                     "For Japanese, Chinese, or Korean cards, translate or normalize the cardName to the closest English card name for pricing when possible.",
+                    "If only the card border/art/card shape is visible, return Unknown Pokemon card with confidence 0.15-0.3.",
                     "Include setName, cardNumber, and variant only if visible or strongly inferable from card text/art."
                   ].join(" ")
               },
@@ -107,7 +109,7 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
     return (parsed.candidates ?? []).flatMap((candidate) => {
       const cardName = String(candidate.cardName ?? "").trim();
       const confidence = Number(candidate.confidence ?? 0);
-      if (!cardName || !Number.isFinite(confidence) || confidence < 0.35) return [];
+      if (!cardName || !Number.isFinite(confidence) || confidence < 0.15) return [];
       return [{
         cardName,
         setName: stringOrNull(candidate.setName),

@@ -87,7 +87,7 @@ export function CardScanner() {
     setNotice(null);
 
     const imageDataUrl = captureVideoFrame(videoRef.current);
-    const scanned = await scanImageDataUrl(imageDataUrl);
+    const scanned = await scanImageDataUrl(imageDataUrl, { tryCrops: true });
     setIsScanning(false);
 
     if (!scanned) return;
@@ -114,7 +114,7 @@ export function CardScanner() {
 
       for (let index = 0; index < frames.length; index += 1) {
         setNotice(`Scanning frame ${index + 1} of ${frames.length}...`);
-        const scanned = await scanImageDataUrl(frames[index]);
+        const scanned = await scanImageDataUrl(frames[index], { silentMiss: true, tryCrops: true });
         if (!scanned) continue;
 
         const key = normalizeCardKey(scanned.cardName, scanned.setName);
@@ -125,6 +125,9 @@ export function CardScanner() {
 
       setIsComplete(true);
       setNotice(null);
+      if (!seen.size) {
+        setError("No cards were detected in the sampled frames. Try choosing Japanese/Chinese/Korean in the language selector, or upload a shorter close-up video.");
+      }
     } catch (scanError) {
       setError(scanError instanceof Error ? scanError.message : "Video scan failed.");
     } finally {
@@ -150,13 +153,20 @@ export function CardScanner() {
     setManualSet("");
   }
 
-  async function scanImageDataUrl(imageDataUrl: string) {
-    const response = await fetch("/api/scanner/scan", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...dataUrlToPayload(imageDataUrl), language })
-    });
-    return handleScanResponse(response);
+  async function scanImageDataUrl(imageDataUrl: string, options: { silentMiss?: boolean; tryCrops?: boolean } = {}) {
+    const variants = options.tryCrops ? await imageScanVariants(imageDataUrl) : [imageDataUrl];
+
+    for (const variant of variants) {
+      const response = await fetch("/api/scanner/scan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...dataUrlToPayload(variant), language })
+      });
+      const scanned = await handleScanResponse(response, options);
+      if (scanned) return scanned;
+    }
+
+    return null;
   }
 
   async function scanManualCard(cardName: string, setName: string) {
@@ -168,10 +178,12 @@ export function CardScanner() {
     return handleScanResponse(response);
   }
 
-  async function handleScanResponse(response: Response) {
+  async function handleScanResponse(response: Response, options: { silentMiss?: boolean } = {}) {
     const body = await response.json().catch(() => null) as ScanResponse | null;
     if (!response.ok || !body?.card) {
-      setError(body?.error ?? `Scan failed with status ${response.status}.`);
+      if (!options.silentMiss) {
+        setError(body?.error ?? `Scan failed with status ${response.status}.`);
+      }
       return null;
     }
 
@@ -373,6 +385,52 @@ function dataUrlToPayload(dataUrl: string) {
   const [header, imageBase64] = dataUrl.split(",");
   const mimeType = header.match(/data:(.*);base64/)?.[1] ?? "image/jpeg";
   return { imageBase64, mimeType };
+}
+
+async function imageScanVariants(dataUrl: string) {
+  const image = await loadImage(dataUrl);
+  const variants = [dataUrl];
+  const crops = [
+    centerCrop(image.width, image.height, 0.72, 0.88),
+    centerCrop(image.width, image.height, 0.48, 0.92),
+    centerCrop(image.width, image.height, 0.9, 0.58)
+  ];
+
+  for (const crop of crops) {
+    variants.push(cropImage(image, crop.x, crop.y, crop.width, crop.height));
+  }
+
+  return variants;
+}
+
+function centerCrop(width: number, height: number, widthRatio: number, heightRatio: number) {
+  const cropWidth = Math.max(1, Math.round(width * widthRatio));
+  const cropHeight = Math.max(1, Math.round(height * heightRatio));
+  return {
+    x: Math.max(0, Math.round((width - cropWidth) / 2)),
+    y: Math.max(0, Math.round((height - cropHeight) / 2)),
+    width: cropWidth,
+    height: cropHeight
+  };
+}
+
+function cropImage(image: HTMLImageElement, x: number, y: number, width: number, height: number) {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.min(1280, width);
+  canvas.height = Math.round((height / width) * canvas.width);
+  const context = canvas.getContext("2d");
+  if (!context) return image.src;
+  context.drawImage(image, x, y, width, height, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.84);
+}
+
+function loadImage(dataUrl: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not prepare frame crop."));
+    image.src = dataUrl;
+  });
 }
 
 async function extractVideoFrames(file: File) {
