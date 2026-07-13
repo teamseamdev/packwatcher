@@ -3,6 +3,7 @@ import { ScanLine } from "lucide-react";
 import { InventoryCollection } from "@/components/inventory/InventoryCollection";
 import { StatCard } from "@/components/stat-card";
 import { requireUser } from "@/lib/auth";
+import { TCGCSVProvider } from "@/lib/clips/providers/pricing";
 import { calculateProfit, currency } from "@/lib/profit";
 import type { InventoryItem } from "@/lib/types";
 
@@ -10,6 +11,7 @@ export default async function InventoryPage() {
   const { supabase, user } = await requireUser();
   const { data: items } = await supabase.from("inventory_items").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).returns<InventoryItem[]>();
   const inventory = items ?? [];
+  const displayInventory = await hydrateInventoryImages(inventory);
   const totals = inventory.reduce((sum, item) => {
     const result = calculateProfit({
       estimatedSalePrice: item.estimated_sale_price,
@@ -47,9 +49,48 @@ export default async function InventoryPage() {
             Scan cards
           </Link>
         </aside>
-        <InventoryCollection items={inventory} />
+        <InventoryCollection items={displayInventory} />
       </section>
     </div>
   );
+}
+
+async function hydrateInventoryImages(items: InventoryItem[]) {
+  const provider = new TCGCSVProvider();
+  const hydrated: InventoryItem[] = [];
+
+  for (const item of items) {
+    if (item.image_url) {
+      hydrated.push(item);
+      continue;
+    }
+
+    const lookup = parseInventoryLookup(item.name);
+    if (!lookup.cardName) {
+      hydrated.push(item);
+      continue;
+    }
+
+    const prices = await provider.price(lookup).catch(() => []);
+    hydrated.push({
+      ...item,
+      image_url: prices[0]?.imageUrl ?? null
+    });
+  }
+
+  return hydrated;
+}
+
+function parseInventoryLookup(name: string) {
+  const parts = name.split(" - ").map((part) => part.trim()).filter(Boolean);
+  const cardName = parts[0] ?? name.trim();
+  const maybeNumber = parts[1]?.match(/\d{1,4}(?:\s*\/\s*\d{1,4})?/)?.[0] ?? null;
+  const setName = parts.length >= 3 ? parts.slice(2).join(" - ") : parts[1] ?? null;
+
+  return {
+    cardName,
+    cardNumber: maybeNumber,
+    setName
+  };
 }
 

@@ -208,5 +208,5 @@ function thisSource(product: TcgCsvProduct, group: TcgCsvGroup) {
 }
 
 function productImageUrl(product: TcgCsvProduct) {
-  return product.imageUrl ?? product.image_url ?? product.image ?? null;
+  return product.imageUrl ?? product.image_url ?? product.image ?? `https://tcgplayer-cdn.tcgplayer.com/product/${product.productId}_in_1000x1000.jpg`;
 }

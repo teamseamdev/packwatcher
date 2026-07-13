@@ -448,7 +448,7 @@ export function CardScanner() {
       estimated_sale_price: Number(card.estimatedValue || 0),
       fees: 0,
       shipping: 0,
-      image_url: card.referenceImageUrl ?? null,
+      image_url: card.referenceImageUrl ?? card.imageDataUrl ?? null,
       notes: [
         "Added from PackWatcher Scanner",
         card.originalName ? `Printed name: ${card.originalName}` : null,
