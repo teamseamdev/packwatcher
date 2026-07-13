@@ -4,6 +4,7 @@ import { ExternalLink } from "lucide-react";
 import { ProductTrackButton } from "@/components/product-track-button";
 import { requireProfile } from "@/lib/auth";
 import { compareCatalogOffers, metadataText } from "@/lib/catalog/offer-ranking";
+import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
 import { optionalCurrency } from "@/lib/profit";
 import { aggregatePrices } from "@/lib/retailers/shared/price-aggregation";
 import type { CatalogOffer, CatalogProduct } from "@/lib/types";
@@ -118,7 +119,7 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
                   Last checked {offer.last_checked_at ? new Date(offer.last_checked_at).toLocaleString() : "not yet"}
                 </p>
                 <a
-                  href={offer.url}
+                  href={resolveRetailerUrl(offer.url, offer.retailer ?? offer.store_name, offer.title ?? product.title ?? product.name)}
                   target="_blank"
                   rel="noreferrer"
                   className="mt-5 inline-flex h-10 items-center gap-2 rounded-lg border border-white/10 px-4 text-sm font-semibold text-white"

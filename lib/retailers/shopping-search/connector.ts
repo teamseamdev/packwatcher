@@ -1,3 +1,4 @@
+import { isGoogleUrl, resolveRetailerUrl } from "@/lib/catalog/retailer-url";
 import type { ShoppingSearchProvider, ShoppingSearchResult } from "@/lib/retailers/shared/types";
 
 type ProviderResponseItem = {
@@ -22,6 +23,8 @@ type ProviderResponseItem = {
   sourceUrl?: string;
   source_url?: string;
   product_link?: string;
+  direct_link?: string;
+  merchant_link?: string;
   confidence?: number;
 };
 
@@ -91,9 +94,11 @@ export function createConfiguredShoppingSearchProvider(): ShoppingSearchProvider
       const retrievedAt = new Date().toISOString();
 
       return items.flatMap((item) => {
-        const productUrl = item.productUrl ?? item.product_url ?? item.link ?? item.product_link;
         const retailer = item.retailer ?? item.source;
+        const rawProductUrl = item.productUrl ?? item.product_url ?? item.direct_link ?? item.merchant_link ?? item.link ?? item.product_link;
+        const productUrl = resolveRetailerUrl(rawProductUrl, retailer, item.title);
         if (!item.title || !retailer || !productUrl) return [];
+        if (isGoogleUrl(productUrl)) return [];
         return [{
           provider: providerName,
           title: item.title,
@@ -105,7 +110,7 @@ export function createConfiguredShoppingSearchProvider(): ShoppingSearchProvider
           availabilityText: textOrNull(item.availability) ?? joinedExtensions(item),
           shippingText: textOrNull(item.delivery) ?? textOrNull(item.shipping),
           pickupText: textOrNull(item.pickup),
-          sourceUrl: item.sourceUrl ?? item.source_url ?? productUrl,
+          sourceUrl: item.sourceUrl ?? item.source_url ?? rawProductUrl ?? productUrl,
           retrievedAt,
           confidence: item.confidence ?? 0.6
         }];

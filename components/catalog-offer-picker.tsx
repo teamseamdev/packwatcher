@@ -8,6 +8,7 @@ import { BellOff, BellPlus, ExternalLink, Loader2, PackageSearch, Search } from 
 import { removeTrackedProduct, trackCatalogProduct, untrackCatalogProduct } from "@/app/(app)/watchlist/actions";
 import { isLikelyPokemonProduct } from "@/lib/catalog-importers/pokemon-product-filter";
 import { compareCatalogOffers, fulfillmentText, metadataText } from "@/lib/catalog/offer-ranking";
+import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
 import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, TrackedProduct } from "@/lib/types";
 
@@ -269,7 +270,12 @@ export function CatalogOfferPicker({
                           Product page
                         </Link>
                       ) : null}
-                      <a href={offer.url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1 rounded-lg border border-white/10 px-3 text-xs font-semibold text-white">
+                      <a
+                        href={resolveRetailerUrl(offer.url, offer.retailer ?? offer.store_name, offer.title ?? product?.title ?? product?.name)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex h-9 items-center gap-1 rounded-lg border border-white/10 px-3 text-xs font-semibold text-white"
+                      >
                         <ExternalLink className="h-3 w-3" />
                         Retailer
                       </a>

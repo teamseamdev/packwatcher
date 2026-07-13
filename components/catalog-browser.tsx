@@ -8,6 +8,7 @@ import { BellOff, BellPlus, ExternalLink, Loader2, PackageSearch, Search } from 
 import { trackCatalogOffer, trackCatalogProduct, untrackCatalogProduct } from "@/app/(app)/watchlist/actions";
 import { isLikelyPokemonProduct } from "@/lib/catalog-importers/pokemon-product-filter";
 import { compareCatalogOffers, fulfillmentText } from "@/lib/catalog/offer-ranking";
+import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
 import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, StockStatus } from "@/lib/types";
 
@@ -349,7 +350,12 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
                               <p className="mt-1 text-xs text-slate-400">{statusLabel(item.status)} - {optionalCurrency(item.last_price)}</p>
                               {fulfillmentText(item) ? <p className="mt-1 line-clamp-2 text-[11px] text-slate-500">{fulfillmentText(item)}</p> : null}
                             </div>
-                            <a href={item.url} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center gap-1 rounded-lg border border-white/10 px-2 text-xs text-slate-200">
+                            <a
+                              href={resolveRetailerUrl(item.url, item.retailer ?? item.store_name, item.title ?? group.product.title ?? group.product.name)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex h-8 items-center gap-1 rounded-lg border border-white/10 px-2 text-xs text-slate-200"
+                            >
                               <ExternalLink className="h-3 w-3" />
                               Store
                             </a>

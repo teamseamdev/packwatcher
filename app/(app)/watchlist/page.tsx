@@ -5,6 +5,7 @@ import { WatchlistGrid } from "@/components/watchlist-grid";
 import { isAdmin, requireProfile } from "@/lib/auth";
 import { ensureCatalogHasRows } from "@/lib/catalog/ensure-catalog";
 import { compareCatalogOffers, metadataText } from "@/lib/catalog/offer-ranking";
+import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
 import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, TrackedProduct } from "@/lib/types";
 import { addProduct, untrackCatalogProduct } from "./actions";
@@ -126,7 +127,12 @@ export default async function WatchlistPage() {
                                 {offer.availability_text ? <p className="mt-1 text-[11px] text-slate-500">{offer.availability_text}</p> : null}
                                 <p className="mt-1 text-[11px] text-slate-500">Checked {offer.last_checked_at ? new Date(offer.last_checked_at).toLocaleString() : "not yet"}</p>
                               </div>
-                              <a href={offer.url} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center gap-1 rounded-lg border border-white/10 px-2 text-xs text-slate-200">
+                              <a
+                                href={resolveRetailerUrl(offer.url, offer.retailer ?? offer.store_name, offer.title ?? related.title ?? related.name)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex h-8 items-center gap-1 rounded-lg border border-white/10 px-2 text-xs text-slate-200"
+                              >
                                 <ExternalLink className="h-3 w-3" />
                                 Store
                               </a>
