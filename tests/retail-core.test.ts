@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { aggregatePrices } from "../lib/retailers/shared/price-aggregation.ts";
 import { isLikelyPokemonProduct, pokemonShoppingQuery } from "../lib/catalog-importers/pokemon-product-filter.ts";
+import { isGoogleUrl, resolveRetailerUrl } from "../lib/catalog/retailer-url.ts";
 import { matchProduct } from "../lib/retailers/shared/product-matching.ts";
 import { freshnessLabel, normalizeAvailabilityStatus, normalizeTitle, normalizeUpc } from "../lib/retailers/shared/normalize.ts";
 import { notificationEventKey, shouldSendRestockAlert } from "../lib/retailers/shared/restock-events.ts";
@@ -97,4 +98,14 @@ test("filters shopping discovery to Pokemon sealed/card products", () => {
   assert.equal(isLikelyPokemonProduct({ title: "Chaos Rising (Sword and Sorcery S20)", storeName: "Books A Million", productUrl: "https://example.com/book" }), false);
   assert.equal(isLikelyPokemonProduct({ title: "Pokemon Chaos Rising Blister Pack", storeName: "TCGplayer", productUrl: "https://example.com/pokemon" }), true);
   assert.equal(isLikelyPokemonProduct({ title: "Surging Sparks Elite Trainer Box", storeName: "Target", productUrl: "https://example.com/item" }), true);
+});
+
+test("resolves shopping provider Google URLs to retailer URLs", () => {
+  const title = "Pokemon Mega Evolution Chaos Rising Booster Pack";
+  const galactic = resolveRetailerUrl("https://www.google.com/shopping/product/123", "Galactic Toys", title);
+  const embedded = resolveRetailerUrl(`https://www.google.com/url?q=${encodeURIComponent("https://www.acehardware.com/departments/toys-and-games/pokemon")}`, "Ace Hardware", title);
+
+  assert.equal(isGoogleUrl(galactic), false);
+  assert.equal(galactic, "https://www.galactictoys.com/search?q=Pokemon%20Mega%20Evolution%20Chaos%20Rising%20Booster%20Pack");
+  assert.equal(embedded, "https://www.acehardware.com/departments/toys-and-games/pokemon");
 });

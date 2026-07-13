@@ -49,7 +49,14 @@ function retailerSearchUrl(retailer?: string | null, title?: string | null) {
   const normalizedRetailer = (retailer ?? "").toLowerCase();
   const query = encodeURIComponent((title ?? "pokemon cards").replace(/\s+/g, " ").trim() || "pokemon cards");
 
+  if (!normalizedRetailer || ["retailer", "store", "seller", "unknown"].includes(normalizedRetailer)) return null;
+
   if (normalizedRetailer.includes("ace")) return `https://www.acehardware.com/search?query=${query}`;
+  if (normalizedRetailer.includes("galactic toys")) return `https://www.galactictoys.com/search?q=${query}`;
+  if (normalizedRetailer === "fye" || normalizedRetailer.includes(" fye")) return `https://www.fye.com/search?q=${query}`;
+  if (normalizedRetailer.includes("tcgplayer")) return `https://www.tcgplayer.com/search/all/product?q=${query}`;
+  if (normalizedRetailer.includes("books a million") || normalizedRetailer.includes("books-a-million")) return `https://www.booksamillion.com/search?query=${query}`;
+  if (normalizedRetailer.includes("world of books")) return `https://www.wob.com/en-us/search?search=${query}`;
   if (normalizedRetailer.includes("walmart")) return `https://www.walmart.com/search?q=${query}`;
   if (normalizedRetailer.includes("target")) return `https://www.target.com/s?searchTerm=${query}`;
   if (normalizedRetailer.includes("gamestop")) return `https://www.gamestop.com/search/?q=${query}`;
@@ -63,5 +70,18 @@ function retailerSearchUrl(retailer?: string | null, title?: string | null) {
   if (normalizedRetailer.includes("cvs")) return `https://www.cvs.com/search?searchTerm=${query}`;
   if (normalizedRetailer.includes("walgreens")) return `https://www.walgreens.com/search/results.jsp?Ntt=${query}`;
 
-  return null;
+  const domain = retailerDomainGuess(normalizedRetailer);
+  return domain ? `https://www.${domain}/search?q=${query}` : null;
+}
+
+function retailerDomainGuess(retailer: string) {
+  const cleaned = retailer
+    .replace(/\.com\b/g, "")
+    .replace(/&/g, "and")
+    .replace(/\b(the|official|store|shop|online)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+
+  if (cleaned.length < 4 || cleaned.length > 36) return null;
+  return `${cleaned}.com`;
 }
