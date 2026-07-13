@@ -63,6 +63,7 @@ create table public.inventory_items (
   fees numeric(10,2) not null default 0,
   shipping numeric(10,2) not null default 0,
   notes text,
+  image_url text,
   created_at timestamptz not null default now()
 );
 

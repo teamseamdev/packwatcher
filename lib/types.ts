@@ -105,9 +105,11 @@ export type InventoryItem = {
   name: string;
   quantity: number;
   purchase_price: number;
+  purchase_date?: string | null;
   estimated_sale_price: number;
   fees: number;
   shipping: number;
   notes: string | null;
+  image_url?: string | null;
   created_at: string;
 };

@@ -448,6 +448,7 @@ export function CardScanner() {
       estimated_sale_price: Number(card.estimatedValue || 0),
       fees: 0,
       shipping: 0,
+      image_url: card.referenceImageUrl ?? null,
       notes: [
         "Added from PackWatcher Scanner",
         card.originalName ? `Printed name: ${card.originalName}` : null,
@@ -455,7 +456,12 @@ export function CardScanner() {
       ].filter(Boolean).join("\n")
     }));
 
-    const { error: insertError } = await supabase.from("inventory_items").insert(rows);
+    let { error: insertError } = await supabase.from("inventory_items").insert(rows);
+    if (insertError && /image_url/i.test(insertError.message)) {
+      const rowsWithoutImages = rows.map(({ image_url: _imageUrl, ...row }) => row);
+      const retry = await supabase.from("inventory_items").insert(rowsWithoutImages);
+      insertError = retry.error;
+    }
     setIsScanning(false);
     setScanPhase("idle");
     if (insertError) {
