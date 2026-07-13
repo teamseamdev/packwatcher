@@ -49,9 +49,9 @@ export function AppNav({ plan }: { plan: Plan }) {
           </nav>
         </div>
       </header>
-      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-white/10 bg-slate-950 md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-white/10 bg-slate-950 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 md:hidden">
         {mobileItems.map((item) => (
-          <Link key={item.href} href={item.href} className={`grid justify-items-center gap-1 px-1 py-2 text-[11px] ${pathname.startsWith(item.href) ? "text-amber-200" : "text-slate-400"}`}>
+          <Link key={item.href} href={item.href} className={`grid justify-items-center gap-1 px-1 py-1 text-[11px] ${pathname.startsWith(item.href) ? "text-amber-200" : "text-slate-400"}`}>
             <item.icon className="h-5 w-5" />
             {item.label}
           </Link>
