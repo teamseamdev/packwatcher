@@ -1,9 +1,9 @@
 "use client";
 
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
-import { Camera, CheckCircle2, FileDown, Loader2, Plus, ScanLine, UploadCloud, Video, X } from "lucide-react";
+import { Camera, CheckCircle2, FileDown, Loader2, Plus, ScanLine, Search, Trash2, UploadCloud, Video, X } from "lucide-react";
 
-type ScannerMode = "single" | "multi-camera" | "video";
+type ScannerMode = "scanner" | "video";
 type ScannerLanguage = "auto" | "english" | "japanese" | "chinese_simplified" | "chinese_traditional" | "korean";
 type ScanPhase = "idle" | "capturing" | "recognizing" | "pricing";
 type ScannerCard = {
@@ -32,12 +32,13 @@ type ScanResponse = {
 const MAX_VIDEO_SCAN_FRAMES = 96;
 const MIN_VIDEO_SCAN_FRAMES = 18;
 const CONTACT_SHEET_FRAME_COUNT = 24;
-const PREVIEW_FRAME_COUNT = 12;
 
 export function CardScanner() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const [mode, setMode] = useState<ScannerMode>("single");
+  const successFlashTimeoutRef = useRef<number | null>(null);
+  const cardHideTimeoutRef = useRef<number | null>(null);
+  const [mode, setMode] = useState<ScannerMode>("scanner");
   const [cards, setCards] = useState<ScannerCard[]>([]);
   const [lastCard, setLastCard] = useState<ScannerCard | null>(null);
   const [isCameraReady, setIsCameraReady] = useState(false);
@@ -49,13 +50,16 @@ export function CardScanner() {
   const [manualSet, setManualSet] = useState("");
   const [packHint, setPackHint] = useState("");
   const [language, setLanguage] = useState<ScannerLanguage>("auto");
-  const [sampledFrames, setSampledFrames] = useState<string[]>([]);
   const [scanPhase, setScanPhase] = useState<ScanPhase>("idle");
+  const [successFlash, setSuccessFlash] = useState(false);
 
   const totalValue = useMemo(() => cards.reduce((sum, card) => sum + card.estimatedValue, 0), [cards]);
 
   useEffect(() => {
-    return () => stopCamera();
+    return () => {
+      stopCamera();
+      clearScannerTimers();
+    };
   }, []);
 
   useEffect(() => {
@@ -104,17 +108,36 @@ export function CardScanner() {
     setIsCameraReady(false);
   }
 
+  function clearScannerTimers() {
+    if (successFlashTimeoutRef.current) window.clearTimeout(successFlashTimeoutRef.current);
+    if (cardHideTimeoutRef.current) window.clearTimeout(cardHideTimeoutRef.current);
+    successFlashTimeoutRef.current = null;
+    cardHideTimeoutRef.current = null;
+  }
+
+  function showScannedCard(card: ScannerCard) {
+    clearScannerTimers();
+    setLastCard(card);
+    setSuccessFlash(true);
+    successFlashTimeoutRef.current = window.setTimeout(() => {
+      setSuccessFlash(false);
+      successFlashTimeoutRef.current = null;
+    }, 450);
+    cardHideTimeoutRef.current = window.setTimeout(() => {
+      setLastCard(null);
+      cardHideTimeoutRef.current = null;
+    }, 5000);
+  }
+
   async function scanCameraFrame() {
     if (!videoRef.current) return;
     setIsScanning(true);
     setScanPhase("capturing");
     setError(null);
-    setNotice("Capturing a short scan burst...");
-    setSampledFrames([]);
+    setNotice("Checking card...");
 
     try {
       const frames = await captureCameraBurst(videoRef.current);
-      setSampledFrames(frames);
       const scanFailures: string[] = [];
       let scanned: Omit<ScannerCard, "id" | "order" | "imageDataUrl"> | null = null;
       let scannedImage = frames[0];
@@ -123,7 +146,7 @@ export function CardScanner() {
       const contactSheet = await buildContactSheet(focusedFrames);
       if (contactSheet) {
         setScanPhase("recognizing");
-        setNotice("Scanning camera burst...");
+        setNotice("Checking card...");
         scanned = await scanImageDataUrl(contactSheet, {
           silentMiss: true,
           onMiss: (message) => {
@@ -135,7 +158,7 @@ export function CardScanner() {
 
       for (let index = 0; !scanned && index < focusedFrames.length; index += 1) {
         setScanPhase(index < frames.length ? "recognizing" : "pricing");
-        setNotice(`Scanning camera frame ${index + 1} of ${focusedFrames.length}...`);
+        setNotice("Checking card...");
         scanned = await scanImageDataUrl(focusedFrames[index], {
           silentMiss: true,
           tryCrops: true,
@@ -153,11 +176,8 @@ export function CardScanner() {
       }
 
       const card = addCard(scanned, scannedImage);
-      setLastCard(card);
+      showScannedCard(card);
       setNotice(null);
-      if (mode === "single") {
-        setIsComplete(true);
-      }
     } finally {
       setScanPhase("idle");
       setIsScanning(false);
@@ -169,7 +189,6 @@ export function CardScanner() {
     setIsComplete(false);
     setCards([]);
     setLastCard(null);
-    setSampledFrames([]);
     setError(null);
     setNotice("Scanning video frames in your browser. The raw video is not uploaded.");
     setIsScanning(true);
@@ -177,7 +196,6 @@ export function CardScanner() {
 
     try {
       const frames = await extractVideoFrames(file);
-      setSampledFrames(selectPreviewFrames(frames));
       const seen = new Set<string>();
       const scanFailures: string[] = [];
       const contactSheets = await buildContactSheets(frames, CONTACT_SHEET_FRAME_COUNT);
@@ -309,8 +327,51 @@ export function CardScanner() {
       order: cards.length + 1,
       imageDataUrl
     };
-    setCards((current) => [...current, next]);
+    setCards((current) => {
+      const storedCard = {
+        ...next,
+        order: current.length + 1,
+      };
+      return [...current, storedCard];
+    });
     return next;
+  }
+
+  function updateCard(id: string, changes: Partial<ScannerCard>) {
+    setCards((current) => current.map((card) => card.id === id ? { ...card, ...changes } : card));
+  }
+
+  function removeCard(id: string) {
+    setCards((current) => reorderCards(current.filter((card) => card.id !== id)));
+    if (lastCard?.id === id) setLastCard(null);
+  }
+
+  async function lookupCard(card: ScannerCard) {
+    if (!card.cardName.trim()) {
+      setError("Enter a card name before looking up value.");
+      return;
+    }
+
+    setIsScanning(true);
+    setScanPhase("pricing");
+    setError(null);
+    const scanned = await scanManualCard(card.cardName, card.setName ?? "");
+    setIsScanning(false);
+    setScanPhase("idle");
+    if (!scanned) return;
+
+    updateCard(card.id, {
+      cardName: scanned.cardName,
+      originalName: scanned.originalName,
+      language: scanned.language,
+      setName: scanned.setName,
+      cardNumber: scanned.cardNumber,
+      variant: scanned.variant,
+      estimatedValue: scanned.estimatedValue,
+      confidence: scanned.confidence,
+      recognitionSource: scanned.recognitionSource,
+      pricingSource: scanned.pricingSource
+    });
   }
 
   function resetSession(nextMode: ScannerMode) {
@@ -318,7 +379,6 @@ export function CardScanner() {
     setMode(nextMode);
     setCards([]);
     setLastCard(null);
-    setSampledFrames([]);
     setIsComplete(false);
     setError(null);
     setNotice(null);
@@ -328,9 +388,8 @@ export function CardScanner() {
   return (
     <div className="space-y-5">
       <section className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
-        <div className="grid gap-2 md:grid-cols-[1fr_1fr_1fr_220px]">
-          <ModeButton active={mode === "single"} icon={ScanLine} label="Single scan" onClick={() => { resetSession("single"); void startCamera("single"); }} />
-          <ModeButton active={mode === "multi-camera"} icon={Camera} label="Multi scan" onClick={() => { resetSession("multi-camera"); void startCamera("multi-camera"); }} />
+        <div className="grid gap-2 md:grid-cols-[1fr_1fr_220px]">
+          <ModeButton active={mode === "scanner"} icon={ScanLine} label="Scanner" onClick={() => { resetSession("scanner"); void startCamera("scanner"); }} />
           <label className={`flex h-12 cursor-pointer items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold ${mode === "video" ? "border-amber-300 bg-amber-300 text-slate-950" : "border-white/10 bg-slate-950/50 text-slate-200"}`}>
             <Video className="h-4 w-4" />
             Upload video
@@ -384,7 +443,7 @@ export function CardScanner() {
             )}
             {!isCameraReady && mode !== "video" ? (
               <div className="absolute inset-0 grid place-items-center p-6 text-center text-sm text-slate-400">
-                Start single or multi scan to use your camera.
+                Start scanner to use your camera.
               </div>
             ) : null}
           </div>
@@ -392,9 +451,21 @@ export function CardScanner() {
           <div className="mt-4 flex flex-wrap gap-3">
             {mode !== "video" ? (
               <>
-                <button onClick={() => void startCamera(mode)} disabled={isScanning} className="inline-flex h-11 items-center gap-2 rounded-lg border border-white/10 px-4 text-sm font-semibold text-slate-200">
+                <button
+                  onClick={() => {
+                    if (isCameraReady) {
+                      setIsComplete(true);
+                      stopCamera();
+                      setScanPhase("idle");
+                    } else {
+                      void startCamera("scanner");
+                    }
+                  }}
+                  disabled={isScanning}
+                  className="inline-flex h-11 items-center gap-2 rounded-lg border border-white/10 px-4 text-sm font-semibold text-slate-200"
+                >
                   <Camera className="h-4 w-4" />
-                  Start camera
+                  {isCameraReady ? "Stop scanning" : "Start scanner"}
                 </button>
                 <button onClick={() => void scanCameraFrame()} disabled={!isCameraReady || isScanning} className="inline-flex h-11 items-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-bold text-slate-950 disabled:opacity-50">
                   {isScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />}
@@ -412,13 +483,6 @@ export function CardScanner() {
                 }} />
               </label>
             )}
-
-            {mode === "multi-camera" && cards.length ? (
-              <>
-                <button onClick={() => setLastCard(null)} className="h-11 rounded-lg border border-white/10 px-4 text-sm font-semibold text-slate-200">Next scan</button>
-                <button onClick={() => { setIsComplete(true); stopCamera(); setScanPhase("idle"); }} className="h-11 rounded-lg border border-amber-300/40 px-4 text-sm font-semibold text-amber-100">End scan</button>
-              </>
-            ) : null}
           </div>
 
           {lastCard ? (
@@ -433,21 +497,6 @@ export function CardScanner() {
 
           {notice ? <p className="mt-4 rounded-lg border border-amber-300/30 bg-amber-300/10 p-3 text-sm text-amber-100">{notice}</p> : null}
           {error ? <p className="mt-4 rounded-lg border border-rose-300/30 bg-rose-500/10 p-3 text-sm text-rose-100">{error}</p> : null}
-          {sampledFrames.length ? (
-            <div className="mt-4 rounded-lg border border-white/10 bg-slate-950/40 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Sampled frames sent to scanner</p>
-              <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-                {sampledFrames.map((frame, index) => (
-                  <div
-                    key={`${frame.slice(0, 48)}-${index}`}
-                    className="h-24 w-16 shrink-0 rounded-md border border-white/10 bg-cover bg-center"
-                    style={{ backgroundImage: `url(${frame})` }}
-                    title={`Frame ${index + 1}`}
-                  />
-                ))}
-              </div>
-            </div>
-          ) : null}
         </div>
 
         <aside className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
@@ -478,7 +527,7 @@ export function CardScanner() {
 
         <div className="mt-4 max-h-[520px] space-y-3 overflow-y-auto pr-1">
           {cards.length ? cards.map((card) => (
-            <div key={card.id} className="grid gap-3 rounded-lg bg-slate-950/50 p-3 sm:grid-cols-[64px_1fr_auto] sm:items-center">
+            <div key={card.id} className="grid gap-3 rounded-lg bg-slate-950/50 p-3 sm:grid-cols-[64px_1fr]">
               {card.imageDataUrl ? (
                 <div
                   aria-hidden="true"
@@ -486,13 +535,44 @@ export function CardScanner() {
                   style={{ backgroundImage: `url(${card.imageDataUrl})` }}
                 />
               ) : <div className="grid h-20 w-16 place-items-center rounded-md bg-white/5 text-xs text-slate-500">Manual</div>}
-              <div>
-                <p className="font-bold text-white">{card.order}. {card.cardName}</p>
+              <div className="min-w-0">
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_120px]">
+                  <input
+                    value={card.cardName}
+                    onChange={(event) => updateCard(card.id, { cardName: event.target.value })}
+                    className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm font-semibold text-white outline-none focus:border-amber-300"
+                    aria-label={`Card ${card.order} name`}
+                  />
+                  <input
+                    value={card.setName ?? ""}
+                    onChange={(event) => updateCard(card.id, { setName: event.target.value || null })}
+                    placeholder="Set"
+                    className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-slate-100 outline-none focus:border-amber-300"
+                    aria-label={`Card ${card.order} set`}
+                  />
+                  <input
+                    value={String(card.estimatedValue || 0)}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    onChange={(event) => updateCard(card.id, { estimatedValue: Number(event.target.value) || 0 })}
+                    className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm font-bold text-amber-200 outline-none focus:border-amber-300"
+                    aria-label={`Card ${card.order} value`}
+                  />
+                </div>
                 {card.originalName ? <p className="mt-1 text-sm text-slate-300">Printed name: {card.originalName}</p> : null}
                 <p className="mt-1 text-sm text-slate-400">{[card.setName, card.cardNumber, card.variant, languageLabel(card.language)].filter(Boolean).join(" - ") || "No set details"}</p>
-                <p className="mt-1 text-xs text-slate-500">Recognition: {card.recognitionSource} - Pricing: {card.pricingSource}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button onClick={() => void lookupCard(card)} disabled={isScanning} className="inline-flex h-9 items-center gap-2 rounded-lg border border-white/10 px-3 text-xs font-semibold text-slate-200 disabled:opacity-50">
+                    <Search className="h-3.5 w-3.5" />
+                    Lookup value
+                  </button>
+                  <button onClick={() => removeCard(card.id)} className="inline-flex h-9 items-center gap-2 rounded-lg border border-rose-300/30 px-3 text-xs font-semibold text-rose-100">
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Remove
+                  </button>
+                </div>
               </div>
-              <p className="text-lg font-black text-amber-200">{currency(card.estimatedValue)}</p>
             </div>
           )) : (
             <div className="rounded-lg border border-dashed border-white/10 p-6 text-center text-sm text-slate-400">
@@ -505,10 +585,10 @@ export function CardScanner() {
       </section>
       {isCameraReady && mode !== "video" ? (
         <FullScreenScanner
-          mode={mode}
           videoRef={videoRef}
           isScanning={isScanning}
           scanPhase={scanPhase}
+          successFlash={successFlash}
           lastCard={lastCard}
           totalCards={cards.length}
           totalValue={totalValue}
@@ -516,13 +596,9 @@ export function CardScanner() {
           notice={notice}
           onScan={() => void scanCameraFrame()}
           onClose={() => {
+            setIsComplete(true);
             stopCamera();
             setScanPhase("idle");
-          }}
-          onNext={() => {
-            setLastCard(null);
-            setError(null);
-            setNotice(null);
           }}
           onEnd={() => {
             setIsComplete(true);
@@ -536,10 +612,10 @@ export function CardScanner() {
 }
 
 function FullScreenScanner({
-  mode,
   videoRef,
   isScanning,
   scanPhase,
+  successFlash,
   lastCard,
   totalCards,
   totalValue,
@@ -547,13 +623,12 @@ function FullScreenScanner({
   notice,
   onScan,
   onClose,
-  onNext,
   onEnd
 }: {
-  mode: ScannerMode;
   videoRef: RefObject<HTMLVideoElement | null>;
   isScanning: boolean;
   scanPhase: ScanPhase;
+  successFlash: boolean;
   lastCard: ScannerCard | null;
   totalCards: number;
   totalValue: number;
@@ -561,21 +636,21 @@ function FullScreenScanner({
   notice: string | null;
   onScan: () => void;
   onClose: () => void;
-  onNext: () => void;
   onEnd: () => void;
 }) {
   const phaseText = scanPhase === "capturing"
     ? "Capturing"
     : scanPhase === "recognizing"
-      ? "Reading card"
+      ? "Checking"
       : scanPhase === "pricing"
-        ? "Checking value"
+        ? "Checking"
         : "Ready";
 
   return (
     <div className="fixed inset-0 z-[100] bg-black text-white">
       <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0,transparent_42%,rgba(0,0,0,0.72)_72%)]" />
+      {successFlash ? <div className="pointer-events-none absolute inset-0 bg-emerald-400/35" /> : null}
       <div className="pointer-events-none absolute inset-x-8 top-[16vh] mx-auto max-w-[340px]">
         <div className="relative aspect-[63/88] rounded-2xl border-2 border-amber-300/90 shadow-[0_0_0_999px_rgba(0,0,0,0.22)]">
           <div className="absolute left-4 right-4 top-5 rounded border border-amber-200/70 bg-black/30 px-2 py-1 text-center text-[10px] font-bold uppercase tracking-wide text-amber-100">
@@ -590,7 +665,7 @@ function FullScreenScanner({
 
       <div className="absolute left-0 right-0 top-0 flex items-center justify-between p-4 pt-[calc(env(safe-area-inset-top)+12px)]">
         <div className="rounded-full bg-black/55 px-3 py-2 text-xs font-bold uppercase tracking-wide text-amber-100">
-          {mode === "multi-camera" ? "Multi scan" : "Single scan"} - {phaseText}
+          Scanner - {phaseText}
         </div>
         <button onClick={onClose} className="grid h-11 w-11 place-items-center rounded-full bg-black/55 text-white">
           <X className="h-5 w-5" />
@@ -625,23 +700,20 @@ function FullScreenScanner({
         </div>
 
         <div className="flex gap-3">
-          {mode === "multi-camera" && lastCard ? (
-            <button onClick={onNext} className="h-14 flex-1 rounded-2xl border border-white/15 bg-white/10 text-base font-bold text-white">
-              Next
-            </button>
-          ) : null}
           <button onClick={onScan} disabled={isScanning} className="h-14 flex-[2] rounded-2xl bg-amber-300 text-base font-black text-slate-950 disabled:opacity-60">
-            {isScanning ? <span className="inline-flex items-center gap-2"><Loader2 className="h-5 w-5 animate-spin" /> Scanning</span> : "Scan"}
+            {isScanning ? <span className="inline-flex items-center gap-2"><Loader2 className="h-5 w-5 animate-spin" /> Checking</span> : "Scan"}
           </button>
-          {mode === "multi-camera" && totalCards ? (
-            <button onClick={onEnd} className="h-14 flex-1 rounded-2xl border border-amber-300/50 bg-black/40 text-base font-bold text-amber-100">
-              Done
-            </button>
-          ) : null}
+          <button onClick={onEnd} className="h-14 flex-1 rounded-2xl border border-amber-300/50 bg-black/40 text-base font-bold text-amber-100">
+            Stop scanning
+          </button>
         </div>
       </div>
     </div>
   );
+}
+
+function reorderCards(cards: ScannerCard[]) {
+  return cards.map((card, index) => ({ ...card, order: index + 1 }));
 }
 
 function ModeButton({ active, icon: Icon, label, onClick }: { active: boolean; icon: typeof ScanLine; label: string; onClick: () => void }) {
@@ -841,14 +913,6 @@ async function extractVideoFrames(file: File) {
   }
 }
 
-function selectPreviewFrames(frames: string[]) {
-  if (frames.length <= PREVIEW_FRAME_COUNT) return frames;
-  return Array.from({ length: PREVIEW_FRAME_COUNT }, (_, index) => {
-    const frameIndex = Math.round((index * (frames.length - 1)) / (PREVIEW_FRAME_COUNT - 1));
-    return frames[frameIndex];
-  });
-}
-
 function once(target: EventTarget, eventName: string) {
   return new Promise<void>((resolve, reject) => {
     const timeout = window.setTimeout(() => {
@@ -891,7 +955,6 @@ function exportResultsPdf(cards: ScannerCard[], totalValue: number) {
       `${card.order}. ${card.cardName} - ${currency(card.estimatedValue)}`,
       card.originalName ? `   Printed name: ${card.originalName}` : "",
       `   ${[card.setName, card.cardNumber, card.variant, languageLabel(card.language)].filter(Boolean).join(" | ") || "No set details"}`,
-      `   Pricing: ${card.pricingSource}`,
       ""
     ])
   ];
