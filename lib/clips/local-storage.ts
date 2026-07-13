@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 
-const LOCAL_SOURCE_ROOT = resolve(/* turbopackIgnore: true */ process.cwd(), ".local-clips", "source-videos");
+const LOCAL_SOURCE_ROOT = resolve(
+  process.env.CLIPS_LOCAL_STORAGE_DIR || resolve(tmpdir(), "packwatcher-clips", "source-videos")
+);
 
 export const LOCAL_SOURCE_BUCKET = "local-source-videos";
 
@@ -39,7 +42,8 @@ export async function readLocalSourceVideo(relativePath: string) {
 
 function resolveLocalSourcePath(relativePath: string) {
   const absolutePath = resolve(LOCAL_SOURCE_ROOT, relativePath);
-  if (!absolutePath.startsWith(LOCAL_SOURCE_ROOT)) {
+  const pathFromRoot = relative(LOCAL_SOURCE_ROOT, absolutePath);
+  if (pathFromRoot.startsWith("..") || isAbsolute(pathFromRoot)) {
     throw new Error("Invalid local source video path.");
   }
   return absolutePath;

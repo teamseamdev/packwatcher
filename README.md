@@ -61,6 +61,7 @@ OPENAI_API_KEY=
 CLIPS_ENABLE_OPENAI=false
 CLIPS_LOCAL_ANALYSIS=true
 CLIPS_MAX_UPLOAD_MB=5120
+CLIPS_LOCAL_STORAGE_DIR=
 CLIPS_OPENAI_MODEL=gpt-4o-mini
 CLIPS_TCGCSV_MAX_GROUPS=40
 ```
@@ -128,7 +129,7 @@ If the `clip-source-videos` bucket already exists and uploads fail with "The obj
 
 Run `supabase/migrations/007_retail_aggregation_foundation.sql` to add normalized retail aggregation tables, alert filters, connector health, retail job runs, uncertain match reviews, and notification event dedupe.
 
-During local development, if Supabase Storage still enforces a lower project or plan upload cap, PackWatcher Clips falls back to `.local-clips/` for the raw source video and continues the review/export flow. `.local-clips/` is ignored by git and is intended for local testing only.
+During local development, if Supabase Storage still enforces a lower project or plan upload cap, PackWatcher Clips stores the raw source video in the OS temp directory and continues the review/export flow. Set `CLIPS_LOCAL_STORAGE_DIR` to a writable folder if you want to control where local source videos are saved.
 
 ## PackWatcher Clips
 
@@ -318,6 +319,5 @@ lib/
 public/
 supabase/schema.sql
 ```
-
 
 

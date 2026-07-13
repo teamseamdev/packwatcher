@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, UploadCloud } from "lucide-react";
 
 const MAX_UPLOAD_MB = 5120;
-const LOCAL_CHUNK_BYTES = 4 * 1024 * 1024;
+const LOCAL_CHUNK_BYTES = 2 * 1024 * 1024;
 
 type State = "idle" | "creating" | "processing" | "error";
 
@@ -84,9 +84,8 @@ export function ClipUploadForm() {
       });
 
       if (!response.ok) {
-        const body = await response.json().catch(() => null) as { error?: string } | null;
         setState("error");
-        setError(body?.error ?? "Local video upload failed.");
+        setError(await uploadErrorMessage(response));
         return;
       }
 
@@ -210,5 +209,19 @@ function formatFileSize(bytes: number) {
   const mb = bytes / 1024 / 1024;
   if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`;
   return `${mb.toFixed(1)} MB`;
+}
+
+async function uploadErrorMessage(response: Response) {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    const body = await response.json().catch(() => null) as { error?: string } | null;
+    if (body?.error) return body.error;
+  }
+
+  const text = await response.text().catch(() => "");
+  const detail = text.replace(/\s+/g, " ").trim().slice(0, 180);
+  return detail
+    ? `Local video upload failed with status ${response.status}: ${detail}`
+    : `Local video upload failed with status ${response.status}.`;
 }
 

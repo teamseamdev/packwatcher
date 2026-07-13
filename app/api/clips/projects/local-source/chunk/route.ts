@@ -10,6 +10,15 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  try {
+    return await handlePost(request);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown local video upload error.";
+    return NextResponse.json({ error: `Local video upload failed: ${message}` }, { status: 500 });
+  }
+}
+
+async function handlePost(request: Request) {
   const { supabase, user } = await requireUser();
   const uploadId = request.headers.get("x-clip-upload-id") ?? "";
   const fileName = decodeURIComponent(request.headers.get("x-clip-file-name") ?? "source.mp4");
