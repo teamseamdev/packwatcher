@@ -3,7 +3,7 @@ import Link from "next/link";
 import { AccountPlanSwitcher } from "@/components/account-plan-switcher";
 import { PushNotificationSettings } from "@/components/push-notification-settings";
 import { requireProfile } from "@/lib/auth";
-import { switchToFreePlan } from "./actions";
+import { switchToFreePlan, updatePostalCode } from "./actions";
 
 async function signOut() {
   "use server";
@@ -28,6 +28,20 @@ export default async function AccountPage() {
         </dl>
         <form action={signOut} className="mt-6">
           <button className="h-11 rounded-lg border border-white/10 px-4 text-sm font-semibold">Sign out</button>
+        </form>
+      </section>
+      <section className="mt-6 rounded-lg border border-white/10 bg-white/[0.04] p-5">
+        <h2 className="font-bold text-white">Local tracking ZIP</h2>
+        <p className="mt-2 text-sm text-slate-400">Used by Watchlist to prioritize nearby in-store pickup results. You can still override it on the Watchlist page.</p>
+        <form action={updatePostalCode} className="mt-4 flex flex-col gap-3 sm:flex-row">
+          <input
+            name="postal_code"
+            defaultValue={profile?.postal_code ?? ""}
+            inputMode="numeric"
+            placeholder="ZIP code"
+            className="h-11 flex-1 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300"
+          />
+          <button className="h-11 rounded-lg bg-amber-300 px-4 text-sm font-semibold text-slate-950">Save ZIP</button>
         </form>
       </section>
       <AccountPlanSwitcher currentPlan={profile?.plan ?? "free"} />

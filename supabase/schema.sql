@@ -9,6 +9,7 @@ create table public.profiles (
   email text,
   username text,
   avatar_url text,
+  postal_code text,
   plan public.plan_type not null default 'free',
   created_at timestamptz not null default now()
 );

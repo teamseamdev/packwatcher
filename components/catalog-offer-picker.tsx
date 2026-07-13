@@ -28,16 +28,18 @@ export function CatalogOfferPicker({
   offers,
   trackedProducts,
   trackedProductIds = [],
-  isAdmin = false
+  isAdmin = false,
+  defaultPostalCode = ""
 }: {
   offers: CatalogOffer[];
   trackedProducts: TrackedProduct[];
   trackedProductIds?: string[];
   isAdmin?: boolean;
+  defaultPostalCode?: string | null;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
-  const [postalCode, setPostalCode] = useState("");
+  const [postalCode, setPostalCode] = useState(defaultPostalCode ?? "");
   const [sort, setSort] = useState<SortMode>("recommended");
   const [message, setMessage] = useState("");
   const [expandedOfferId, setExpandedOfferId] = useState<string | null>(null);
@@ -185,7 +187,7 @@ export function CatalogOfferPicker({
         </button>
       </div>
 
-      <p className="mt-2 text-xs text-slate-500">Optional ZIP prioritizes nearby in-store pickup results. TCGPlayer and shipping-only listings are shown after local retailer results.</p>
+      <p className="mt-2 text-xs text-slate-500">ZIP prioritizes nearby in-store pickup results. Change it here for a one-off search, or update the default in Account.</p>
       {message ? <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">{message}</p> : null}
 
       <div className="mt-3 grid max-h-[64vh] gap-2 overflow-auto pr-1">

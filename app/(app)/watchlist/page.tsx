@@ -58,6 +58,7 @@ export default async function WatchlistPage() {
           trackedProducts={trackedProducts}
           trackedProductIds={(productAlerts ?? []).map((alert) => alert.product_id)}
           isAdmin={isAdmin(profile)}
+          defaultPostalCode={profile?.postal_code}
         />
       </div>
 

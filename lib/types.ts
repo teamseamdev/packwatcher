@@ -16,6 +16,7 @@ export type Profile = {
   email: string | null;
   username: string | null;
   avatar_url: string | null;
+  postal_code: string | null;
   plan: Plan;
   created_at: string;
 };
