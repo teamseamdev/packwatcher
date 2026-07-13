@@ -42,6 +42,7 @@ export function CardScanner() {
   const [manualName, setManualName] = useState("");
   const [manualSet, setManualSet] = useState("");
   const [language, setLanguage] = useState<ScannerLanguage>("auto");
+  const [sampledFrames, setSampledFrames] = useState<string[]>([]);
 
   const totalValue = useMemo(() => cards.reduce((sum, card) => sum + card.estimatedValue, 0), [cards]);
 
@@ -104,17 +105,26 @@ export function CardScanner() {
     setIsComplete(false);
     setCards([]);
     setLastCard(null);
+    setSampledFrames([]);
     setError(null);
     setNotice("Scanning video frames in your browser. The raw video is not uploaded.");
     setIsScanning(true);
 
     try {
       const frames = await extractVideoFrames(file);
+      setSampledFrames(frames.slice(0, 10));
       const seen = new Set<string>();
+      const scanFailures: string[] = [];
 
       for (let index = 0; index < frames.length; index += 1) {
         setNotice(`Scanning frame ${index + 1} of ${frames.length}...`);
-        const scanned = await scanImageDataUrl(frames[index], { silentMiss: true, tryCrops: true });
+        const scanned = await scanImageDataUrl(frames[index], {
+          silentMiss: true,
+          tryCrops: true,
+          onMiss: (message) => {
+            if (message && !scanFailures.includes(message)) scanFailures.push(message);
+          }
+        });
         if (!scanned) continue;
 
         const key = normalizeCardKey(scanned.cardName, scanned.setName);
@@ -126,7 +136,12 @@ export function CardScanner() {
       setIsComplete(true);
       setNotice(null);
       if (!seen.size) {
-        setError("No cards were detected in the sampled frames. Try choosing Japanese/Chinese/Korean in the language selector, or upload a shorter close-up video.");
+        const backendReason = scanFailures[0];
+        setError(
+          backendReason
+            ? `No cards were detected. Scanner backend response: ${backendReason}`
+            : "No cards were detected in the sampled frames. Check the frame preview below to confirm the cards are visible."
+        );
       }
     } catch (scanError) {
       setError(scanError instanceof Error ? scanError.message : "Video scan failed.");
@@ -153,7 +168,10 @@ export function CardScanner() {
     setManualSet("");
   }
 
-  async function scanImageDataUrl(imageDataUrl: string, options: { silentMiss?: boolean; tryCrops?: boolean } = {}) {
+  async function scanImageDataUrl(
+    imageDataUrl: string,
+    options: { silentMiss?: boolean; tryCrops?: boolean; onMiss?: (message: string) => void } = {}
+  ) {
     const variants = options.tryCrops ? await imageScanVariants(imageDataUrl) : [imageDataUrl];
 
     for (const variant of variants) {
@@ -178,11 +196,16 @@ export function CardScanner() {
     return handleScanResponse(response);
   }
 
-  async function handleScanResponse(response: Response, options: { silentMiss?: boolean } = {}) {
+  async function handleScanResponse(
+    response: Response,
+    options: { silentMiss?: boolean; onMiss?: (message: string) => void } = {}
+  ) {
     const body = await response.json().catch(() => null) as ScanResponse | null;
     if (!response.ok || !body?.card) {
+      const message = body?.error ?? `Scan failed with status ${response.status}.`;
+      options.onMiss?.(message);
       if (!options.silentMiss) {
-        setError(body?.error ?? `Scan failed with status ${response.status}.`);
+        setError(message);
       }
       return null;
     }
@@ -207,6 +230,7 @@ export function CardScanner() {
     setMode(nextMode);
     setCards([]);
     setLastCard(null);
+    setSampledFrames([]);
     setIsComplete(false);
     setError(null);
     setNotice(null);
@@ -303,6 +327,21 @@ export function CardScanner() {
 
           {notice ? <p className="mt-4 rounded-lg border border-amber-300/30 bg-amber-300/10 p-3 text-sm text-amber-100">{notice}</p> : null}
           {error ? <p className="mt-4 rounded-lg border border-rose-300/30 bg-rose-500/10 p-3 text-sm text-rose-100">{error}</p> : null}
+          {sampledFrames.length ? (
+            <div className="mt-4 rounded-lg border border-white/10 bg-slate-950/40 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Sampled frames sent to scanner</p>
+              <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                {sampledFrames.map((frame, index) => (
+                  <div
+                    key={`${frame.slice(0, 48)}-${index}`}
+                    className="h-24 w-16 shrink-0 rounded-md border border-white/10 bg-cover bg-center"
+                    style={{ backgroundImage: `url(${frame})` }}
+                    title={`Frame ${index + 1}`}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <aside className="rounded-lg border border-white/10 bg-white/[0.04] p-4">

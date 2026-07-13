@@ -50,6 +50,22 @@ export async function POST(request: Request) {
     : null;
 
   if (!card && parsed.imageBase64) {
+    if (process.env.CLIPS_ENABLE_OPENAI !== "true") {
+      return NextResponse.json({
+        ok: false,
+        error: "AI scanning is disabled. Set CLIPS_ENABLE_OPENAI=true in Vercel and redeploy, or use manual add.",
+        messages
+      }, { status: 422 });
+    }
+
+    if (!process.env.OPENAI_API_KEY) {
+      return NextResponse.json({
+        ok: false,
+        error: "AI scanning is missing OPENAI_API_KEY in the deployment environment.",
+        messages
+      }, { status: 422 });
+    }
+
     try {
       const candidates = await recognitionProvider.recognize({
         imageBase64: parsed.imageBase64,
