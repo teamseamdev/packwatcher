@@ -7,10 +7,11 @@ import { useMemo, useState, useTransition } from "react";
 import { BellOff, BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
 import { removeTrackedProduct, trackCatalogProduct, untrackCatalogProduct } from "@/app/(app)/watchlist/actions";
 import { isLikelyPokemonProduct } from "@/lib/catalog-importers/pokemon-product-filter";
+import { compareCatalogOffers, fulfillmentText, metadataText } from "@/lib/catalog/offer-ranking";
 import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, TrackedProduct } from "@/lib/types";
 
-type SortMode = "name" | "store" | "status" | "price" | "checked";
+type SortMode = "recommended" | "name" | "store" | "status" | "price" | "checked";
 
 function productForOffer(offer: CatalogOffer) {
   const related = offer.catalog_products as CatalogProduct | CatalogProduct[] | null;
@@ -21,19 +22,6 @@ function stockLabel(status: string) {
   if (status === "in_stock") return "In stock";
   if (status === "out_of_stock") return "Out of stock";
   return "Trackable";
-}
-
-function metadataText(offer: CatalogOffer, key: string) {
-  const value = offer.metadata?.[key];
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function fulfillmentText(offer: CatalogOffer) {
-  return [
-    metadataText(offer, "shippingText"),
-    metadataText(offer, "pickupText"),
-    offer.availability_text
-  ].filter(Boolean).join(" | ");
 }
 
 export function CatalogOfferPicker({
@@ -50,7 +38,7 @@ export function CatalogOfferPicker({
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [postalCode, setPostalCode] = useState("");
-  const [sort, setSort] = useState<SortMode>("name");
+  const [sort, setSort] = useState<SortMode>("recommended");
   const [message, setMessage] = useState("");
   const [expandedOfferId, setExpandedOfferId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -75,13 +63,14 @@ export function CatalogOfferPicker({
       .sort((a, b) => {
         const productA = productForOffer(a);
         const productB = productForOffer(b);
+        if (sort === "recommended") return compareCatalogOffers(a, b, postalCode);
         if (sort === "store") return a.store_name.localeCompare(b.store_name);
         if (sort === "status") return a.status.localeCompare(b.status);
         if (sort === "price") return (b.last_price ?? -1) - (a.last_price ?? -1);
         if (sort === "checked") return new Date(b.last_checked_at ?? 0).getTime() - new Date(a.last_checked_at ?? 0).getTime();
         return (productA?.name ?? "").localeCompare(productB?.name ?? "");
       });
-  }, [offers, query, sort]);
+  }, [offers, postalCode, query, sort]);
 
   function track(productId: string) {
     startTransition(async () => {
@@ -178,6 +167,7 @@ export function CatalogOfferPicker({
           className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300"
         />
         <select value={sort} onChange={(event) => setSort(event.target.value as SortMode)} className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none">
+          <option value="recommended">Local first</option>
           <option value="name">Name</option>
           <option value="store">Store</option>
           <option value="status">Status</option>
@@ -195,7 +185,7 @@ export function CatalogOfferPicker({
         </button>
       </div>
 
-      <p className="mt-2 text-xs text-slate-500">Optional ZIP biases local results. Retailer stock still needs confirmation.</p>
+      <p className="mt-2 text-xs text-slate-500">Optional ZIP prioritizes nearby in-store pickup results. TCGPlayer and shipping-only listings are shown after local retailer results.</p>
       {message ? <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">{message}</p> : null}
 
       <div className="mt-3 grid max-h-[64vh] gap-2 overflow-auto pr-1">

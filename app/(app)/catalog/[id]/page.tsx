@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ExternalLink } from "lucide-react";
 import { ProductTrackButton } from "@/components/product-track-button";
 import { requireProfile } from "@/lib/auth";
+import { compareCatalogOffers, metadataText } from "@/lib/catalog/offer-ranking";
 import { optionalCurrency } from "@/lib/profit";
 import { aggregatePrices } from "@/lib/retailers/shared/price-aggregation";
 import type { CatalogOffer, CatalogProduct } from "@/lib/types";
@@ -11,11 +12,6 @@ function offerStatus(offer: CatalogOffer) {
   if (offer.in_stock || offer.status === "in_stock") return "In stock";
   if (offer.status === "out_of_stock") return "Out of stock";
   return offer.availability_text ?? "Trackable";
-}
-
-function metadataText(offer: CatalogOffer, key: string) {
-  const value = offer.metadata?.[key];
-  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 export default async function CatalogProductPage({ params }: { params: Promise<{ id: string }> }) {
@@ -35,7 +31,7 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
   if (!productRow) notFound();
 
   const product = productRow as CatalogProduct;
-  const offers = (offerRows ?? []) as CatalogOffer[];
+  const offers = ((offerRows ?? []) as CatalogOffer[]).sort((a, b) => compareCatalogOffers(a, b));
   const priceSummary = aggregatePrices(offers.map((offer) => ({
     retailerProductId: offer.retailer_product_id ?? offer.id,
     retailer: offer.retailer ?? offer.store_name,

@@ -7,6 +7,7 @@ import { useMemo, useState, useTransition } from "react";
 import { BellOff, BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
 import { trackCatalogOffer, trackCatalogProduct, untrackCatalogProduct } from "@/app/(app)/watchlist/actions";
 import { isLikelyPokemonProduct } from "@/lib/catalog-importers/pokemon-product-filter";
+import { compareCatalogOffers, fulfillmentText } from "@/lib/catalog/offer-ranking";
 import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, StockStatus } from "@/lib/types";
 
@@ -39,25 +40,8 @@ function lowestPrice(group: CatalogProductGroup) {
   return group.product.msrp;
 }
 
-function metadataText(offer: CatalogOffer, key: string) {
-  const value = offer.metadata?.[key];
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function fulfillmentText(offer: CatalogOffer) {
-  return [
-    metadataText(offer, "shippingText"),
-    metadataText(offer, "pickupText"),
-    offer.availability_text
-  ].filter(Boolean).join(" | ");
-}
-
-function bestOffer(group: CatalogProductGroup) {
-  const sorted = [...group.offers].sort((a, b) => {
-    if (a.status === "in_stock" && b.status !== "in_stock") return -1;
-    if (b.status === "in_stock" && a.status !== "in_stock") return 1;
-    return (a.last_price ?? Number.MAX_SAFE_INTEGER) - (b.last_price ?? Number.MAX_SAFE_INTEGER);
-  });
+function bestOffer(group: CatalogProductGroup, postalCode?: string | null) {
+  const sorted = [...group.offers].sort((a, b) => compareCatalogOffers(a, b, postalCode));
   return sorted[0] ?? null;
 }
 
@@ -128,9 +112,11 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
         const aInStock = groupStatus(a) === "in_stock";
         const bInStock = groupStatus(b) === "in_stock";
         if (aInStock !== bInStock) return aInStock ? -1 : 1;
+        const offerDifference = compareNullableOffers(bestOffer(a, postalCode), bestOffer(b, postalCode), postalCode);
+        if (offerDifference !== 0) return offerDifference;
         return featuredScore(b) - featuredScore(a);
       });
-  }, [filter, groups, query]);
+  }, [filter, groups, postalCode, query]);
 
   function trackOffer(offerId: string) {
     startTransition(async () => {
@@ -281,7 +267,7 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
           </button>
         </div>
         <p className="mt-3 text-xs text-slate-500">
-          {filteredGroups.length} of {groups.length} catalog products shown. Add a ZIP code to bias retailer discovery toward local results.
+          {filteredGroups.length} of {groups.length} catalog products shown. Add a ZIP code to prioritize nearby in-store pickup results.
         </p>
       </div>
 
@@ -290,7 +276,8 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {filteredGroups.length ? filteredGroups.map((group) => {
           const status = groupStatus(group);
-          const offer = bestOffer(group);
+          const offer = bestOffer(group, postalCode);
+          const sortedOffers = [...group.offers].sort((a, b) => compareCatalogOffers(a, b, postalCode));
           const isExpanded = expandedId === group.product.id;
           const alreadyTracked = group.isProductTracked || group.offers.some((item) => group.trackedOfferUrls.includes(item.url));
 
@@ -352,7 +339,7 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
                 </div>
                 {isExpanded ? (
                   <div className="mt-4 space-y-2 border-t border-white/10 pt-4">
-                    {group.offers.map((item) => {
+                    {sortedOffers.map((item) => {
                       const itemTracked = group.trackedOfferUrls.includes(item.url);
                       return (
                         <div key={item.id} className="rounded-lg bg-slate-950/60 p-3">
@@ -390,5 +377,12 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
       </div>
     </section>
   );
+}
+
+function compareNullableOffers(a: CatalogOffer | null, b: CatalogOffer | null, postalCode?: string | null) {
+  if (a && b) return compareCatalogOffers(a, b, postalCode);
+  if (a) return -1;
+  if (b) return 1;
+  return 0;
 }
 

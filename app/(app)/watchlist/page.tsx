@@ -4,14 +4,10 @@ import { CatalogOfferPicker } from "@/components/catalog-offer-picker";
 import { WatchlistGrid } from "@/components/watchlist-grid";
 import { isAdmin, requireProfile } from "@/lib/auth";
 import { ensureCatalogHasRows } from "@/lib/catalog/ensure-catalog";
+import { compareCatalogOffers, metadataText } from "@/lib/catalog/offer-ranking";
 import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, TrackedProduct } from "@/lib/types";
 import { addProduct, untrackCatalogProduct } from "./actions";
-
-function metadataText(offer: CatalogOffer, key: string) {
-  const value = offer.metadata?.[key];
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
 
 export default async function WatchlistPage() {
   const { supabase, user, profile } = await requireProfile();
@@ -90,11 +86,7 @@ export default async function WatchlistPage() {
                 if (!related) return null;
                 const relatedOffers = catalogOffers
                   .filter((offer) => (offer.product_id ?? offer.catalog_product_id) === related.id)
-                  .sort((a, b) => {
-                    if (a.status === "in_stock" && b.status !== "in_stock") return -1;
-                    if (b.status === "in_stock" && a.status !== "in_stock") return 1;
-                    return (a.last_price ?? Number.MAX_SAFE_INTEGER) - (b.last_price ?? Number.MAX_SAFE_INTEGER);
-                  });
+                  .sort((a, b) => compareCatalogOffers(a, b));
                 return (
                   <details key={alert.id} className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-4">
                     <summary className="cursor-pointer list-none">
