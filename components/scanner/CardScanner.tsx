@@ -35,6 +35,7 @@ const MAX_VIDEO_SCAN_FRAMES = 96;
 const MIN_VIDEO_SCAN_FRAMES = 18;
 const CONTACT_SHEET_FRAME_COUNT = 24;
 const AUTO_CAPTURE_DELAY_MS = 5200;
+const CARD_READINESS_INTERVAL_MS = 450;
 const FALLBACK_PACK_OPTIONS = [
   "Pokemon 151",
   "Prismatic Evolutions",
@@ -59,6 +60,7 @@ export function CardScanner() {
   const cardHideTimeoutRef = useRef<number | null>(null);
   const autoCaptureTimeoutRef = useRef<number | null>(null);
   const autoCaptureScanRef = useRef<(() => void) | null>(null);
+  const cardReadinessIntervalRef = useRef<number | null>(null);
   const [mode, setMode] = useState<ScannerMode>("scanner");
   const [cards, setCards] = useState<ScannerCard[]>([]);
   const [lastCard, setLastCard] = useState<ScannerCard | null>(null);
@@ -74,6 +76,8 @@ export function CardScanner() {
   const [scanPhase, setScanPhase] = useState<ScanPhase>("idle");
   const [successFlash, setSuccessFlash] = useState(false);
   const [packOptions, setPackOptions] = useState<string[]>(FALLBACK_PACK_OPTIONS);
+  const [autoCaptureEnabled, setAutoCaptureEnabled] = useState(false);
+  const [cardReady, setCardReady] = useState(false);
 
   const totalValue = useMemo(() => cards.reduce((sum, card) => sum + card.estimatedValue, 0), [cards]);
 
@@ -100,13 +104,27 @@ export function CardScanner() {
   }, [isCameraReady, mode]);
 
   useEffect(() => {
+    if (!isCameraReady || mode !== "scanner") return;
+
+    cardReadinessIntervalRef.current = window.setInterval(() => {
+      const ready = videoRef.current ? isCardReadyForScan(videoRef.current) : false;
+      setCardReady(ready);
+    }, CARD_READINESS_INTERVAL_MS);
+
+    return () => {
+      if (cardReadinessIntervalRef.current) window.clearInterval(cardReadinessIntervalRef.current);
+      cardReadinessIntervalRef.current = null;
+    };
+  }, [isCameraReady, mode]);
+
+  useEffect(() => {
     autoCaptureScanRef.current = () => {
       void scanCameraFrame();
     };
   });
 
   useEffect(() => {
-    if (!isCameraReady || mode !== "scanner" || isScanning || lastCard) return;
+    if (!autoCaptureEnabled || !cardReady || !isCameraReady || mode !== "scanner" || isScanning || lastCard) return;
     autoCaptureTimeoutRef.current = window.setTimeout(() => {
       autoCaptureScanRef.current?.();
     }, AUTO_CAPTURE_DELAY_MS);
@@ -114,7 +132,7 @@ export function CardScanner() {
       if (autoCaptureTimeoutRef.current) window.clearTimeout(autoCaptureTimeoutRef.current);
       autoCaptureTimeoutRef.current = null;
     };
-  }, [isCameraReady, isScanning, lastCard, mode]);
+  }, [autoCaptureEnabled, cardReady, isCameraReady, isScanning, lastCard, mode]);
 
   useEffect(() => {
     let ignore = false;
@@ -172,9 +190,12 @@ export function CardScanner() {
 
   function stopCamera() {
     if (autoCaptureTimeoutRef.current) window.clearTimeout(autoCaptureTimeoutRef.current);
+    if (cardReadinessIntervalRef.current) window.clearInterval(cardReadinessIntervalRef.current);
     autoCaptureTimeoutRef.current = null;
+    cardReadinessIntervalRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    setCardReady(false);
     setIsCameraReady(false);
   }
 
@@ -616,12 +637,15 @@ export function CardScanner() {
           cards={cards}
           isScanning={isScanning}
           successFlash={successFlash}
+          autoCaptureEnabled={autoCaptureEnabled}
+          cardReady={cardReady}
           lastCard={lastCard}
           totalCards={cards.length}
           totalValue={totalValue}
           error={error}
           notice={notice}
           onScan={() => void scanCameraFrame()}
+          onToggleAutoCapture={() => setAutoCaptureEnabled((enabled) => !enabled)}
           onUpload={(file) => {
             stopCamera();
             void scanUploadedVideo(file);
@@ -648,12 +672,15 @@ function FullScreenScanner({
   cards,
   isScanning,
   successFlash,
+  autoCaptureEnabled,
+  cardReady,
   lastCard,
   totalCards,
   totalValue,
   error,
   notice,
   onScan,
+  onToggleAutoCapture,
   onUpload,
   onRemove,
   onClose,
@@ -663,12 +690,15 @@ function FullScreenScanner({
   cards: ScannerCard[];
   isScanning: boolean;
   successFlash: boolean;
+  autoCaptureEnabled: boolean;
+  cardReady: boolean;
   lastCard: ScannerCard | null;
   totalCards: number;
   totalValue: number;
   error: string | null;
   notice: string | null;
   onScan: () => void;
+  onToggleAutoCapture: () => void;
   onUpload: (file: File) => void;
   onRemove: (id: string) => void;
   onClose: () => void;
@@ -677,10 +707,10 @@ function FullScreenScanner({
   return (
     <div className="fixed inset-0 z-[100] overflow-hidden bg-black text-white">
       <style>{`
-        @keyframes packwatcherScannerTrack {
-          0%, 100% { transform: translate3d(-2%, -1%, 0) scale(0.98); }
-          35% { transform: translate3d(2%, 1.5%, 0) scale(1.02); }
-          70% { transform: translate3d(0, -2%, 0) scale(1); }
+        @keyframes packwatcherScanLine {
+          0% { transform: translateY(-42%); opacity: 0.15; }
+          50% { opacity: 1; }
+          100% { transform: translateY(42%); opacity: 0.15; }
         }
       `}</style>
       <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
@@ -691,22 +721,29 @@ function FullScreenScanner({
         <button onClick={onClose} className="grid h-12 w-12 place-items-center rounded-full bg-white text-slate-950 shadow-lg">
           <X className="h-6 w-6" />
         </button>
-        <div className="rounded-full bg-black/50 px-4 py-2 text-sm font-bold text-emerald-200 shadow-lg backdrop-blur">
-          Auto capture on
-        </div>
+        <button
+          onClick={onToggleAutoCapture}
+          className={`rounded-full px-4 py-2 text-sm font-bold shadow-lg backdrop-blur ${autoCaptureEnabled ? "bg-emerald-400/25 text-emerald-100" : "bg-black/50 text-white/75"}`}
+        >
+          Auto capture {autoCaptureEnabled ? "on" : "off"}
+        </button>
         <div className="w-12" />
       </div>
 
-      <div className="pointer-events-none absolute inset-x-8 top-[24vh] mx-auto max-w-[340px]" style={{ animation: "packwatcherScannerTrack 4.6s ease-in-out infinite" }}>
-        <div className="relative aspect-[63/88] rounded-[10px] border-[5px] border-emerald-400 shadow-[0_0_30px_rgba(74,222,128,0.5)]">
-          <div className="absolute -left-3 -top-3 h-6 w-6 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" />
-          <div className="absolute -right-3 -top-3 h-6 w-6 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" />
-          <div className="absolute -bottom-3 -left-3 h-6 w-6 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" />
-          <div className="absolute -bottom-3 -right-3 h-6 w-6 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" />
-          <div className="absolute left-1/2 top-7 -translate-x-1/2 rounded-full bg-emerald-400/65 px-5 py-3 text-sm font-black shadow-lg backdrop-blur">
-            {isScanning ? <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Checking</span> : <span className="inline-flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> Ready to capture</span>}
+      <div className="pointer-events-none absolute inset-x-8 top-[24vh] mx-auto max-w-[340px]">
+        <div className={`relative aspect-[63/88] rounded-[10px] border-[5px] shadow-[0_0_30px_rgba(148,163,184,0.25)] ${cardReady ? "border-emerald-400 shadow-[0_0_30px_rgba(74,222,128,0.5)]" : "border-slate-400/80"}`}>
+          <div className={`absolute -left-3 -top-3 h-6 w-6 rounded-full ${cardReady ? "bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" : "bg-slate-400"}`} />
+          <div className={`absolute -right-3 -top-3 h-6 w-6 rounded-full ${cardReady ? "bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" : "bg-slate-400"}`} />
+          <div className={`absolute -bottom-3 -left-3 h-6 w-6 rounded-full ${cardReady ? "bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" : "bg-slate-400"}`} />
+          <div className={`absolute -bottom-3 -right-3 h-6 w-6 rounded-full ${cardReady ? "bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" : "bg-slate-400"}`} />
+          <div className={`absolute left-1/2 top-7 -translate-x-1/2 rounded-full px-5 py-3 text-sm font-black shadow-lg backdrop-blur ${cardReady ? "bg-emerald-400/70 text-white" : "bg-slate-900/65 text-slate-100"}`}>
+            {isScanning
+              ? <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Checking</span>
+              : cardReady
+                ? <span className="inline-flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> Ready to capture</span>
+                : <span>Line card up</span>}
           </div>
-          {isScanning ? <div className="absolute inset-x-3 top-1/2 h-1 animate-pulse rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(74,222,128,0.9)]" /> : null}
+          {isScanning ? <div className="absolute inset-x-3 top-1/2 h-1 rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(74,222,128,0.9)]" style={{ animation: "packwatcherScanLine 1.2s ease-in-out infinite alternate" }} /> : null}
         </div>
       </div>
 
@@ -725,7 +762,7 @@ function FullScreenScanner({
         </div>
 
         {cards.length ? (
-          <div className="mb-6 flex gap-3 overflow-x-auto pb-1">
+          <div className="mb-6 flex gap-3 overflow-x-auto px-3 pb-3 pt-3">
             {cards.slice().reverse().slice(0, 8).map((card) => (
               <div key={card.id} className="relative flex min-w-[228px] items-center gap-3 rounded-2xl bg-white/12 p-3 shadow-lg backdrop-blur">
                 <button
@@ -758,7 +795,7 @@ function FullScreenScanner({
               event.currentTarget.value = "";
             }} />
           </label>
-          <button onClick={onScan} disabled={isScanning} className="grid h-24 w-24 place-items-center rounded-full border-[5px] border-emerald-400 bg-emerald-400 text-slate-950 shadow-[0_0_24px_rgba(74,222,128,0.7)] disabled:opacity-70">
+          <button onClick={onScan} disabled={isScanning} className={`grid h-24 w-24 place-items-center rounded-full border-[5px] text-slate-950 disabled:opacity-70 ${cardReady ? "border-emerald-400 bg-emerald-400 shadow-[0_0_24px_rgba(74,222,128,0.7)]" : "border-slate-300 bg-white"}`}>
             {isScanning ? <Loader2 className="h-10 w-10 animate-spin" /> : <Check className="h-12 w-12 stroke-[3]" />}
           </button>
           <button onClick={onEnd} className="grid justify-items-center gap-1 text-xs font-semibold text-white/85">
@@ -783,6 +820,59 @@ function captureVideoFrame(video: HTMLVideoElement) {
   if (!context) throw new Error("Could not capture camera frame.");
   context.drawImage(video, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/jpeg", 0.82);
+}
+
+function isCardReadyForScan(video: HTMLVideoElement) {
+  if (!video.videoWidth || !video.videoHeight) return false;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 96;
+  canvas.height = 128;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return false;
+
+  const crop = centerCrop(video.videoWidth, video.videoHeight, 0.72, 0.78, -0.02);
+  context.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
+  const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+
+  let sum = 0;
+  let sumSquares = 0;
+  let saturated = 0;
+  let edgeTotal = 0;
+  let edgeCount = 0;
+  const luminance = new Float32Array(canvas.width * canvas.height);
+
+  for (let index = 0; index < data.length; index += 4) {
+    const r = data[index];
+    const g = data[index + 1];
+    const b = data[index + 2];
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const pixel = index / 4;
+    luminance[pixel] = luma;
+    sum += luma;
+    sumSquares += luma * luma;
+    if (max - min > 35) saturated += 1;
+  }
+
+  for (let y = 1; y < canvas.height - 1; y += 1) {
+    for (let x = 1; x < canvas.width - 1; x += 1) {
+      const i = y * canvas.width + x;
+      const gradient = Math.abs(luminance[i] - luminance[i - 1]) + Math.abs(luminance[i] - luminance[i - canvas.width]);
+      edgeTotal += gradient;
+      edgeCount += 1;
+    }
+  }
+
+  const pixels = canvas.width * canvas.height;
+  const mean = sum / pixels;
+  const variance = sumSquares / pixels - mean * mean;
+  const contrast = Math.sqrt(Math.max(0, variance));
+  const edgeScore = edgeCount ? edgeTotal / edgeCount : 0;
+  const saturationRatio = saturated / pixels;
+
+  return mean > 38 && contrast > 28 && edgeScore > 11 && saturationRatio > 0.06;
 }
 
 async function captureCameraBurst(video: HTMLVideoElement) {

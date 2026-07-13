@@ -60,6 +60,7 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
                 "Cards may be English, Japanese, Simplified Chinese, Traditional Chinese, Korean, or another localized Pokemon TCG language.",
                 "Use the artwork, Pokemon/card name, HP, attacks, rarity marks, collector/card number, regulation mark, set code, and visible text.",
                 "For live camera scans, prioritize the card title/name near the top border and the collector number/set code near the lower-left or lower edge.",
+                "When the user provides a pack/set hint, use the visible collector number plus that hint as the strongest signal for exact card identity.",
                 "Hands, thumbs, sleeves, glare, and pack wrappers may block parts of the card; infer from the readable top name, bottom number, artwork, HP, and set context.",
                 "If the image is a contact sheet or grid of video frames, inspect every panel and return candidates for every readable Pokemon card you can identify.",
                 "For non-English cards, return cardName as the best English/Tcgplayer-compatible card name when you can infer it. Put the printed/localized name in originalName.",
@@ -83,7 +84,7 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
                     "Use confidence 0-1.",
                     "For Japanese, Chinese, or Korean cards, translate or normalize the cardName to the closest English card name for pricing when possible.",
                     "If only the card border/art/card shape is visible, return Unknown Pokemon card with confidence 0.08-0.3.",
-                    "Include setName, cardNumber, and variant only if visible or strongly inferable from card text/art."
+                    "Include setName, cardNumber, and variant when visible. If a card number like 063/068 is visible and a set hint is provided, use that pair to identify the card."
                   ].join(" ")
               },
               {

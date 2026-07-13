@@ -136,9 +136,9 @@ export async function POST(request: Request) {
 function scannerScanNotes(language: z.infer<typeof ScanSchema>["language"], packHint?: string) {
   return [
     scannerLanguageLabel(language),
-    packHint ? `User pack/set hint: ${packHint}. Use this as context for likely set, expansion, language, and card numbering.` : null,
+    packHint ? `User pack/set hint: ${packHint}. Use this as context for likely set, expansion, language, and card numbering. If a collector number is visible, combine it with this pack/set hint to identify the exact card.` : null,
     "Prioritize the card name/title text near the top edge of the card.",
-    "Prioritize the collector number, set code, rarity, and regulation mark near the lower-left or lower edge.",
+    "Prioritize the collector number, set code, rarity, and regulation mark near the lower-left or lower edge. Return cardNumber whenever visible because it is a primary lookup key.",
     "Ignore fingers, sleeves, playmats, pack wrappers, and background objects unless they clarify the set."
   ].filter(Boolean).join(" ");
 }
