@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 
@@ -19,17 +19,48 @@ export async function writeLocalSourceVideo(userId: string, fileName: string, bu
 }
 
 export async function writeLocalSourceChunk(userId: string, uploadId: string, fileName: string, chunk: Buffer, chunkIndex: number) {
-  const relativePath = localSourceRelativePath(userId, uploadId, fileName);
+  const relativePath = localSourceChunkRelativePath(userId, uploadId, chunkIndex);
   const absolutePath = resolveLocalSourcePath(relativePath);
   await mkdir(dirname(absolutePath), { recursive: true });
+  await writeFile(absolutePath, chunk);
+  return localSourceRelativePath(userId, uploadId, fileName);
+}
 
-  if (chunkIndex === 0) {
-    await writeFile(absolutePath, chunk);
-  } else {
-    await appendFile(absolutePath, chunk);
+export async function assembleLocalSourceChunks(userId: string, uploadId: string, fileName: string, chunkCount: number) {
+  const finalRelativePath = localSourceRelativePath(userId, uploadId, fileName);
+  const finalAbsolutePath = resolveLocalSourcePath(finalRelativePath);
+  const missingChunks = await missingLocalSourceChunks(userId, uploadId, chunkCount);
+
+  if (missingChunks.length) {
+    return { complete: false as const, finalRelativePath, missingChunks };
   }
 
-  return relativePath;
+  await mkdir(dirname(finalAbsolutePath), { recursive: true });
+  await writeFile(finalAbsolutePath, Buffer.alloc(0));
+
+  for (let index = 0; index < chunkCount; index += 1) {
+    const chunk = await readFile(resolveLocalSourcePath(localSourceChunkRelativePath(userId, uploadId, index)));
+    await appendFile(finalAbsolutePath, chunk);
+  }
+
+  await rm(resolveLocalSourcePath(localSourceChunkDirectory(userId, uploadId)), { recursive: true, force: true });
+
+  return { complete: true as const, finalRelativePath, missingChunks: [] as number[] };
+}
+
+async function missingLocalSourceChunks(userId: string, uploadId: string, chunkCount: number) {
+  const missingChunks: number[] = [];
+
+  for (let index = 0; index < chunkCount; index += 1) {
+    try {
+      const chunkStat = await stat(resolveLocalSourcePath(localSourceChunkRelativePath(userId, uploadId, index)));
+      if (!chunkStat.size) missingChunks.push(index);
+    } catch {
+      missingChunks.push(index);
+    }
+  }
+
+  return missingChunks;
 }
 
 export async function discardLocalSourceVideo(relativePath: string) {
@@ -52,6 +83,15 @@ function resolveLocalSourcePath(relativePath: string) {
 function localSourceRelativePath(userId: string, uploadId: string, fileName: string) {
   const safeUploadId = uploadId.replace(/[^a-zA-Z0-9-]/g, "");
   return `${userId}/${safeUploadId}${sourceExtension(fileName)}`;
+}
+
+function localSourceChunkDirectory(userId: string, uploadId: string) {
+  const safeUploadId = uploadId.replace(/[^a-zA-Z0-9-]/g, "");
+  return `${userId}/${safeUploadId}.parts`;
+}
+
+function localSourceChunkRelativePath(userId: string, uploadId: string, chunkIndex: number) {
+  return `${localSourceChunkDirectory(userId, uploadId)}/${chunkIndex}.part`;
 }
 
 function sourceExtension(fileName: string) {

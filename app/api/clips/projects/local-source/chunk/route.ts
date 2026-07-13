@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { calculateClipTotals } from "@/lib/clips/types";
-import { LOCAL_SOURCE_BUCKET, discardLocalSourceVideo, readLocalSourceVideo, writeLocalSourceChunk } from "@/lib/clips/local-storage";
+import { LOCAL_SOURCE_BUCKET, assembleLocalSourceChunks, discardLocalSourceVideo, readLocalSourceVideo, writeLocalSourceChunk } from "@/lib/clips/local-storage";
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024;
 const MAX_CHUNK_BYTES = 8 * 1024 * 1024;
@@ -57,17 +57,28 @@ async function handlePost(request: Request) {
   }
 
   const localPath = await writeLocalSourceChunk(user.id, uploadId, fileName, chunk, chunkIndex);
-  const isFinalChunk = chunkIndex === chunkCount - 1;
+  const shouldFinalize = chunkIndex === chunkCount - 1 || request.headers.get("x-clip-finalize") === "true";
 
-  if (!isFinalChunk) {
+  if (!shouldFinalize) {
     return NextResponse.json({ ok: true, complete: false, localPath });
   }
 
-  const finalBuffer = await readLocalSourceVideo(localPath);
-  if (finalBuffer.byteLength !== fileSize) {
-    await discardLocalSourceVideo(localPath);
+  const assembled = await assembleLocalSourceChunks(user.id, uploadId, fileName, chunkCount);
+  if (!assembled.complete) {
     return NextResponse.json({
-      error: `Local upload was incomplete: received ${finalBuffer.byteLength} bytes, expected ${fileSize}. Try uploading again.`
+      ok: true,
+      complete: false,
+      localPath: assembled.finalRelativePath,
+      missingChunks: assembled.missingChunks,
+      message: `Waiting for ${assembled.missingChunks.length} missing video chunk${assembled.missingChunks.length === 1 ? "" : "s"}.`
+    });
+  }
+
+  const finalBuffer = await readLocalSourceVideo(assembled.finalRelativePath);
+  if (finalBuffer.byteLength !== fileSize) {
+    await discardLocalSourceVideo(assembled.finalRelativePath);
+    return NextResponse.json({
+      error: `Local upload assembled to ${finalBuffer.byteLength} bytes, expected ${fileSize}. Try uploading again.`
     }, { status: 400 });
   }
 
@@ -82,7 +93,7 @@ async function handlePost(request: Request) {
       pack_count: packCount,
       notes,
       source_video_bucket: LOCAL_SOURCE_BUCKET,
-      source_video_path: localPath,
+      source_video_path: assembled.finalRelativePath,
       source_file_name: fileName,
       source_content_type: contentType,
       source_file_size: finalBuffer.byteLength,

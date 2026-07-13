@@ -6,6 +6,7 @@ import { Loader2, UploadCloud } from "lucide-react";
 
 const MAX_UPLOAD_MB = 5120;
 const LOCAL_CHUNK_BYTES = 2 * 1024 * 1024;
+const LOCAL_UPLOAD_RETRY_LIMIT = 4;
 
 type State = "idle" | "creating" | "processing" | "error";
 
@@ -59,8 +60,9 @@ export function ClipUploadForm() {
     const uploadId = crypto.randomUUID();
     const chunkCount = Math.ceil(selectedFile.size / LOCAL_CHUNK_BYTES);
     let projectId: string | null = null;
+    let missingChunks: number[] = [];
 
-    for (let index = 0; index < chunkCount; index += 1) {
+    async function uploadChunk(index: number, finalize = false) {
       const start = index * LOCAL_CHUNK_BYTES;
       const end = Math.min(selectedFile.size, start + LOCAL_CHUNK_BYTES);
       const chunk = selectedFile.slice(start, end);
@@ -78,7 +80,8 @@ export function ClipUploadForm() {
           "x-clip-product-name": encodeURIComponent(productName),
           "x-clip-total-cost": totalCost || "0",
           "x-clip-pack-count": packCount || "1",
-          "x-clip-notes": encodeURIComponent(notes)
+          "x-clip-notes": encodeURIComponent(notes),
+          ...(finalize ? { "x-clip-finalize": "true" } : {})
         },
         body: chunk
       });
@@ -86,19 +89,51 @@ export function ClipUploadForm() {
       if (!response.ok) {
         setState("error");
         setError(await uploadErrorMessage(response));
-        return;
+        return null;
       }
 
-      const body = await response.json() as { id?: string; complete?: boolean };
+      return await response.json() as { id?: string; complete?: boolean; missingChunks?: number[]; message?: string };
+    }
+
+    for (let index = 0; index < chunkCount; index += 1) {
+      const body = await uploadChunk(index);
+      if (!body) return;
       setProgress(Math.round(((index + 1) / chunkCount) * 100));
       if (body.complete && body.id) {
         projectId = body.id;
+      }
+      missingChunks = body.missingChunks ?? [];
+    }
+
+    for (let attempt = 1; !projectId && attempt <= LOCAL_UPLOAD_RETRY_LIMIT; attempt += 1) {
+      const chunksToRetry = missingChunks.length ? missingChunks : [chunkCount - 1];
+      setNotice(`Retrying ${chunksToRetry.length} missing video chunk${chunksToRetry.length === 1 ? "" : "s"} (${attempt}/${LOCAL_UPLOAD_RETRY_LIMIT}).`);
+
+      for (const index of chunksToRetry) {
+        const body = await uploadChunk(index, true);
+        if (!body) return;
+        if (body.complete && body.id) {
+          projectId = body.id;
+          break;
+        }
+        missingChunks = body.missingChunks ?? [];
+      }
+
+      if (!missingChunks.length && !projectId) {
+        const body = await uploadChunk(chunkCount - 1, true);
+        if (!body) return;
+        if (body.complete && body.id) projectId = body.id;
+        missingChunks = body.missingChunks ?? [];
       }
     }
 
     if (!projectId) {
       setState("error");
-      setError("Local video upload finished without creating a clip project.");
+      setError(
+        missingChunks.length
+          ? `Local video upload could not finish because ${missingChunks.length} chunk${missingChunks.length === 1 ? "" : "s"} were still missing after retry. This usually means the server cannot keep local upload chunks between requests.`
+          : "Local video upload finished without creating a clip project."
+      );
       return;
     }
 
