@@ -61,8 +61,9 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
                 "Use the artwork, Pokemon/card name, HP, attacks, rarity marks, card number, regulation mark, set code, and visible text.",
                 "If the image is a contact sheet or grid of video frames, inspect every panel and return candidates for every readable Pokemon card you can identify.",
                 "For non-English cards, return cardName as the best English/Tcgplayer-compatible card name when you can infer it. Put the printed/localized name in originalName.",
-                "If a Pokemon card is clearly visible but exact identity is uncertain, return cardName \"Unknown Pokemon card\" with low confidence instead of an empty list.",
-                "Return an empty candidates array only when no Pokemon card is visible.",
+                "If a Pokemon card or Pokemon TCG card front is visible but exact identity is uncertain, return your best guess with low confidence, or return cardName \"Unknown Pokemon card\" with low confidence.",
+                "Do not return an empty candidates array just because text is partially blurred, localized, angled, or small.",
+                "Return an empty candidates array only when no Pokemon card or Pokemon TCG card front is visible.",
                 "Return JSON only."
               ].join(" ")
           },
@@ -78,14 +79,15 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
                     "Return {\"candidates\":[{\"cardName\":\"English pricing name\",\"originalName\":null,\"language\":null,\"setName\":null,\"cardNumber\":null,\"variant\":null,\"confidence\":0.0}]}",
                     "Use confidence 0-1.",
                     "For Japanese, Chinese, or Korean cards, translate or normalize the cardName to the closest English card name for pricing when possible.",
-                    "If only the card border/art/card shape is visible, return Unknown Pokemon card with confidence 0.15-0.3.",
+                    "If only the card border/art/card shape is visible, return Unknown Pokemon card with confidence 0.08-0.3.",
                     "Include setName, cardNumber, and variant only if visible or strongly inferable from card text/art."
                   ].join(" ")
               },
               {
                 type: "image_url",
                 image_url: {
-                  url: `data:${input.mimeType ?? "image/jpeg"};base64,${input.imageBase64}`
+                  url: `data:${input.mimeType ?? "image/jpeg"};base64,${input.imageBase64}`,
+                  detail: "high"
                 }
               }
             ]
@@ -110,7 +112,7 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
     return (parsed.candidates ?? []).flatMap((candidate) => {
       const cardName = String(candidate.cardName ?? "").trim();
       const confidence = Number(candidate.confidence ?? 0);
-      if (!cardName || !Number.isFinite(confidence) || confidence < 0.15) return [];
+      if (!cardName || !Number.isFinite(confidence) || confidence < 0.08) return [];
       return [{
         cardName,
         setName: stringOrNull(candidate.setName),

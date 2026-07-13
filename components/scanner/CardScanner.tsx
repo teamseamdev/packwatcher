@@ -28,6 +28,11 @@ type ScanResponse = {
   messages?: string[];
 };
 
+const MAX_VIDEO_SCAN_FRAMES = 96;
+const MIN_VIDEO_SCAN_FRAMES = 18;
+const CONTACT_SHEET_FRAME_COUNT = 24;
+const PREVIEW_FRAME_COUNT = 12;
+
 export function CardScanner() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -85,18 +90,55 @@ export function CardScanner() {
     if (!videoRef.current) return;
     setIsScanning(true);
     setError(null);
-    setNotice(null);
+    setNotice("Capturing a short scan burst...");
+    setSampledFrames([]);
 
-    const imageDataUrl = captureVideoFrame(videoRef.current);
-    const scanned = await scanImageDataUrl(imageDataUrl, { tryCrops: true });
-    setIsScanning(false);
+    try {
+      const frames = await captureCameraBurst(videoRef.current);
+      setSampledFrames(frames);
+      const scanFailures: string[] = [];
+      let scanned: Omit<ScannerCard, "id" | "order" | "imageDataUrl"> | null = null;
+      let scannedImage = frames[0];
 
-    if (!scanned) return;
-    const card = addCard(scanned, imageDataUrl);
-    setLastCard(card);
-    if (mode === "single") {
-      setIsComplete(true);
-      stopCamera();
+      const contactSheet = await buildContactSheet(frames);
+      if (contactSheet) {
+        setNotice("Scanning camera burst...");
+        scanned = await scanImageDataUrl(contactSheet, {
+          silentMiss: true,
+          onMiss: (message) => {
+            if (message && !scanFailures.includes(message)) scanFailures.push(message);
+          }
+        });
+        if (scanned) scannedImage = contactSheet;
+      }
+
+      for (let index = 0; !scanned && index < frames.length; index += 1) {
+        setNotice(`Scanning camera frame ${index + 1} of ${frames.length}...`);
+        scanned = await scanImageDataUrl(frames[index], {
+          silentMiss: true,
+          tryCrops: true,
+          onMiss: (message) => {
+            if (message && !scanFailures.includes(message)) scanFailures.push(message);
+          }
+        });
+        if (scanned) scannedImage = frames[index];
+      }
+
+      if (!scanned) {
+        setError(scanFailures[0] ?? "No readable Pokemon card was detected. Hold the card flat in the frame, tap to focus if needed, then scan again.");
+        setNotice(null);
+        return;
+      }
+
+      const card = addCard(scanned, scannedImage);
+      setLastCard(card);
+      setNotice(null);
+      if (mode === "single") {
+        setIsComplete(true);
+        stopCamera();
+      }
+    } finally {
+      setIsScanning(false);
     }
   }
 
@@ -112,24 +154,26 @@ export function CardScanner() {
 
     try {
       const frames = await extractVideoFrames(file);
-      setSampledFrames(frames.slice(0, 10));
+      setSampledFrames(selectPreviewFrames(frames));
       const seen = new Set<string>();
       const scanFailures: string[] = [];
-      const contactSheet = await buildContactSheet(frames.slice(0, 24));
+      const contactSheets = await buildContactSheets(frames, CONTACT_SHEET_FRAME_COUNT);
 
-      if (contactSheet) {
-        setNotice("Scanning contact sheet...");
+      for (let sheetIndex = 0; sheetIndex < contactSheets.length; sheetIndex += 1) {
+        const contactSheet = contactSheets[sheetIndex];
+        setNotice(`Scanning contact sheet ${sheetIndex + 1} of ${contactSheets.length}...`);
         const contactSheetScan = await scanImageDataUrl(contactSheet, {
           silentMiss: true,
           onMiss: (message) => {
             if (message && !scanFailures.includes(message)) scanFailures.push(message);
           }
         });
-        if (contactSheetScan) {
-          const key = normalizeCardKey(contactSheetScan.cardName, contactSheetScan.setName);
-          seen.add(key);
-          addCard(contactSheetScan, contactSheet);
-        }
+        if (!contactSheetScan) continue;
+
+        const key = normalizeCardKey(contactSheetScan.cardName, contactSheetScan.setName);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        addCard(contactSheetScan, contactSheet);
       }
 
       for (let index = 0; index < frames.length; index += 1) {
@@ -156,7 +200,7 @@ export function CardScanner() {
         setError(
           backendReason
             ? `No cards were detected. Scanner backend response: ${backendReason}`
-            : "No cards were detected in the sampled frames. Check the frame preview below to confirm the cards are visible."
+            : `No cards were detected after sampling ${frames.length} frames across the full video. Check the frame preview below to confirm the cards are visible.`
         );
       }
     } catch (scanError) {
@@ -436,6 +480,19 @@ function captureVideoFrame(video: HTMLVideoElement) {
   return canvas.toDataURL("image/jpeg", 0.82);
 }
 
+async function captureCameraBurst(video: HTMLVideoElement) {
+  const frames: string[] = [];
+  for (let index = 0; index < 3; index += 1) {
+    frames.push(captureVideoFrame(video));
+    if (index < 2) await delay(260);
+  }
+  return frames;
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function dataUrlToPayload(dataUrl: string) {
   const [header, imageBase64] = dataUrl.split(",");
   const mimeType = header.match(/data:(.*);base64/)?.[1] ?? "image/jpeg";
@@ -523,6 +580,15 @@ async function buildContactSheet(frames: string[]) {
   return canvas.toDataURL("image/jpeg", 0.82);
 }
 
+async function buildContactSheets(frames: string[], frameCount: number) {
+  const sheets: string[] = [];
+  for (let index = 0; index < frames.length; index += frameCount) {
+    const sheet = await buildContactSheet(frames.slice(index, index + frameCount));
+    if (sheet) sheets.push(sheet);
+  }
+  return sheets;
+}
+
 async function extractVideoFrames(file: File) {
   const video = document.createElement("video");
   video.muted = true;
@@ -541,11 +607,15 @@ async function extractVideoFrames(file: File) {
     const context = canvas.getContext("2d");
     if (!context) throw new Error("Could not scan video frames.");
 
-    const frameCount = Math.min(60, Math.max(1, Math.ceil(duration)));
+    const frameCount = Math.min(
+      MAX_VIDEO_SCAN_FRAMES,
+      Math.max(MIN_VIDEO_SCAN_FRAMES, Math.ceil(duration / 1.25))
+    );
+    const step = duration / frameCount;
     const frames: string[] = [];
 
     for (let index = 0; index < frameCount; index += 1) {
-      video.currentTime = Math.min(duration - 0.1, index);
+      video.currentTime = Math.min(Math.max(0, duration - 0.1), index * step + step / 2);
       await once(video, "seeked");
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       frames.push(canvas.toDataURL("image/jpeg", 0.78));
@@ -555,6 +625,14 @@ async function extractVideoFrames(file: File) {
   } finally {
     URL.revokeObjectURL(video.src);
   }
+}
+
+function selectPreviewFrames(frames: string[]) {
+  if (frames.length <= PREVIEW_FRAME_COUNT) return frames;
+  return Array.from({ length: PREVIEW_FRAME_COUNT }, (_, index) => {
+    const frameIndex = Math.round((index * (frames.length - 1)) / (PREVIEW_FRAME_COUNT - 1));
+    return frames[frameIndex];
+  });
 }
 
 function once(target: EventTarget, eventName: string) {
