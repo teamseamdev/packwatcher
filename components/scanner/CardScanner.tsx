@@ -34,7 +34,6 @@ type ScanResponse = {
 const MAX_VIDEO_SCAN_FRAMES = 96;
 const MIN_VIDEO_SCAN_FRAMES = 18;
 const CONTACT_SHEET_FRAME_COUNT = 24;
-const AUTO_CAPTURE_DELAY_MS = 5200;
 const CARD_READINESS_INTERVAL_MS = 450;
 const FALLBACK_PACK_OPTIONS = [
   "Pokemon 151",
@@ -58,8 +57,6 @@ export function CardScanner() {
   const streamRef = useRef<MediaStream | null>(null);
   const successFlashTimeoutRef = useRef<number | null>(null);
   const cardHideTimeoutRef = useRef<number | null>(null);
-  const autoCaptureTimeoutRef = useRef<number | null>(null);
-  const autoCaptureScanRef = useRef<(() => void) | null>(null);
   const cardReadinessIntervalRef = useRef<number | null>(null);
   const [mode, setMode] = useState<ScannerMode>("scanner");
   const [cards, setCards] = useState<ScannerCard[]>([]);
@@ -76,7 +73,6 @@ export function CardScanner() {
   const [scanPhase, setScanPhase] = useState<ScanPhase>("idle");
   const [successFlash, setSuccessFlash] = useState(false);
   const [packOptions, setPackOptions] = useState<string[]>(FALLBACK_PACK_OPTIONS);
-  const [autoCaptureEnabled, setAutoCaptureEnabled] = useState(false);
   const [cardReady, setCardReady] = useState(false);
 
   const totalValue = useMemo(() => cards.reduce((sum, card) => sum + card.estimatedValue, 0), [cards]);
@@ -116,23 +112,6 @@ export function CardScanner() {
       cardReadinessIntervalRef.current = null;
     };
   }, [isCameraReady, mode]);
-
-  useEffect(() => {
-    autoCaptureScanRef.current = () => {
-      void scanCameraFrame();
-    };
-  });
-
-  useEffect(() => {
-    if (!autoCaptureEnabled || !cardReady || !isCameraReady || mode !== "scanner" || isScanning || lastCard) return;
-    autoCaptureTimeoutRef.current = window.setTimeout(() => {
-      autoCaptureScanRef.current?.();
-    }, AUTO_CAPTURE_DELAY_MS);
-    return () => {
-      if (autoCaptureTimeoutRef.current) window.clearTimeout(autoCaptureTimeoutRef.current);
-      autoCaptureTimeoutRef.current = null;
-    };
-  }, [autoCaptureEnabled, cardReady, isCameraReady, isScanning, lastCard, mode]);
 
   useEffect(() => {
     let ignore = false;
@@ -189,9 +168,7 @@ export function CardScanner() {
   }
 
   function stopCamera() {
-    if (autoCaptureTimeoutRef.current) window.clearTimeout(autoCaptureTimeoutRef.current);
     if (cardReadinessIntervalRef.current) window.clearInterval(cardReadinessIntervalRef.current);
-    autoCaptureTimeoutRef.current = null;
     cardReadinessIntervalRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
@@ -439,6 +416,47 @@ export function CardScanner() {
     removeCard(id);
   }
 
+  async function addScansToInventory() {
+    if (!cards.length) return;
+
+    setIsScanning(true);
+    setScanPhase("pricing");
+    setError(null);
+    const supabase = createClient();
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    const userId = authData.user?.id;
+    if (authError || !userId) {
+      setIsScanning(false);
+      setScanPhase("idle");
+      setError("Sign in again before adding scans to inventory.");
+      return;
+    }
+
+    const rows = cards.map((card) => ({
+      user_id: userId,
+      name: [card.cardName, card.cardNumber, card.setName].filter(Boolean).join(" - "),
+      quantity: 1,
+      purchase_price: 0,
+      estimated_sale_price: Number(card.estimatedValue || 0),
+      fees: 0,
+      shipping: 0,
+      notes: [
+        "Added from PackWatcher Scanner",
+        card.originalName ? `Printed name: ${card.originalName}` : null,
+        card.variant ? `Variant: ${card.variant}` : null
+      ].filter(Boolean).join("\n")
+    }));
+
+    const { error: insertError } = await supabase.from("inventory_items").insert(rows);
+    setIsScanning(false);
+    setScanPhase("idle");
+    if (insertError) {
+      setError(`Could not add scans to inventory: ${insertError.message}`);
+      return;
+    }
+    setNotice(`Added ${cards.length} scanned card${cards.length === 1 ? "" : "s"} to inventory.`);
+  }
+
   async function lookupCard(card: ScannerCard) {
     if (!card.cardName.trim()) {
       setError("Enter a card name before looking up value.");
@@ -567,10 +585,16 @@ export function CardScanner() {
             <h2 className="text-xl font-bold text-white">Scan results</h2>
             <p className="mt-1 text-sm text-slate-400">{cards.length} card{cards.length === 1 ? "" : "s"} scanned - Total value {currency(totalValue)}</p>
           </div>
-          <button onClick={() => exportResultsPdf(cards, totalValue)} disabled={!cards.length} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-bold text-slate-950 disabled:opacity-50">
-            <FileDown className="h-4 w-4" />
-            Export PDF
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => void addScansToInventory()} disabled={!cards.length || isScanning} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-emerald-300/40 px-4 text-sm font-bold text-emerald-100 disabled:opacity-50">
+              <Plus className="h-4 w-4" />
+              Add to inventory
+            </button>
+            <button onClick={() => exportResultsPdf(cards, totalValue)} disabled={!cards.length} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-bold text-slate-950 disabled:opacity-50">
+              <FileDown className="h-4 w-4" />
+              Export PDF
+            </button>
+          </div>
         </div>
 
         <div className="mt-4 max-h-[520px] space-y-3 overflow-y-auto pr-1">
@@ -637,7 +661,6 @@ export function CardScanner() {
           cards={cards}
           isScanning={isScanning}
           successFlash={successFlash}
-          autoCaptureEnabled={autoCaptureEnabled}
           cardReady={cardReady}
           lastCard={lastCard}
           totalCards={cards.length}
@@ -645,7 +668,6 @@ export function CardScanner() {
           error={error}
           notice={notice}
           onScan={() => void scanCameraFrame()}
-          onToggleAutoCapture={() => setAutoCaptureEnabled((enabled) => !enabled)}
           onUpload={(file) => {
             stopCamera();
             void scanUploadedVideo(file);
@@ -672,7 +694,6 @@ function FullScreenScanner({
   cards,
   isScanning,
   successFlash,
-  autoCaptureEnabled,
   cardReady,
   lastCard,
   totalCards,
@@ -680,7 +701,6 @@ function FullScreenScanner({
   error,
   notice,
   onScan,
-  onToggleAutoCapture,
   onUpload,
   onRemove,
   onClose,
@@ -690,7 +710,6 @@ function FullScreenScanner({
   cards: ScannerCard[];
   isScanning: boolean;
   successFlash: boolean;
-  autoCaptureEnabled: boolean;
   cardReady: boolean;
   lastCard: ScannerCard | null;
   totalCards: number;
@@ -698,7 +717,6 @@ function FullScreenScanner({
   error: string | null;
   notice: string | null;
   onScan: () => void;
-  onToggleAutoCapture: () => void;
   onUpload: (file: File) => void;
   onRemove: (id: string) => void;
   onClose: () => void;
@@ -721,16 +739,13 @@ function FullScreenScanner({
         <button onClick={onClose} className="grid h-12 w-12 place-items-center rounded-full bg-white text-slate-950 shadow-lg">
           <X className="h-6 w-6" />
         </button>
-        <button
-          onClick={onToggleAutoCapture}
-          className={`rounded-full px-4 py-2 text-sm font-bold shadow-lg backdrop-blur ${autoCaptureEnabled ? "bg-emerald-400/25 text-emerald-100" : "bg-black/50 text-white/75"}`}
-        >
-          Auto capture {autoCaptureEnabled ? "on" : "off"}
-        </button>
+        <div className="rounded-full bg-black/50 px-4 py-2 text-sm font-bold text-white/75 shadow-lg backdrop-blur">
+          Manual scan
+        </div>
         <div className="w-12" />
       </div>
 
-      <div className="pointer-events-none absolute inset-x-8 top-[24vh] mx-auto max-w-[340px]">
+      <div className="pointer-events-none absolute inset-x-8 top-[18vh] mx-auto max-w-[285px] sm:max-w-[320px]">
         <div className={`relative aspect-[63/88] rounded-[10px] border-[5px] shadow-[0_0_30px_rgba(148,163,184,0.25)] ${cardReady ? "border-emerald-400 shadow-[0_0_30px_rgba(74,222,128,0.5)]" : "border-slate-400/80"}`}>
           <div className={`absolute -left-3 -top-3 h-6 w-6 rounded-full ${cardReady ? "bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" : "bg-slate-400"}`} />
           <div className={`absolute -right-3 -top-3 h-6 w-6 rounded-full ${cardReady ? "bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" : "bg-slate-400"}`} />
@@ -838,6 +853,8 @@ function isCardReadyForScan(video: HTMLVideoElement) {
   let sum = 0;
   let sumSquares = 0;
   let saturated = 0;
+  let bright = 0;
+  let veryDark = 0;
   let edgeTotal = 0;
   let edgeCount = 0;
   const luminance = new Float32Array(canvas.width * canvas.height);
@@ -854,6 +871,8 @@ function isCardReadyForScan(video: HTMLVideoElement) {
     sum += luma;
     sumSquares += luma * luma;
     if (max - min > 35) saturated += 1;
+    if (luma > 170) bright += 1;
+    if (luma < 32) veryDark += 1;
   }
 
   for (let y = 1; y < canvas.height - 1; y += 1) {
@@ -871,8 +890,10 @@ function isCardReadyForScan(video: HTMLVideoElement) {
   const contrast = Math.sqrt(Math.max(0, variance));
   const edgeScore = edgeCount ? edgeTotal / edgeCount : 0;
   const saturationRatio = saturated / pixels;
+  const brightRatio = bright / pixels;
+  const darkRatio = veryDark / pixels;
 
-  return mean > 38 && contrast > 28 && edgeScore > 11 && saturationRatio > 0.06;
+  return mean > 55 && contrast > 34 && edgeScore > 15 && saturationRatio > 0.1 && brightRatio > 0.08 && darkRatio < 0.42;
 }
 
 async function captureCameraBurst(video: HTMLVideoElement) {

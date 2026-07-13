@@ -80,8 +80,8 @@ export async function POST(request: Request) {
             setName: candidate.setName ?? null,
             cardNumber: candidate.cardNumber ?? null,
             variant: candidate.variant ?? null,
-            language: candidate.language ?? parsed.language,
-            originalName: candidate.originalName ?? null,
+            language: normalizeDetectedLanguage(candidate.language ?? parsed.language, candidate.cardName, candidate.originalName, parsed.language),
+            originalName: normalizeOriginalName(candidate.originalName, candidate.cardName),
             confidence: candidate.confidence,
             source: candidate.source
           }
@@ -158,4 +158,24 @@ function scannerLanguageLabel(language: z.infer<typeof ScanSchema>["language"]) 
     default:
       return "Auto-detect card language, including English, Japanese, Chinese, and Korean.";
   }
+}
+
+function normalizeDetectedLanguage(language: string | null | undefined, cardName: string, originalName: string | null | undefined, requestedLanguage: z.infer<typeof ScanSchema>["language"]) {
+  if (requestedLanguage !== "auto") return requestedLanguage;
+  const detected = (language ?? "").toLowerCase();
+  const combined = `${cardName} ${originalName ?? ""}`;
+  const latinLetters = (combined.match(/[a-z]/gi) ?? []).length;
+  const localizedLetters = (combined.match(/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/g) ?? []).length;
+  if (["japanese", "chinese", "korean", "chinese_simplified", "chinese_traditional"].includes(detected) && latinLetters > localizedLetters * 2) {
+    return "english";
+  }
+  return language ?? requestedLanguage;
+}
+
+function normalizeOriginalName(originalName: string | null | undefined, cardName: string) {
+  const text = typeof originalName === "string" ? originalName.trim() : "";
+  if (!text || text.toLowerCase() === cardName.toLowerCase()) return null;
+  const readable = (text.match(/[a-z0-9\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/gi) ?? []).length;
+  if (readable < Math.max(2, text.length * 0.35)) return null;
+  return text;
 }
