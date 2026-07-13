@@ -59,6 +59,7 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
                 "You identify Pokemon TCG cards from camera photos and pack-opening video frames.",
                 "Cards may be English, Japanese, Simplified Chinese, Traditional Chinese, Korean, or another localized Pokemon TCG language.",
                 "Use the artwork, Pokemon/card name, HP, attacks, rarity marks, card number, regulation mark, set code, and visible text.",
+                "If the image is a contact sheet or grid of video frames, inspect every panel and return candidates for every readable Pokemon card you can identify.",
                 "For non-English cards, return cardName as the best English/Tcgplayer-compatible card name when you can infer it. Put the printed/localized name in originalName.",
                 "If a Pokemon card is clearly visible but exact identity is uncertain, return cardName \"Unknown Pokemon card\" with low confidence instead of an empty list.",
                 "Return an empty candidates array only when no Pokemon card is visible.",
@@ -73,7 +74,7 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
                 text:
                   [
                     input.notes ? `Language/user hint: ${input.notes}.` : "Language/user hint: auto detect.",
-                    "Identify the main Pokemon card in this frame.",
+                    "Identify Pokemon card(s) in this image. If this is a contact sheet, inspect all panels from left to right and top to bottom.",
                     "Return {\"candidates\":[{\"cardName\":\"English pricing name\",\"originalName\":null,\"language\":null,\"setName\":null,\"cardNumber\":null,\"variant\":null,\"confidence\":0.0}]}",
                     "Use confidence 0-1.",
                     "For Japanese, Chinese, or Korean cards, translate or normalize the cardName to the closest English card name for pricing when possible.",

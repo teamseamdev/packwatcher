@@ -115,6 +115,22 @@ export function CardScanner() {
       setSampledFrames(frames.slice(0, 10));
       const seen = new Set<string>();
       const scanFailures: string[] = [];
+      const contactSheet = await buildContactSheet(frames.slice(0, 24));
+
+      if (contactSheet) {
+        setNotice("Scanning contact sheet...");
+        const contactSheetScan = await scanImageDataUrl(contactSheet, {
+          silentMiss: true,
+          onMiss: (message) => {
+            if (message && !scanFailures.includes(message)) scanFailures.push(message);
+          }
+        });
+        if (contactSheetScan) {
+          const key = normalizeCardKey(contactSheetScan.cardName, contactSheetScan.setName);
+          seen.add(key);
+          addCard(contactSheetScan, contactSheet);
+        }
+      }
 
       for (let index = 0; index < frames.length; index += 1) {
         setNotice(`Scanning frame ${index + 1} of ${frames.length}...`);
@@ -470,6 +486,41 @@ function loadImage(dataUrl: string) {
     image.onerror = () => reject(new Error("Could not prepare frame crop."));
     image.src = dataUrl;
   });
+}
+
+async function buildContactSheet(frames: string[]) {
+  if (!frames.length) return null;
+  const images = await Promise.all(frames.map((frame) => loadImage(frame)));
+  const columns = 4;
+  const cellWidth = 320;
+  const cellHeight = 420;
+  const rows = Math.ceil(images.length / columns);
+  const canvas = document.createElement("canvas");
+  canvas.width = columns * cellWidth;
+  canvas.height = rows * cellHeight;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+
+  context.fillStyle = "#020617";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#f8fafc";
+  context.font = "24px Arial";
+
+  images.forEach((image, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const x = column * cellWidth;
+    const y = row * cellHeight;
+    const scale = Math.max(cellWidth / image.width, (cellHeight - 34) / image.height);
+    const drawWidth = image.width * scale;
+    const drawHeight = image.height * scale;
+    const drawX = x + (cellWidth - drawWidth) / 2;
+    const drawY = y + 34 + ((cellHeight - 34) - drawHeight) / 2;
+    context.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+    context.fillText(String(index + 1), x + 10, y + 26);
+  });
+
+  return canvas.toDataURL("image/jpeg", 0.82);
 }
 
 async function extractVideoFrames(file: File) {
