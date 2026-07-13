@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { AdminSyncPanel } from "@/components/admin-sync-panel";
 import { StatCard } from "@/components/stat-card";
 import { isAdmin, requireProfile } from "@/lib/auth";
-import { addCatalogOffer, adminCheckProduct, approveProductMatch, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, rejectProductMatch, sendAdminTestNotification, updateUserPlan } from "./actions";
+import { formatPromoDiscount } from "@/lib/promo-codes";
+import { addCatalogOffer, adminCheckProduct, approveProductMatch, createPromoCode, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, rejectProductMatch, sendAdminTestNotification, setPromoCodeActive, updateUserPlan } from "./actions";
 
 const panelClass = "rounded-lg border border-white/10 bg-white/[0.04] p-5";
 const scrollPanelClass = `${panelClass} max-h-[680px] overflow-y-auto overscroll-contain pr-4`;
@@ -20,6 +21,7 @@ export default async function AdminPage() {
     { data: notifications },
     { data: products },
     { data: users },
+    { data: promoCodes },
     { data: connectorHealth },
     { data: retailJobRuns },
     { data: matchReviews }
@@ -32,6 +34,7 @@ export default async function AdminPage() {
     supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(10),
     supabase.from("tracked_products").select("id,name,store_name,status,last_checked_at").order("created_at", { ascending: false }).limit(10),
     supabase.from("profiles").select("id,email,plan,created_at").order("created_at", { ascending: false }).limit(50),
+    supabase.from("promo_codes").select("*").order("created_at", { ascending: false }).limit(50),
     supabase.from("retailer_connector_health").select("*").order("updated_at", { ascending: false }).limit(12),
     supabase.from("retail_job_runs").select("*").order("started_at", { ascending: false }).limit(10),
     supabase.from("product_match_reviews").select("*").eq("status", "pending").order("created_at", { ascending: false }).limit(10)
@@ -174,6 +177,50 @@ export default async function AdminPage() {
             </label>
             <button className="h-10 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Send test notification</button>
           </form>
+        </div>
+
+        <div className={scrollPanelClass}>
+          <h2 className="font-bold text-white">Promo codes</h2>
+          <form action={createPromoCode} className="mt-4 grid gap-3 rounded-lg bg-white/5 p-3">
+            <input name="code" placeholder="Code, e.g. LAUNCH25" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300" />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <select name="discount_type" defaultValue="percent" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm">
+                <option value="percent">Percent off</option>
+                <option value="amount">Dollar amount off</option>
+              </select>
+              <input name="discount_value" type="number" min="0" step="0.01" placeholder="Discount value" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300" />
+            </div>
+            <input name="max_uses" type="number" min="1" step="1" placeholder="Total uses" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300" />
+            <label className="flex items-center gap-3 text-sm text-slate-300">
+              <input name="unlimited_uses" value="true" type="checkbox" className="h-4 w-4" />
+              Unlimited uses until deactivated
+            </label>
+            <button className="h-10 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Create promo code</button>
+          </form>
+          <div className="mt-4 space-y-3">
+            {promoCodes?.length ? promoCodes.map((promo) => (
+              <div key={promo.id} className="rounded-lg bg-white/5 p-3 text-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-bold text-white">{promo.code}</p>
+                    <p className="mt-1 text-slate-400">
+                      {formatPromoDiscount(promo)} - {promo.used_count ?? 0} / {promo.max_uses ?? "infinity"} used
+                    </p>
+                  </div>
+                  <span className={`rounded-full px-2 py-1 text-xs font-semibold ${promo.active ? "bg-emerald-400/15 text-emerald-200" : "bg-white/10 text-slate-400"}`}>
+                    {promo.active ? "Active" : "Inactive"}
+                  </span>
+                </div>
+                <form action={setPromoCodeActive} className="mt-3">
+                  <input type="hidden" name="promo_code_id" value={promo.id} />
+                  <input type="hidden" name="active" value={promo.active ? "false" : "true"} />
+                  <button className="h-9 rounded-lg border border-white/10 px-3 text-xs font-semibold text-slate-200">
+                    {promo.active ? "Deactivate" : "Activate"}
+                  </button>
+                </form>
+              </div>
+            )) : <p className="text-sm text-slate-400">No promo codes yet.</p>}
+          </div>
         </div>
 
         <div className={scrollPanelClass}>

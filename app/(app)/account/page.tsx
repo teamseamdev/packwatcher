@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import { AccountPlanSwitcher } from "@/components/account-plan-switcher";
 import { PushNotificationSettings } from "@/components/push-notification-settings";
 import { requireProfile } from "@/lib/auth";
+import { switchToFreePlan } from "./actions";
 
 async function signOut() {
   "use server";
@@ -28,6 +30,16 @@ export default async function AccountPage() {
           <button className="h-11 rounded-lg border border-white/10 px-4 text-sm font-semibold">Sign out</button>
         </form>
       </section>
+      <AccountPlanSwitcher currentPlan={profile?.plan ?? "free"} />
+      {profile?.plan === "pro" ? (
+        <section className="mt-6 rounded-lg border border-white/10 bg-white/[0.04] p-5">
+          <h2 className="font-bold text-white">Switch to Free</h2>
+          <p className="mt-2 text-sm text-slate-400">This downgrades your PackWatcher account and cancels the Stripe subscription at period end when a Stripe subscription is attached.</p>
+          <form action={switchToFreePlan} className="mt-4">
+            <button className="h-11 rounded-lg border border-white/10 px-4 text-sm font-semibold text-slate-200">Switch to Free</button>
+          </form>
+        </section>
+      ) : null}
       {profile?.plan === "admin" ? (
         <section className="mt-6 rounded-lg border border-amber-300/20 bg-amber-300/10 p-5">
           <h2 className="font-bold text-white">Admin access</h2>

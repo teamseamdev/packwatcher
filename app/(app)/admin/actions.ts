@@ -11,6 +11,7 @@ import { syncAvailableCatalogs } from "@/lib/catalog-importers/sync-all";
 import { importPokemonSealedFromTcgCsv } from "@/lib/catalog-importers/tcgcsv";
 import { upsertImportedCatalog, upsertImportedOffers } from "@/lib/catalog-importers/upsert";
 import { fetchProductMetadata } from "@/lib/product-metadata";
+import { normalizePromoCode } from "@/lib/promo-codes";
 import { sendPushToUser } from "@/lib/push";
 import { getAdapter } from "@/lib/stock-checkers";
 import { runProductCheck } from "@/lib/stock-checkers/run-check";
@@ -38,6 +39,19 @@ const TestNotificationSchema = z.object({
   title: z.string().trim().min(1).max(120),
   message: z.string().trim().min(1).max(500),
   send_push: z.coerce.boolean().optional()
+});
+
+const PromoCodeSchema = z.object({
+  code: z.string().trim().min(2).max(40),
+  discount_type: z.enum(["percent", "amount"]),
+  discount_value: z.coerce.number().positive(),
+  max_uses: z.string().optional(),
+  unlimited_uses: z.string().optional()
+});
+
+const PromoCodeIdSchema = z.object({
+  promo_code_id: z.string().uuid(),
+  active: z.enum(["true", "false"])
 });
 
 export async function adminCheckProduct(productId: string) {
@@ -114,6 +128,53 @@ export async function sendAdminTestNotification(formData: FormData) {
 
   revalidatePath("/admin");
   revalidatePath("/alerts");
+}
+
+export async function createPromoCode(formData: FormData) {
+  const { profile, user } = await requireProfile();
+  if (!isAdmin(profile)) throw new Error("Admin access required.");
+
+  const parsed = PromoCodeSchema.parse(Object.fromEntries(formData));
+  const code = normalizePromoCode(parsed.code);
+  const parsedMaxUses = Number.parseInt(String(parsed.max_uses ?? ""), 10);
+  const maxUses = parsed.unlimited_uses ? null : parsedMaxUses;
+
+  if (!parsed.unlimited_uses && (!Number.isFinite(parsedMaxUses) || parsedMaxUses < 1)) {
+    throw new Error("Enter a total use limit or choose unlimited uses.");
+  }
+
+  if (parsed.discount_type === "percent" && parsed.discount_value > 100) {
+    throw new Error("Percentage discounts cannot be more than 100%.");
+  }
+
+  const admin = createAdminClient();
+  const { error } = await admin.from("promo_codes").insert({
+    code,
+    discount_type: parsed.discount_type,
+    discount_value: parsed.discount_value,
+    max_uses: parsed.unlimited_uses ? null : maxUses,
+    created_by: user.id
+  });
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/admin");
+}
+
+export async function setPromoCodeActive(formData: FormData) {
+  const { profile } = await requireProfile();
+  if (!isAdmin(profile)) throw new Error("Admin access required.");
+  const parsed = PromoCodeIdSchema.parse(Object.fromEntries(formData));
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("promo_codes")
+    .update({ active: parsed.active === "true", updated_at: new Date().toISOString() })
+    .eq("id", parsed.promo_code_id);
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/admin");
 }
 
 export async function addCatalogOffer(formData: FormData) {

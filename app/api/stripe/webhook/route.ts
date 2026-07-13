@@ -23,6 +23,16 @@ export async function POST(request: Request) {
       const session = event.data.object as Stripe.Checkout.Session;
       const userId = session.metadata?.user_id;
       if (userId) {
+        const promoCodeId = session.metadata?.promo_code_id;
+        if (promoCodeId) {
+          await supabase.rpc("redeem_promo_code", {
+            input_promo_code_id: promoCodeId,
+            input_user_id: userId,
+            input_checkout_session_id: session.id,
+            input_subscription_id: String(session.subscription ?? "")
+          });
+        }
+
         await supabase.from("billing_status").upsert({
           user_id: userId,
           stripe_customer_id: String(session.customer ?? ""),
