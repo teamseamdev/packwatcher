@@ -14,6 +14,7 @@ const ScanSchema = z.object({
   setName: z.string().trim().optional(),
   cardNumber: z.string().trim().optional(),
   variant: z.string().trim().optional(),
+  packHint: z.string().trim().optional(),
   language: z.enum(["auto", "english", "japanese", "chinese_simplified", "chinese_traditional", "korean"]).default("auto")
 });
 
@@ -70,7 +71,7 @@ export async function POST(request: Request) {
       const candidates = await recognitionProvider.recognize({
         imageBase64: parsed.imageBase64,
         mimeType: parsed.mimeType ?? "image/jpeg",
-        notes: scannerLanguageLabel(parsed.language)
+        notes: scannerScanNotes(parsed.language, parsed.packHint)
       });
       const candidate = candidates[0];
       card = candidate
@@ -129,6 +130,16 @@ export async function POST(request: Request) {
     },
     messages
   });
+}
+
+function scannerScanNotes(language: z.infer<typeof ScanSchema>["language"], packHint?: string) {
+  return [
+    scannerLanguageLabel(language),
+    packHint ? `User pack/set hint: ${packHint}. Use this as context for likely set, expansion, language, and card numbering.` : null,
+    "Prioritize the card name/title text near the top edge of the card.",
+    "Prioritize the collector number, set code, rarity, and regulation mark near the lower-left or lower edge.",
+    "Ignore fingers, sleeves, playmats, pack wrappers, and background objects unless they clarify the set."
+  ].filter(Boolean).join(" ");
 }
 
 function scannerLanguageLabel(language: z.infer<typeof ScanSchema>["language"]) {

@@ -58,7 +58,9 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
               [
                 "You identify Pokemon TCG cards from camera photos and pack-opening video frames.",
                 "Cards may be English, Japanese, Simplified Chinese, Traditional Chinese, Korean, or another localized Pokemon TCG language.",
-                "Use the artwork, Pokemon/card name, HP, attacks, rarity marks, card number, regulation mark, set code, and visible text.",
+                "Use the artwork, Pokemon/card name, HP, attacks, rarity marks, collector/card number, regulation mark, set code, and visible text.",
+                "For live camera scans, prioritize the card title/name near the top border and the collector number/set code near the lower-left or lower edge.",
+                "Hands, thumbs, sleeves, glare, and pack wrappers may block parts of the card; infer from the readable top name, bottom number, artwork, HP, and set context.",
                 "If the image is a contact sheet or grid of video frames, inspect every panel and return candidates for every readable Pokemon card you can identify.",
                 "For non-English cards, return cardName as the best English/Tcgplayer-compatible card name when you can infer it. Put the printed/localized name in originalName.",
                 "If a Pokemon card or Pokemon TCG card front is visible but exact identity is uncertain, return your best guess with low confidence, or return cardName \"Unknown Pokemon card\" with low confidence.",
@@ -76,6 +78,7 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
                   [
                     input.notes ? `Language/user hint: ${input.notes}.` : "Language/user hint: auto detect.",
                     "Identify Pokemon card(s) in this image. If this is a contact sheet, inspect all panels from left to right and top to bottom.",
+                    "Some panels may be crops of the same card: one full frame, one top-title crop, one lower-left number crop, and one card-body crop. Combine those clues into one candidate when they match.",
                     "Return {\"candidates\":[{\"cardName\":\"English pricing name\",\"originalName\":null,\"language\":null,\"setName\":null,\"cardNumber\":null,\"variant\":null,\"confidence\":0.0}]}",
                     "Use confidence 0-1.",
                     "For Japanese, Chinese, or Korean cards, translate or normalize the cardName to the closest English card name for pricing when possible.",
