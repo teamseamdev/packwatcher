@@ -3,6 +3,8 @@ export type CardRecognitionCandidate = {
   setName?: string | null;
   cardNumber?: string | null;
   variant?: string | null;
+  language?: string | null;
+  originalName?: string | null;
   confidence: number;
   source: string;
 };
@@ -53,7 +55,14 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
           {
             role: "system",
             content:
-              "You identify Pokemon cards from pack-opening video frames. Return JSON only. Do not guess. If the card text is not readable, return an empty candidates array."
+              [
+                "You identify Pokemon TCG cards from camera photos and pack-opening video frames.",
+                "Cards may be English, Japanese, Simplified Chinese, Traditional Chinese, Korean, or another localized Pokemon TCG language.",
+                "Use the artwork, Pokemon/card name, HP, attacks, rarity marks, card number, regulation mark, set code, and visible text.",
+                "For non-English cards, return cardName as the best English/Tcgplayer-compatible card name when you can infer it. Put the printed/localized name in originalName.",
+                "Do not guess. If the card is too blurry, too small, or not a Pokemon card, return an empty candidates array.",
+                "Return JSON only."
+              ].join(" ")
           },
           {
             role: "user",
@@ -61,7 +70,14 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
               {
                 type: "text",
                 text:
-                  "Identify the main Pokemon card in this frame. Return {\"candidates\":[{\"cardName\":\"\",\"setName\":null,\"cardNumber\":null,\"variant\":null,\"confidence\":0.0}]}. Use confidence 0-1. Include set/card number only if visible."
+                  [
+                    input.notes ? `Language/user hint: ${input.notes}.` : "Language/user hint: auto detect.",
+                    "Identify the main Pokemon card in this frame.",
+                    "Return {\"candidates\":[{\"cardName\":\"English pricing name\",\"originalName\":null,\"language\":null,\"setName\":null,\"cardNumber\":null,\"variant\":null,\"confidence\":0.0}]}",
+                    "Use confidence 0-1.",
+                    "For Japanese, Chinese, or Korean cards, translate or normalize the cardName to the closest English card name for pricing when possible.",
+                    "Include setName, cardNumber, and variant only if visible or strongly inferable from card text/art."
+                  ].join(" ")
               },
               {
                 type: "image_url",
@@ -97,6 +113,8 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
         setName: stringOrNull(candidate.setName),
         cardNumber: stringOrNull(candidate.cardNumber),
         variant: stringOrNull(candidate.variant),
+        language: stringOrNull(candidate.language),
+        originalName: stringOrNull(candidate.originalName),
         confidence: Math.min(1, Math.max(0, confidence)),
         source: this.name
       }];

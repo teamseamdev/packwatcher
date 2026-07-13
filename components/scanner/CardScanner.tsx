@@ -4,10 +4,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Camera, CheckCircle2, FileDown, Loader2, Plus, ScanLine, UploadCloud, Video } from "lucide-react";
 
 type ScannerMode = "single" | "multi-camera" | "video";
+type ScannerLanguage = "auto" | "english" | "japanese" | "chinese_simplified" | "chinese_traditional" | "korean";
 type ScannerCard = {
   id: string;
   order: number;
   cardName: string;
+  originalName: string | null;
+  language: string | null;
   setName: string | null;
   cardNumber: string | null;
   variant: string | null;
@@ -38,6 +41,7 @@ export function CardScanner() {
   const [error, setError] = useState<string | null>(null);
   const [manualName, setManualName] = useState("");
   const [manualSet, setManualSet] = useState("");
+  const [language, setLanguage] = useState<ScannerLanguage>("auto");
 
   const totalValue = useMemo(() => cards.reduce((sum, card) => sum + card.estimatedValue, 0), [cards]);
 
@@ -150,7 +154,7 @@ export function CardScanner() {
     const response = await fetch("/api/scanner/scan", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(dataUrlToPayload(imageDataUrl))
+      body: JSON.stringify({ ...dataUrlToPayload(imageDataUrl), language })
     });
     return handleScanResponse(response);
   }
@@ -159,7 +163,7 @@ export function CardScanner() {
     const response = await fetch("/api/scanner/scan", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cardName, setName: setName || undefined })
+      body: JSON.stringify({ cardName, setName: setName || undefined, language })
     });
     return handleScanResponse(response);
   }
@@ -199,7 +203,7 @@ export function CardScanner() {
   return (
     <div className="space-y-5">
       <section className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2 md:grid-cols-[1fr_1fr_1fr_220px]">
           <ModeButton active={mode === "single"} icon={ScanLine} label="Single scan" onClick={() => { resetSession("single"); void startCamera("single"); }} />
           <ModeButton active={mode === "multi-camera"} icon={Camera} label="Multi scan" onClick={() => { resetSession("multi-camera"); void startCamera("multi-camera"); }} />
           <label className={`flex h-12 cursor-pointer items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold ${mode === "video" ? "border-amber-300 bg-amber-300 text-slate-950" : "border-white/10 bg-slate-950/50 text-slate-200"}`}>
@@ -217,6 +221,18 @@ export function CardScanner() {
               }}
             />
           </label>
+          <select
+            value={language}
+            onChange={(event) => setLanguage(event.target.value as ScannerLanguage)}
+            className="h-12 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm font-semibold text-slate-200 outline-none focus:border-amber-300"
+          >
+            <option value="auto">Auto language</option>
+            <option value="english">English</option>
+            <option value="japanese">Japanese</option>
+            <option value="chinese_simplified">Chinese simplified</option>
+            <option value="chinese_traditional">Chinese traditional</option>
+            <option value="korean">Korean</option>
+          </select>
         </div>
       </section>
 
@@ -295,7 +311,7 @@ export function CardScanner() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-xl font-bold text-white">Scan results</h2>
-            <p className="mt-1 text-sm text-slate-400">{cards.length} card{cards.length === 1 ? "" : "s"} scanned · Total value {currency(totalValue)}</p>
+            <p className="mt-1 text-sm text-slate-400">{cards.length} card{cards.length === 1 ? "" : "s"} scanned - Total value {currency(totalValue)}</p>
           </div>
           <button onClick={() => exportResultsPdf(cards, totalValue)} disabled={!cards.length} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-bold text-slate-950 disabled:opacity-50">
             <FileDown className="h-4 w-4" />
@@ -315,8 +331,9 @@ export function CardScanner() {
               ) : <div className="grid h-20 w-16 place-items-center rounded-md bg-white/5 text-xs text-slate-500">Manual</div>}
               <div>
                 <p className="font-bold text-white">{card.order}. {card.cardName}</p>
-                <p className="mt-1 text-sm text-slate-400">{[card.setName, card.cardNumber, card.variant].filter(Boolean).join(" · ") || "No set details"}</p>
-                <p className="mt-1 text-xs text-slate-500">Recognition: {card.recognitionSource} · Pricing: {card.pricingSource}</p>
+                {card.originalName ? <p className="mt-1 text-sm text-slate-300">Printed name: {card.originalName}</p> : null}
+                <p className="mt-1 text-sm text-slate-400">{[card.setName, card.cardNumber, card.variant, languageLabel(card.language)].filter(Boolean).join(" - ") || "No set details"}</p>
+                <p className="mt-1 text-xs text-slate-500">Recognition: {card.recognitionSource} - Pricing: {card.pricingSource}</p>
               </div>
               <p className="text-lg font-black text-amber-200">{currency(card.estimatedValue)}</p>
             </div>
@@ -376,11 +393,11 @@ async function extractVideoFrames(file: File) {
     const context = canvas.getContext("2d");
     if (!context) throw new Error("Could not scan video frames.");
 
-    const frameCount = Math.min(30, Math.max(1, Math.ceil(duration / 2)));
+    const frameCount = Math.min(60, Math.max(1, Math.ceil(duration)));
     const frames: string[] = [];
 
     for (let index = 0; index < frameCount; index += 1) {
-      video.currentTime = Math.min(duration - 0.1, index * 2);
+      video.currentTime = Math.min(duration - 0.1, index);
       await once(video, "seeked");
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       frames.push(canvas.toDataURL("image/jpeg", 0.78));
@@ -418,6 +435,11 @@ function currency(value: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value || 0);
 }
 
+function languageLabel(language: string | null) {
+  if (!language || language === "auto") return null;
+  return language.replace(/_/g, " ");
+}
+
 function exportResultsPdf(cards: ScannerCard[], totalValue: number) {
   const lines = [
     "PackWatcher Scanner Results",
@@ -427,7 +449,8 @@ function exportResultsPdf(cards: ScannerCard[], totalValue: number) {
     "",
     ...cards.flatMap((card) => [
       `${card.order}. ${card.cardName} - ${currency(card.estimatedValue)}`,
-      `   ${[card.setName, card.cardNumber, card.variant].filter(Boolean).join(" | ") || "No set details"}`,
+      card.originalName ? `   Printed name: ${card.originalName}` : "",
+      `   ${[card.setName, card.cardNumber, card.variant, languageLabel(card.language)].filter(Boolean).join(" | ") || "No set details"}`,
       `   Pricing: ${card.pricingSource}`,
       ""
     ])

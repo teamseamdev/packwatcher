@@ -13,8 +13,20 @@ const ScanSchema = z.object({
   cardName: z.string().trim().optional(),
   setName: z.string().trim().optional(),
   cardNumber: z.string().trim().optional(),
-  variant: z.string().trim().optional()
+  variant: z.string().trim().optional(),
+  language: z.enum(["auto", "english", "japanese", "chinese_simplified", "chinese_traditional", "korean"]).default("auto")
 });
+
+type DetectedScannerCard = {
+  cardName: string;
+  setName: string | null;
+  cardNumber: string | null;
+  variant: string | null;
+  language: string | null;
+  originalName: string | null;
+  confidence: number;
+  source: string;
+};
 
 export async function POST(request: Request) {
   await requireUser();
@@ -24,12 +36,14 @@ export async function POST(request: Request) {
   const pricingProvider = new TCGCSVProvider();
   const messages: string[] = [];
 
-  let card = parsed.cardName
+  let card: DetectedScannerCard | null = parsed.cardName
     ? {
         cardName: parsed.cardName,
         setName: parsed.setName || null,
         cardNumber: parsed.cardNumber || null,
         variant: parsed.variant || null,
+        language: parsed.language,
+        originalName: null,
         confidence: 1,
         source: "manual"
       }
@@ -39,7 +53,8 @@ export async function POST(request: Request) {
     try {
       const candidates = await recognitionProvider.recognize({
         imageBase64: parsed.imageBase64,
-        mimeType: parsed.mimeType ?? "image/jpeg"
+        mimeType: parsed.mimeType ?? "image/jpeg",
+        notes: scannerLanguageLabel(parsed.language)
       });
       const candidate = candidates[0];
       card = candidate
@@ -48,6 +63,8 @@ export async function POST(request: Request) {
             setName: candidate.setName ?? null,
             cardNumber: candidate.cardNumber ?? null,
             variant: candidate.variant ?? null,
+            language: candidate.language ?? parsed.language,
+            originalName: candidate.originalName ?? null,
             confidence: candidate.confidence,
             source: candidate.source
           }
@@ -85,6 +102,8 @@ export async function POST(request: Request) {
       setName: card.setName ?? null,
       cardNumber: card.cardNumber ?? null,
       variant: card.variant ?? null,
+      language: card.language ?? null,
+      originalName: card.originalName ?? null,
       confidence: card.confidence,
       recognitionSource: card.source,
       estimatedValue: price?.value ?? 0,
@@ -94,4 +113,21 @@ export async function POST(request: Request) {
     },
     messages
   });
+}
+
+function scannerLanguageLabel(language: z.infer<typeof ScanSchema>["language"]) {
+  switch (language) {
+    case "english":
+      return "English Pokemon TCG card";
+    case "japanese":
+      return "Japanese Pokemon TCG card. Use visible Japanese text, card number, and artwork; return English pricing name when possible.";
+    case "chinese_simplified":
+      return "Simplified Chinese Pokemon TCG card. Use visible Chinese text, card number, and artwork; return English pricing name when possible.";
+    case "chinese_traditional":
+      return "Traditional Chinese Pokemon TCG card. Use visible Chinese text, card number, and artwork; return English pricing name when possible.";
+    case "korean":
+      return "Korean Pokemon TCG card. Use visible Korean text, card number, and artwork; return English pricing name when possible.";
+    default:
+      return "Auto-detect card language, including English, Japanese, Chinese, and Korean.";
+  }
 }
