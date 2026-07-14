@@ -29,6 +29,22 @@ type DetectedScannerCard = {
   source: string;
 };
 
+type PricedScannerCard = {
+  cardName: string;
+  setName: string | null;
+  cardNumber: string | null;
+  variant: string | null;
+  language: string | null;
+  originalName: string | null;
+  confidence: number;
+  recognitionSource: string;
+  estimatedValue: number;
+  priceLabel: string | null;
+  pricingSource: string;
+  pricingConfidence: number;
+  referenceImageUrl: string | null;
+};
+
 export async function POST(request: Request) {
   await requireUser();
   const parsed = ScanSchema.parse(await request.json());
@@ -37,8 +53,8 @@ export async function POST(request: Request) {
   const pricingProvider = new TCGCSVProvider();
   const messages: string[] = [];
 
-  let card: DetectedScannerCard | null = parsed.cardName
-    ? {
+  let detectedCards: DetectedScannerCard[] = parsed.cardName
+    ? [{
         cardName: parsed.cardName,
         setName: parsed.setName || null,
         cardNumber: normalizeCardNumber(parsed.cardNumber, parsed.packHint, parsed.setName),
@@ -47,10 +63,10 @@ export async function POST(request: Request) {
         originalName: null,
         confidence: 1,
         source: "manual"
-      }
-    : null;
+      }]
+    : [];
 
-  if (!card && parsed.imageBase64) {
+  if (!detectedCards.length && parsed.imageBase64) {
     if (process.env.CLIPS_ENABLE_OPENAI !== "true") {
       return NextResponse.json({
         ok: false,
@@ -73,9 +89,7 @@ export async function POST(request: Request) {
         mimeType: parsed.mimeType ?? "image/jpeg",
         notes: scannerScanNotes(parsed.language, parsed.packHint)
       });
-      const candidate = candidates[0];
-      card = candidate
-        ? {
+      detectedCards = candidates.map((candidate) => ({
             cardName: candidate.cardName,
             setName: candidate.setName ?? null,
             cardNumber: normalizeCardNumber(candidate.cardNumber, parsed.packHint, candidate.setName),
@@ -84,8 +98,8 @@ export async function POST(request: Request) {
             originalName: normalizeOriginalName(candidate.originalName, candidate.cardName),
             confidence: candidate.confidence,
             source: candidate.source
-          }
-        : null;
+          }))
+        .filter((candidate) => !isPlaceholderCard(candidate));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Card recognition failed.";
       if (/429|insufficient_quota|quota/i.test(message)) {
@@ -96,7 +110,7 @@ export async function POST(request: Request) {
     }
   }
 
-  if (!card) {
+  if (!detectedCards.length) {
     return NextResponse.json({
       ok: false,
       error: process.env.CLIPS_ENABLE_OPENAI === "true"
@@ -106,31 +120,42 @@ export async function POST(request: Request) {
     }, { status: 422 });
   }
 
+  const pricedCards: PricedScannerCard[] = [];
+  for (const detectedCard of detectedCards.slice(0, 12)) {
+    pricedCards.push(await priceCard(detectedCard, pricingProvider, messages));
+  }
+  const primaryCard = pricedCards[0];
+
+  return NextResponse.json({
+    ok: true,
+    card: primaryCard,
+    cards: pricedCards,
+    messages
+  });
+}
+
+async function priceCard(card: DetectedScannerCard, pricingProvider: TCGCSVProvider, messages: string[]): Promise<PricedScannerCard> {
   const prices = await pricingProvider.price(card).catch((error) => {
-    messages.push(`Pricing lookup failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    messages.push(`Pricing lookup failed for ${card.cardName}: ${error instanceof Error ? error.message : "unknown error"}`);
     return [];
   });
   const price = prices[0] ?? null;
 
-  return NextResponse.json({
-    ok: true,
-    card: {
-      cardName: card.cardName,
-      setName: card.setName ?? null,
-      cardNumber: card.cardNumber ?? null,
-      variant: card.variant ?? null,
-      language: card.language ?? null,
-      originalName: card.originalName ?? null,
-      confidence: card.confidence,
-      recognitionSource: card.source,
-      estimatedValue: price?.value ?? 0,
-      priceLabel: price?.label ?? null,
-      pricingSource: price?.source ?? "manual",
-      pricingConfidence: price?.confidence ?? 0,
-      referenceImageUrl: price?.imageUrl ?? null
-    },
-    messages
-  });
+  return {
+    cardName: card.cardName,
+    setName: card.setName ?? null,
+    cardNumber: card.cardNumber ?? null,
+    variant: card.variant ?? null,
+    language: card.language ?? null,
+    originalName: card.originalName ?? null,
+    confidence: card.confidence,
+    recognitionSource: card.source,
+    estimatedValue: price?.value ?? 0,
+    priceLabel: price?.label ?? null,
+    pricingSource: price?.source ?? "manual",
+    pricingConfidence: price?.confidence ?? 0,
+    referenceImageUrl: price?.imageUrl ?? null
+  };
 }
 
 function scannerScanNotes(language: z.infer<typeof ScanSchema>["language"], packHint?: string) {
@@ -180,6 +205,10 @@ function normalizeOriginalName(originalName: string | null | undefined, cardName
   const readable = (text.match(/[a-z0-9\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/gi) ?? []).length;
   if (readable < Math.max(2, text.length * 0.35)) return null;
   return text;
+}
+
+function isPlaceholderCard(card: DetectedScannerCard) {
+  return /^unknown pokemon card$/i.test(card.cardName.trim());
 }
 
 function normalizeCardNumber(cardNumber: string | null | undefined, packHint?: string, setName?: string | null) {

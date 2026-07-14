@@ -27,6 +27,7 @@ type ScannerCard = {
 type ScanResponse = {
   ok: boolean;
   card?: Omit<ScannerCard, "id" | "order" | "imageDataUrl">;
+  cards?: Array<Omit<ScannerCard, "id" | "order" | "imageDataUrl">>;
   error?: string;
   messages?: string[];
 };
@@ -272,42 +273,43 @@ export function CardScanner() {
       const frames = await extractVideoFrames(file);
       const seen = new Set<string>();
       const scanFailures: string[] = [];
-      const contactSheets = await buildContactSheets(frames, CONTACT_SHEET_FRAME_COUNT);
+      const cardFrames = await buildVideoCardFrames(frames);
+      const contactSheets = await buildContactSheets(cardFrames, CONTACT_SHEET_FRAME_COUNT);
 
       for (let sheetIndex = 0; sheetIndex < contactSheets.length; sheetIndex += 1) {
         const contactSheet = contactSheets[sheetIndex];
         setScanPhase("recognizing");
         setNotice(`Scanning contact sheet ${sheetIndex + 1} of ${contactSheets.length}...`);
-        const contactSheetScan = await scanImageDataUrl(contactSheet, {
+        const contactSheetScans = await scanImageDataUrlCards(contactSheet, {
           silentMiss: true,
           onMiss: (message) => {
             if (message && !scanFailures.includes(message)) scanFailures.push(message);
           }
         });
-        if (!contactSheetScan) continue;
-
-        const key = normalizeCardKey(contactSheetScan.cardName, contactSheetScan.setName);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        addCard(contactSheetScan, frames[sheetIndex * CONTACT_SHEET_FRAME_COUNT] ?? null);
+        for (const contactSheetScan of contactSheetScans) {
+          const key = normalizeCardKey(contactSheetScan.cardName, contactSheetScan.setName, contactSheetScan.cardNumber);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          addCard(contactSheetScan, cardFrames[sheetIndex * CONTACT_SHEET_FRAME_COUNT] ?? frames[sheetIndex * CONTACT_SHEET_FRAME_COUNT] ?? null);
+        }
       }
 
       for (let index = 0; index < frames.length; index += 1) {
         setScanPhase("recognizing");
         setNotice(`Scanning frame ${index + 1} of ${frames.length}...`);
-        const scanned = await scanImageDataUrl(frames[index], {
+        const scannedCards = await scanImageDataUrlCards(frames[index], {
           silentMiss: true,
           tryCrops: true,
           onMiss: (message) => {
             if (message && !scanFailures.includes(message)) scanFailures.push(message);
           }
         });
-        if (!scanned) continue;
-
-        const key = normalizeCardKey(scanned.cardName, scanned.setName);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        addCard(scanned, frames[index]);
+        for (const scanned of scannedCards) {
+          const key = normalizeCardKey(scanned.cardName, scanned.setName, scanned.cardNumber);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          addCard(scanned, frames[index]);
+        }
       }
 
       setIsComplete(true);
@@ -367,6 +369,25 @@ export function CardScanner() {
     return null;
   }
 
+  async function scanImageDataUrlCards(
+    imageDataUrl: string,
+    options: { silentMiss?: boolean; tryCrops?: boolean; onMiss?: (message: string) => void } = {}
+  ) {
+    const variants = options.tryCrops ? await imageScanVariants(imageDataUrl) : [imageDataUrl];
+
+    for (const variant of variants) {
+      const response = await fetch("/api/scanner/scan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...dataUrlToPayload(variant), language, packHint: packHint.trim() || undefined })
+      });
+      const scanned = await handleScanCardsResponse(response, options);
+      if (scanned.length) return scanned;
+    }
+
+    return [];
+  }
+
   async function scanManualCard(cardName: string, setName: string, cardNumber?: string | null) {
     const response = await fetch("/api/scanner/scan", {
       method: "POST",
@@ -390,8 +411,27 @@ export function CardScanner() {
       return null;
     }
 
-    if (body.messages?.length) setNotice(body.messages.join(" "));
+    if (body?.messages?.length) setNotice(body.messages.join(" "));
     return body.card;
+  }
+
+  async function handleScanCardsResponse(
+    response: Response,
+    options: { silentMiss?: boolean; onMiss?: (message: string) => void } = {}
+  ) {
+    const body = await response.json().catch(() => null) as ScanResponse | null;
+    const cards = body?.cards?.length ? body.cards : body?.card ? [body.card] : [];
+    if (!response.ok || !cards.length) {
+      const message = body?.error ?? `Scan failed with status ${response.status}.`;
+      options.onMiss?.(message);
+      if (!options.silentMiss) {
+        setError(message);
+      }
+      return [];
+    }
+
+    if (body?.messages?.length) setNotice(body.messages.join(" "));
+    return cards;
   }
 
   function addCard(card: Omit<ScannerCard, "id" | "order" | "imageDataUrl">, imageDataUrl?: string | null) {
@@ -994,6 +1034,16 @@ async function buildRecognitionFrames(frames: string[]) {
   return variants;
 }
 
+async function buildVideoCardFrames(frames: string[]) {
+  const variants: string[] = [];
+  for (const frame of frames) {
+    const image = await loadImage(frame);
+    const guidedCardCrop = centerCrop(image.width, image.height, 0.76, 0.82, -0.02);
+    variants.push(cropImage(image, guidedCardCrop.x, guidedCardCrop.y, guidedCardCrop.width, guidedCardCrop.height));
+  }
+  return variants.length ? variants : frames;
+}
+
 function centerCrop(width: number, height: number, widthRatio: number, heightRatio: number, yOffsetRatio = 0) {
   const cropWidth = Math.max(1, Math.round(width * widthRatio));
   const cropHeight = Math.max(1, Math.round(height * heightRatio));
@@ -1135,8 +1185,8 @@ function once(target: EventTarget, eventName: string) {
   });
 }
 
-function normalizeCardKey(cardName: string, setName: string | null) {
-  return `${cardName} ${setName ?? ""}`.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+function normalizeCardKey(cardName: string, setName: string | null, cardNumber?: string | null) {
+  return `${cardName} ${cardNumber ?? ""} ${setName ?? ""}`.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function currency(value: number) {

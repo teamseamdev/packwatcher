@@ -82,12 +82,13 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
                     input.notes ? `Language/user hint: ${input.notes}.` : "Language/user hint: auto detect.",
                     "Identify Pokemon card(s) in this image. If this is a contact sheet, inspect all panels from left to right and top to bottom.",
                     "Some panels may be crops of the same card: one full frame, one top-title crop, one lower-left number crop, and one card-body crop. Combine those clues into one candidate when they match.",
+                    "For pack-opening video contact sheets, return one candidate for each distinct revealed card in reveal order. Do not repeat the same card across adjacent frames unless the visible card name or collector number changes.",
                     "Return {\"candidates\":[{\"cardName\":\"English pricing name\",\"originalName\":null,\"language\":null,\"setName\":null,\"cardNumber\":null,\"variant\":null,\"confidence\":0.0}]}",
                     "Use confidence 0-1.",
                     "For Japanese, Chinese, or Korean cards, translate or normalize the cardName to the closest English card name for pricing when possible.",
                     "If the card name, attacks, or collector text are readable in English, return language \"English\" and originalName null unless a distinct localized printed name is visible.",
                     "If only the card border/art/card shape is visible, return Unknown Pokemon card with confidence 0.08-0.3.",
-                    "Include setName, cardNumber, and variant when visible. Only return cardNumber when it is directly readable on the current card image; otherwise return null."
+                    "Include setName, cardNumber, and variant when visible. Only return cardNumber when it is directly readable on the current card image; otherwise return null. Never copy a collector number from one panel/card to another."
                   ].join(" ")
                 },
               {
