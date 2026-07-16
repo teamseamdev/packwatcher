@@ -10,11 +10,31 @@ export function metadataText(offer: CatalogOffer, key: string) {
 }
 
 export function fulfillmentText(offer: CatalogOffer) {
+  const availabilityText = usefulAvailabilityText(offer.availability_text);
   return [
     metadataText(offer, "pickupText"),
     metadataText(offer, "shippingText"),
-    offer.availability_text
+    availabilityText
   ].filter(Boolean).join(" | ");
+}
+
+export function verificationLabel(offer: CatalogOffer) {
+  if (offer.metadata?.verifiedByRetailerConnector === true) return "Retailer checked";
+  if (metadataText(offer, "discoverySource") === "shopping-search" || metadataText(offer, "source") === "shopping-search") {
+    return "Shopping result";
+  }
+  if (offer.last_checked_at) return "Checked";
+  return "Needs confirmation";
+}
+
+export function verificationText(offer: CatalogOffer) {
+  if (offer.metadata?.verifiedByRetailerConnector === true) {
+    return "Availability was checked against the retailer page.";
+  }
+  if (metadataText(offer, "discoverySource") === "shopping-search" || metadataText(offer, "source") === "shopping-search") {
+    return "Discovered through shopping search; open the retailer page to confirm current stock.";
+  }
+  return "Open the retailer page to confirm current stock before buying.";
 }
 
 export function fulfillmentLabel(offer: CatalogOffer) {
@@ -97,4 +117,13 @@ function isAvailableStatus(status: StockStatus) {
 function normalizedPrice(offer: CatalogOffer) {
   const price = offer.last_price ?? offer.price;
   return typeof price === "number" && Number.isFinite(price) && price > 0 ? price : Number.MAX_SAFE_INTEGER;
+}
+
+function usefulAvailabilityText(text: string | null) {
+  if (!text) return null;
+  const normalized = text.trim();
+  if (!normalized) return null;
+  if (/^matched\s+"?(in stock|available|add to cart|buy now)"?$/i.test(normalized)) return null;
+  if (/^in stock$/i.test(normalized)) return null;
+  return normalized;
 }

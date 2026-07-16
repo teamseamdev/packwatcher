@@ -7,7 +7,7 @@ import { useMemo, useState, useTransition } from "react";
 import { BellOff, BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
 import { removeTrackedProduct, trackCatalogProduct, untrackCatalogProduct } from "@/app/(app)/watchlist/actions";
 import { isLikelyPokemonProduct } from "@/lib/catalog-importers/pokemon-product-filter";
-import { compareCatalogOffers, fulfillmentLabel, fulfillmentText, fulfillmentTone, metadataText } from "@/lib/catalog/offer-ranking";
+import { compareCatalogOffers, fulfillmentLabel, fulfillmentText, fulfillmentTone, metadataText, verificationLabel, verificationText } from "@/lib/catalog/offer-ranking";
 import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
 import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, TrackedProduct } from "@/lib/types";
@@ -216,6 +216,7 @@ export function CatalogOfferPicker({
                     <span className="text-xs text-slate-500">{expandedOfferId === offer.id ? "Hide details" : "Show details"}</span>
                   </div>
                   {fulfillmentText(offer) ? <p className="mt-2 line-clamp-1 text-xs text-slate-500">{fulfillmentText(offer)}</p> : null}
+                  <p className="mt-1 text-[11px] font-semibold text-slate-500">{verificationLabel(offer)}</p>
                 </div>
                 </button>
                 {expandedOfferId === offer.id ? (
@@ -224,11 +225,13 @@ export function CatalogOfferPicker({
                       <p><span className="text-slate-500">Retailer:</span> {offer.retailer ?? offer.store_name}</p>
                       <p><span className="text-slate-500">Fulfillment:</span> {fulfillmentLabel(offer)}</p>
                       <p><span className="text-slate-500">Raw status:</span> {offer.status.replaceAll("_", " ")}</p>
+                      <p><span className="text-slate-500">Source:</span> {verificationLabel(offer)}</p>
                       <p><span className="text-slate-500">Price:</span> {optionalCurrency(offer.last_price ?? offer.price ?? product?.msrp)}</p>
                       <p><span className="text-slate-500">Checked:</span> {offer.last_checked_at ? new Date(offer.last_checked_at).toLocaleString() : "not yet"}</p>
                       {metadataText(offer, "shippingText") ? <p><span className="text-slate-500">Shipping:</span> {metadataText(offer, "shippingText")}</p> : null}
                       {metadataText(offer, "pickupText") ? <p><span className="text-slate-500">Pickup:</span> {metadataText(offer, "pickupText")}</p> : null}
                       {offer.availability_text ? <p className="sm:col-span-2"><span className="text-slate-500">Availability:</span> {offer.availability_text}</p> : null}
+                      <p className="sm:col-span-2 text-slate-500">{verificationText(offer)}</p>
                       <p className="sm:col-span-2"><span className="text-slate-500">Product:</span> {product?.title ?? product?.name ?? offer.title ?? "Catalog product"}</p>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">

@@ -69,6 +69,8 @@ export async function checkExistingCatalogOffers(supabase: SupabaseClient, limit
           if (!shouldSendRestockAlert(alert, snapshot)) continue;
 
           const eventKey = notificationEventKey(alert.user_id, snapshot);
+          if (await hasRecentNotificationEvent(supabase, alert, productId, retailer, "online")) continue;
+
           const { error: eventError } = await supabase.from("notification_events").insert({
             user_id: alert.user_id,
             product_id: productId,
@@ -118,4 +120,29 @@ export async function checkExistingCatalogOffers(supabase: SupabaseClient, limit
   }
 
   return result;
+}
+
+async function hasRecentNotificationEvent(
+  supabase: SupabaseClient,
+  alert: ProductAlert,
+  productId: string,
+  retailer: string,
+  availabilityType: "online" | "local" | "marketplace"
+) {
+  const cooldownMinutes = alert.cooldown_minutes ?? 60;
+  if (cooldownMinutes <= 0) return false;
+
+  const since = new Date(Date.now() - cooldownMinutes * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from("notification_events")
+    .select("id")
+    .eq("user_id", alert.user_id)
+    .eq("product_id", productId)
+    .eq("retailer", retailer)
+    .eq("availability_type", availabilityType)
+    .gte("sent_at", since)
+    .limit(1);
+
+  if (error) return false;
+  return Boolean(data?.length);
 }

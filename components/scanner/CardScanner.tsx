@@ -1,10 +1,10 @@
 "use client";
 
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCircle2, FileDown, Images, Loader2, Plus, ScanLine, Search, Trash2, UploadCloud, X } from "lucide-react";
+import { Check, CheckCircle2, FileDown, Loader2, Plus, ScanLine, Search, Trash2, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/browser";
 
-type ScannerMode = "scanner" | "video";
+type ScannerMode = "scanner";
 type ScannerLanguage = "auto" | "english" | "japanese" | "chinese_simplified" | "chinese_traditional" | "korean";
 type ScanPhase = "idle" | "capturing" | "recognizing" | "pricing";
 type ScannerCard = {
@@ -32,9 +32,6 @@ type ScanResponse = {
   messages?: string[];
 };
 
-const MAX_VIDEO_SCAN_FRAMES = 96;
-const MIN_VIDEO_SCAN_FRAMES = 18;
-const CONTACT_SHEET_FRAME_COUNT = 24;
 const CARD_READINESS_INTERVAL_MS = 450;
 const FALLBACK_PACK_OPTIONS = [
   "Pokemon 151",
@@ -100,7 +97,7 @@ export function CardScanner() {
   }, [isCameraReady, mode]);
 
   useEffect(() => {
-    if (!isCameraReady || mode === "video") return;
+    if (!isCameraReady) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
@@ -109,7 +106,7 @@ export function CardScanner() {
   }, [isCameraReady, mode]);
 
   useEffect(() => {
-    if (!isCameraReady || mode !== "scanner") return;
+    if (!isCameraReady) return;
 
     cardReadinessIntervalRef.current = window.setInterval(() => {
       const ready = videoRef.current ? isCardReadyForScan(videoRef.current) : false;
@@ -259,77 +256,6 @@ export function CardScanner() {
     }
   }
 
-  async function scanUploadedVideo(file: File) {
-    setMode("video");
-    setIsComplete(false);
-    setCards([]);
-    setLastCard(null);
-    setError(null);
-    setNotice("Scanning video frames in your browser. The raw video is not uploaded.");
-    setIsScanning(true);
-    setScanPhase("capturing");
-
-    try {
-      const frames = await extractVideoFrames(file);
-      const seen = new Set<string>();
-      const scanFailures: string[] = [];
-      const cardFrames = await buildVideoCardFrames(frames);
-      const contactSheets = await buildContactSheets(cardFrames, CONTACT_SHEET_FRAME_COUNT);
-
-      for (let sheetIndex = 0; sheetIndex < contactSheets.length; sheetIndex += 1) {
-        const contactSheet = contactSheets[sheetIndex];
-        setScanPhase("recognizing");
-        setNotice(`Scanning contact sheet ${sheetIndex + 1} of ${contactSheets.length}...`);
-        const contactSheetScans = await scanImageDataUrlCards(contactSheet, {
-          silentMiss: true,
-          onMiss: (message) => {
-            if (message && !scanFailures.includes(message)) scanFailures.push(message);
-          }
-        });
-        for (const contactSheetScan of contactSheetScans) {
-          const key = normalizeCardKey(contactSheetScan.cardName, contactSheetScan.setName, contactSheetScan.cardNumber);
-          if (seen.has(key)) continue;
-          seen.add(key);
-          addCard(contactSheetScan, cardFrames[sheetIndex * CONTACT_SHEET_FRAME_COUNT] ?? frames[sheetIndex * CONTACT_SHEET_FRAME_COUNT] ?? null);
-        }
-      }
-
-      for (let index = 0; index < frames.length; index += 1) {
-        setScanPhase("recognizing");
-        setNotice(`Scanning frame ${index + 1} of ${frames.length}...`);
-        const scannedCards = await scanImageDataUrlCards(frames[index], {
-          silentMiss: true,
-          tryCrops: true,
-          onMiss: (message) => {
-            if (message && !scanFailures.includes(message)) scanFailures.push(message);
-          }
-        });
-        for (const scanned of scannedCards) {
-          const key = normalizeCardKey(scanned.cardName, scanned.setName, scanned.cardNumber);
-          if (seen.has(key)) continue;
-          seen.add(key);
-          addCard(scanned, frames[index]);
-        }
-      }
-
-      setIsComplete(true);
-      setNotice(null);
-      if (!seen.size) {
-        const backendReason = scanFailures[0];
-        setError(
-          backendReason
-            ? `No cards were detected. Scanner backend response: ${backendReason}`
-            : `No cards were detected after sampling ${frames.length} frames across the full video. Check the frame preview below to confirm the cards are visible.`
-        );
-      }
-    } catch (scanError) {
-      setError(scanError instanceof Error ? scanError.message : "Video scan failed.");
-    } finally {
-      setScanPhase("idle");
-      setIsScanning(false);
-    }
-  }
-
   async function addManualCard() {
     if (!manualName.trim()) {
       setError("Enter a card name.");
@@ -369,25 +295,6 @@ export function CardScanner() {
     return null;
   }
 
-  async function scanImageDataUrlCards(
-    imageDataUrl: string,
-    options: { silentMiss?: boolean; tryCrops?: boolean; onMiss?: (message: string) => void } = {}
-  ) {
-    const variants = options.tryCrops ? await imageScanVariants(imageDataUrl) : [imageDataUrl];
-
-    for (const variant of variants) {
-      const response = await fetch("/api/scanner/scan", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...dataUrlToPayload(variant), language, packHint: packHint.trim() || undefined })
-      });
-      const scanned = await handleScanCardsResponse(response, options);
-      if (scanned.length) return scanned;
-    }
-
-    return [];
-  }
-
   async function scanManualCard(cardName: string, setName: string, cardNumber?: string | null) {
     const response = await fetch("/api/scanner/scan", {
       method: "POST",
@@ -413,25 +320,6 @@ export function CardScanner() {
 
     if (body?.messages?.length) setNotice(body.messages.join(" "));
     return body.card;
-  }
-
-  async function handleScanCardsResponse(
-    response: Response,
-    options: { silentMiss?: boolean; onMiss?: (message: string) => void } = {}
-  ) {
-    const body = await response.json().catch(() => null) as ScanResponse | null;
-    const cards = body?.cards?.length ? body.cards : body?.card ? [body.card] : [];
-    if (!response.ok || !cards.length) {
-      const message = body?.error ?? `Scan failed with status ${response.status}.`;
-      options.onMiss?.(message);
-      if (!options.silentMiss) {
-        setError(message);
-      }
-      return [];
-    }
-
-    if (body?.messages?.length) setNotice(body.messages.join(" "));
-    return cards;
   }
 
   function addCard(card: Omit<ScannerCard, "id" | "order" | "imageDataUrl">, imageDataUrl?: string | null) {
@@ -540,17 +428,6 @@ export function CardScanner() {
     });
   }
 
-  function resetSession(nextMode: ScannerMode) {
-    stopCamera();
-    setMode(nextMode);
-    setCards([]);
-    setLastCard(null);
-    setIsComplete(false);
-    setError(null);
-    setNotice(null);
-    setScanPhase("idle");
-  }
-
   return (
     <div className="space-y-5">
       <section className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
@@ -626,15 +503,6 @@ export function CardScanner() {
               <ScanLine className="h-4 w-4" />
               {isCameraReady ? "Stop scanning" : "Start scanner"}
             </button>
-            <label className="inline-flex h-12 flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/10 bg-slate-950/50 px-4 text-sm font-semibold text-slate-200 sm:flex-none">
-              <UploadCloud className="h-4 w-4" />
-              Upload video
-              <input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" className="sr-only" onChange={(event) => {
-                const selected = event.target.files?.[0];
-                if (selected) void scanUploadedVideo(selected);
-                event.currentTarget.value = "";
-              }} />
-            </label>
           </div>
 
           {notice ? <p className="mt-4 rounded-lg border border-amber-300/30 bg-amber-300/10 p-3 text-sm text-amber-100">{notice}</p> : null}
@@ -731,14 +599,14 @@ export function CardScanner() {
             </div>
           )) : (
             <div className="rounded-lg border border-dashed border-white/10 p-6 text-center text-sm text-slate-400">
-              Scan a card or upload a video to build a value list.
+              Scan cards to build a value list.
             </div>
           )}
         </div>
 
         {isComplete && cards.length ? <p className="mt-4 rounded-lg border border-emerald-300/30 bg-emerald-400/10 p-3 text-sm text-emerald-100">Scan complete. Review the ordered list, add missing cards manually, or export the PDF.</p> : null}
       </section>
-      {isCameraReady && mode !== "video" ? (
+      {isCameraReady ? (
         <FullScreenScanner
           videoRef={videoRef}
           cards={cards}
@@ -751,10 +619,6 @@ export function CardScanner() {
           error={error}
           notice={notice}
           onScan={() => void scanCameraFrame()}
-          onUpload={(file) => {
-            stopCamera();
-            void scanUploadedVideo(file);
-          }}
           onRemove={removeCardFromScanner}
           onClose={() => {
             setIsComplete(true);
@@ -784,7 +648,6 @@ function FullScreenScanner({
   error,
   notice,
   onScan,
-  onUpload,
   onRemove,
   onClose,
   onEnd
@@ -800,7 +663,6 @@ function FullScreenScanner({
   error: string | null;
   notice: string | null;
   onScan: () => void;
-  onUpload: (file: File) => void;
   onRemove: (id: string) => void;
   onClose: () => void;
   onEnd: () => void;
@@ -884,15 +746,10 @@ function FullScreenScanner({
         ) : null}
 
         <div className="grid grid-cols-[1fr_96px_1fr] items-end gap-4">
-          <label className="grid cursor-pointer justify-items-center gap-1 text-xs font-semibold text-white/85">
-            <span className="grid h-14 w-14 place-items-center rounded-2xl bg-black/40 backdrop-blur"><Images className="h-7 w-7" /></span>
-            Gallery
-            <input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" className="sr-only" onChange={(event) => {
-              const selected = event.target.files?.[0];
-              if (selected) onUpload(selected);
-              event.currentTarget.value = "";
-            }} />
-          </label>
+          <div className="grid justify-items-center gap-1 text-xs font-semibold text-white/70">
+            <span className="grid h-14 w-14 place-items-center rounded-2xl bg-black/40 backdrop-blur"><ScanLine className="h-7 w-7" /></span>
+            Scanner
+          </div>
           <button onClick={onScan} disabled={isScanning} className={`grid h-24 w-24 place-items-center rounded-full border-[5px] text-slate-950 disabled:opacity-70 ${cardReady ? "border-emerald-400 bg-emerald-400 shadow-[0_0_24px_rgba(74,222,128,0.7)]" : "border-slate-300 bg-white"}`}>
             {isScanning ? <Loader2 className="h-10 w-10 animate-spin" /> : <Check className="h-12 w-12 stroke-[3]" />}
           </button>
@@ -1034,16 +891,6 @@ async function buildRecognitionFrames(frames: string[]) {
   return variants;
 }
 
-async function buildVideoCardFrames(frames: string[]) {
-  const variants: string[] = [];
-  for (const frame of frames) {
-    const image = await loadImage(frame);
-    const guidedCardCrop = centerCrop(image.width, image.height, 0.76, 0.82, -0.02);
-    variants.push(cropImage(image, guidedCardCrop.x, guidedCardCrop.y, guidedCardCrop.width, guidedCardCrop.height));
-  }
-  return variants.length ? variants : frames;
-}
-
 function centerCrop(width: number, height: number, widthRatio: number, heightRatio: number, yOffsetRatio = 0) {
   const cropWidth = Math.max(1, Math.round(width * widthRatio));
   const cropHeight = Math.max(1, Math.round(height * heightRatio));
@@ -1118,75 +965,6 @@ async function buildContactSheet(frames: string[]) {
   });
 
   return canvas.toDataURL("image/jpeg", 0.82);
-}
-
-async function buildContactSheets(frames: string[], frameCount: number) {
-  const sheets: string[] = [];
-  for (let index = 0; index < frames.length; index += frameCount) {
-    const sheet = await buildContactSheet(frames.slice(index, index + frameCount));
-    if (sheet) sheets.push(sheet);
-  }
-  return sheets;
-}
-
-async function extractVideoFrames(file: File) {
-  const video = document.createElement("video");
-  video.muted = true;
-  video.playsInline = true;
-  video.preload = "metadata";
-  video.src = URL.createObjectURL(file);
-
-  try {
-    await once(video, "loadedmetadata");
-    const duration = Number.isFinite(video.duration) ? video.duration : 0;
-    if (!duration) throw new Error("Could not read video duration.");
-
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth || 720;
-    canvas.height = video.videoHeight || 1280;
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("Could not scan video frames.");
-
-    const frameCount = Math.min(
-      MAX_VIDEO_SCAN_FRAMES,
-      Math.max(MIN_VIDEO_SCAN_FRAMES, Math.ceil(duration / 1.25))
-    );
-    const step = duration / frameCount;
-    const frames: string[] = [];
-
-    for (let index = 0; index < frameCount; index += 1) {
-      video.currentTime = Math.min(Math.max(0, duration - 0.1), index * step + step / 2);
-      await once(video, "seeked");
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      frames.push(canvas.toDataURL("image/jpeg", 0.78));
-    }
-
-    return frames;
-  } finally {
-    URL.revokeObjectURL(video.src);
-  }
-}
-
-function once(target: EventTarget, eventName: string) {
-  return new Promise<void>((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      cleanup();
-      reject(new Error(`Timed out waiting for ${eventName}.`));
-    }, 8000);
-    const cleanup = () => {
-      window.clearTimeout(timeout);
-      target.removeEventListener(eventName, onEvent);
-    };
-    const onEvent = () => {
-      cleanup();
-      resolve();
-    };
-    target.addEventListener(eventName, onEvent, { once: true });
-  });
-}
-
-function normalizeCardKey(cardName: string, setName: string | null, cardNumber?: string | null) {
-  return `${cardName} ${cardNumber ?? ""} ${setName ?? ""}`.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function currency(value: number) {
