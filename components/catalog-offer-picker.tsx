@@ -185,7 +185,7 @@ export function CatalogOfferPicker({
       <p className="mt-2 text-xs text-slate-500">ZIP prioritizes nearby in-store pickup results. Change it here for a one-off search, or update the default in Account.</p>
       {message ? <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">{message}</p> : null}
 
-      <div className="mt-3 grid max-h-[64vh] gap-2 overflow-auto pr-1">
+      <div className="scroll-panel mt-3 grid max-h-[64vh] gap-2 pr-1">
         {offers.length ? (
           filtered.length ? filtered.map((offer) => {
             const product = productForOffer(offer);

@@ -3,10 +3,10 @@ import { AdminSyncPanel } from "@/components/admin-sync-panel";
 import { StatCard } from "@/components/stat-card";
 import { isAdmin, requireProfile } from "@/lib/auth";
 import { formatPromoDiscount } from "@/lib/promo-codes";
-import { addCatalogOffer, adminCheckProduct, approveProductMatch, createPromoCode, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, rejectProductMatch, sendAdminTestNotification, setPromoCodeActive, updateUserPlan } from "./actions";
+import { addCatalogOffer, adminCheckProduct, approveProductMatch, createPromoCode, disableCatalogOffer, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, rejectProductMatch, sendAdminTestNotification, setPromoCodeActive, updateUserPlan } from "./actions";
 
 const panelClass = "rounded-lg border border-white/10 bg-white/[0.04] p-5";
-const scrollPanelClass = `${panelClass} max-h-[680px] overflow-y-auto overscroll-contain pr-4`;
+const scrollPanelClass = `${panelClass} scroll-panel max-h-[680px] pr-4`;
 
 export default async function AdminPage() {
   const { supabase, profile } = await requireProfile();
@@ -24,7 +24,9 @@ export default async function AdminPage() {
     { data: promoCodes },
     { data: connectorHealth },
     { data: retailJobRuns },
-    { data: matchReviews }
+    { data: matchReviews },
+    { data: recentOffers },
+    { data: appEvents }
   ] = await Promise.all([
     supabase.from("profiles").select("*", { count: "exact", head: true }),
     supabase.from("profiles").select("*", { count: "exact", head: true }).in("plan", ["pro", "admin"]),
@@ -37,7 +39,9 @@ export default async function AdminPage() {
     supabase.from("promo_codes").select("*").order("created_at", { ascending: false }).limit(50),
     supabase.from("retailer_connector_health").select("*").order("updated_at", { ascending: false }).limit(12),
     supabase.from("retail_job_runs").select("*").order("started_at", { ascending: false }).limit(10),
-    supabase.from("product_match_reviews").select("*").eq("status", "pending").order("created_at", { ascending: false }).limit(10)
+    supabase.from("product_match_reviews").select("*").eq("status", "pending").order("created_at", { ascending: false }).limit(10),
+    supabase.from("catalog_offers").select("id,title,store_name,retailer,status,last_price,price,active,created_at,url").order("created_at", { ascending: false }).limit(30),
+    supabase.from("app_events").select("*").in("severity", ["warn", "error"]).order("created_at", { ascending: false }).limit(30)
   ]);
 
   const failedChecks = checks?.filter((check) => check.status === "unknown").length ?? 0;
@@ -231,6 +235,33 @@ export default async function AdminPage() {
         </div>
 
         <div className={scrollPanelClass}>
+          <h2 className="font-bold text-white">Catalog offer controls</h2>
+          <p className="mt-1 text-xs text-slate-400">Disable bad retailer offers without deleting historical data.</p>
+          <div className="mt-4 space-y-3 text-sm">
+            {recentOffers?.length ? recentOffers.map((offer) => (
+              <div key={offer.id} className="rounded-lg bg-white/5 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-white">{offer.title ?? "Untitled offer"}</p>
+                    <p className="mt-1 text-slate-400">{offer.retailer ?? offer.store_name} - {offer.status} - ${offer.last_price ?? offer.price ?? "n/a"}</p>
+                    <p className="mt-1 truncate text-xs text-slate-600">{offer.url}</p>
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${offer.active === false ? "bg-red-400/20 text-red-100" : "bg-emerald-400/15 text-emerald-200"}`}>
+                    {offer.active === false ? "Disabled" : "Active"}
+                  </span>
+                </div>
+                {offer.active === false ? null : (
+                  <form action={disableCatalogOffer} className="mt-3">
+                    <input type="hidden" name="offer_id" value={offer.id} />
+                    <button className="h-9 rounded-lg border border-red-300/30 px-3 text-xs font-semibold text-red-100">Disable offer</button>
+                  </form>
+                )}
+              </div>
+            )) : <p className="text-sm text-slate-400">No catalog offers found.</p>}
+          </div>
+        </div>
+
+        <div className={scrollPanelClass}>
           <h2 className="font-bold text-white">Connector health</h2>
           <div className="mt-4 space-y-3 text-sm">
             {connectorHealth?.length ? connectorHealth.map((connector) => (
@@ -277,6 +308,19 @@ export default async function AdminPage() {
                 </div>
               </div>
             )) : <p className="text-sm text-slate-400">No pending match reviews.</p>}
+          </div>
+        </div>
+
+        <div className={`${scrollPanelClass} lg:col-span-2`}>
+          <h2 className="font-bold text-white">Failed scans and operations</h2>
+          <div className="mt-4 space-y-3 text-sm">
+            {appEvents?.length ? appEvents.map((event) => (
+              <div key={event.id} className="rounded-lg bg-white/5 p-3">
+                <p className="font-medium">{event.category} - {event.severity}</p>
+                <p className="mt-1 text-slate-300">{event.message}</p>
+                <p className="mt-1 text-xs text-slate-500">{new Date(event.created_at).toLocaleString()}</p>
+              </div>
+            )) : <p className="text-sm text-slate-400">No warning or error events recorded.</p>}
           </div>
         </div>
 

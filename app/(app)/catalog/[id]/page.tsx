@@ -32,7 +32,9 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
   if (!productRow) notFound();
 
   const product = productRow as CatalogProduct;
-  const offers = ((offerRows ?? []) as CatalogOffer[]).sort((a, b) => compareCatalogOffers(a, b));
+  const offers = ((offerRows ?? []) as CatalogOffer[])
+    .filter((offer) => offer.active !== false)
+    .sort((a, b) => compareCatalogOffers(a, b));
   const priceSummary = aggregatePrices(offers.map((offer) => ({
     retailerProductId: offer.retailer_product_id ?? offer.id,
     retailer: offer.retailer ?? offer.store_name,

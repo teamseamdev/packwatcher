@@ -36,6 +36,7 @@ export function PushNotificationSettings({
   const [permission, setPermission] = useState<NotificationPermission>("default");
   const [message, setMessage] = useState("");
   const [isHidden, setIsHidden] = useState(false);
+  const [hasActiveDevice, setHasActiveDevice] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -45,7 +46,13 @@ export function PushNotificationSettings({
         if (hideAfterEnable) {
           void navigator.serviceWorker.getRegistration("/sw.js").then(async (registration) => {
             const subscription = await registration?.pushManager.getSubscription();
+            setHasActiveDevice(Boolean(subscription));
             if (subscription) setIsHidden(true);
+          });
+        } else {
+          void navigator.serviceWorker.getRegistration("/sw.js").then(async (registration) => {
+            const subscription = await registration?.pushManager.getSubscription();
+            setHasActiveDevice(Boolean(subscription));
           });
         }
       }
@@ -90,6 +97,7 @@ export function PushNotificationSettings({
 
       const data = await response.json();
       if (data.ok) {
+        setHasActiveDevice(true);
         if (hideAfterEnable) {
           setIsHidden(true);
           return;
@@ -113,6 +121,7 @@ export function PushNotificationSettings({
         });
         await subscription.unsubscribe();
       }
+      setHasActiveDevice(false);
       setIsHidden(false);
       setMessage("Push notifications are disabled on this device.");
     });
@@ -134,11 +143,13 @@ export function PushNotificationSettings({
         </div>
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
-        <button disabled={isPending} onClick={enable} className="inline-flex h-10 items-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-semibold text-slate-950 disabled:opacity-60">
-          <BellRing className="h-4 w-4" />
-          Enable this device
-        </button>
-        {showDisable ? (
+        {!hasActiveDevice ? (
+          <button disabled={isPending} onClick={enable} className="inline-flex h-10 items-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-semibold text-slate-950 disabled:opacity-60">
+            <BellRing className="h-4 w-4" />
+            Enable this device
+          </button>
+        ) : null}
+        {showDisable && hasActiveDevice ? (
           <button disabled={isPending} onClick={disable} className="h-10 rounded-lg border border-white/10 px-4 text-sm font-semibold disabled:opacity-60">
             Disable this device
           </button>

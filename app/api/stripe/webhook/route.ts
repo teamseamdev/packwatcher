@@ -1,19 +1,32 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { errorMetadata, logAppEvent } from "@/lib/monitoring/log";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(request: Request) {
   const secret = process.env.STRIPE_SECRET_KEY;
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!secret || !webhookSecret) {
+    await logAppEvent({
+      category: "stripe",
+      severity: "error",
+      message: "Stripe webhook is not configured"
+    });
     return NextResponse.json({ ok: false, error: "Stripe webhook is not configured." }, { status: 400 });
   }
 
   const stripe = new Stripe(secret);
   const body = await request.text();
   const signature = (await headers()).get("stripe-signature");
-  if (!signature) return NextResponse.json({ ok: false }, { status: 400 });
+  if (!signature) {
+    await logAppEvent({
+      category: "stripe",
+      severity: "warn",
+      message: "Stripe webhook missing signature"
+    });
+    return NextResponse.json({ ok: false }, { status: 400 });
+  }
 
   try {
     const event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
@@ -46,6 +59,12 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (error) {
+    await logAppEvent({
+      category: "stripe",
+      severity: "error",
+      message: "Stripe webhook failed",
+      metadata: errorMetadata(error)
+    });
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Invalid webhook" }, { status: 400 });
   }
 }

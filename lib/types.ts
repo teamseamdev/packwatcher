@@ -79,6 +79,7 @@ export type CatalogOffer = {
   availability_text: string | null;
   last_checked_at: string | null;
   metadata: Record<string, unknown> | null;
+  active?: boolean | null;
   created_at: string;
   updated_at: string | null;
   catalog_products: CatalogProduct | null;

@@ -54,6 +54,10 @@ const PromoCodeIdSchema = z.object({
   active: z.enum(["true", "false"])
 });
 
+const CatalogOfferIdSchema = z.object({
+  offer_id: z.string().uuid()
+});
+
 export async function adminCheckProduct(productId: string) {
   const { profile } = await requireProfile();
   if (!isAdmin(profile)) throw new Error("Admin access required.");
@@ -176,6 +180,30 @@ export async function setPromoCodeActive(formData: FormData) {
   if (error) throw new Error(error.message);
 
   revalidatePath("/admin");
+}
+
+export async function disableCatalogOffer(formData: FormData) {
+  const { profile } = await requireProfile();
+  if (!isAdmin(profile)) throw new Error("Admin access required.");
+  const parsed = CatalogOfferIdSchema.parse(Object.fromEntries(formData));
+  const admin = createAdminClient();
+
+  const { error } = await admin
+    .from("catalog_offers")
+    .update({
+      active: false,
+      status: "unavailable",
+      in_stock: false,
+      availability_text: "Disabled by PackWatcher admin",
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", parsed.offer_id);
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/admin");
+  revalidatePath("/watchlist");
+  revalidatePath("/catalog");
 }
 
 export async function addCatalogOffer(formData: FormData) {

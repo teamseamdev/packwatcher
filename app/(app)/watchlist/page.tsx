@@ -26,7 +26,7 @@ export default async function WatchlistPage() {
   const catalogAlertCount = productAlerts?.length ?? 0;
   const trackedUrlCount = trackedProducts.length;
   const inStockTrackedCount = trackedProducts.filter((product) => product.status === "in_stock").length;
-  const catalogOffers = (offers ?? []) as CatalogOffer[];
+  const catalogOffers = ((offers ?? []) as CatalogOffer[]).filter((offer) => offer.active !== false);
 
   return (
     <div className="space-y-4">
@@ -76,7 +76,7 @@ export default async function WatchlistPage() {
           <div className="mt-4 grid gap-4 xl:grid-cols-[360px_1fr]">
             <div>
               <h3 className="text-sm font-semibold text-amber-200">Catalog alerts</h3>
-              <div className="mt-3 max-h-[520px] space-y-3 overflow-auto pr-1">
+              <div className="scroll-panel mt-3 max-h-[520px] space-y-3 pr-1">
               {productAlerts?.length ? productAlerts.map((alert) => {
                 const related = alert.catalog_products as unknown as {
                   id: string;

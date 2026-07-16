@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendPushToUser } from "@/lib/push";
 import { getRetailerMonitor } from "@/lib/retailers";
+import { errorMetadata, logAppEvent } from "@/lib/monitoring/log";
 import { notificationEventKey, shouldSendRestockAlert } from "@/lib/retailers/shared/restock-events";
 import type { CatalogOffer, CatalogProduct, ProductAlert } from "@/lib/types";
 
@@ -22,6 +23,7 @@ export async function checkExistingCatalogOffers(supabase: SupabaseClient, limit
   }
 
   for (const offer of (offers ?? []) as OfferRow[]) {
+    if (offer.active === false) continue;
     try {
       const previousInStock = offer.in_stock ?? offer.status === "in_stock";
       const retailer = offer.retailer ?? offer.store_name;
@@ -116,6 +118,12 @@ export async function checkExistingCatalogOffers(supabase: SupabaseClient, limit
       await new Promise((resolve) => setTimeout(resolve, 250));
     } catch (error) {
       result.errors.push(error instanceof Error ? `${offer.store_name}: ${error.message}` : `${offer.store_name}: unknown check error`);
+      await logAppEvent({
+        category: "retailer",
+        severity: "error",
+        message: "Catalog offer check failed",
+        metadata: { ...errorMetadata(error), offerId: offer.id, storeName: offer.store_name, url: offer.url }
+      });
     }
   }
 

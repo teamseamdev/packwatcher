@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { OpenAICardRecognitionProvider } from "@/lib/clips/providers/card-recognition";
 import { TCGCSVProvider } from "@/lib/clips/providers/pricing";
+import { errorMetadata, logAppEvent } from "@/lib/monitoring/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,7 +47,7 @@ type PricedScannerCard = {
 };
 
 export async function POST(request: Request) {
-  await requireUser();
+  const { user } = await requireUser();
   const parsed = ScanSchema.parse(await request.json());
 
   const recognitionProvider = new OpenAICardRecognitionProvider();
@@ -104,13 +105,40 @@ export async function POST(request: Request) {
       const message = error instanceof Error ? error.message : "Card recognition failed.";
       if (/429|insufficient_quota|quota/i.test(message)) {
         messages.push("AI scanning is unavailable because the OpenAI quota is limited. Add the card manually.");
+        await logAppEvent({
+          category: "openai",
+          severity: "warn",
+          message: "OpenAI scanner quota or rate limit error",
+          userId: user.id,
+          metadata: { ...errorMetadata(error), packHint: parsed.packHint, language: parsed.language }
+        });
       } else {
         messages.push(message);
+        await logAppEvent({
+          category: "scanner",
+          severity: "error",
+          message: "Scanner recognition failed",
+          userId: user.id,
+          metadata: { ...errorMetadata(error), packHint: parsed.packHint, language: parsed.language }
+        });
       }
     }
   }
 
   if (!detectedCards.length) {
+    await logAppEvent({
+      category: "scanner",
+      severity: "warn",
+      message: "Scanner returned no readable card",
+      userId: user.id,
+      metadata: {
+        hasImage: Boolean(parsed.imageBase64),
+        manual: Boolean(parsed.cardName),
+        packHint: parsed.packHint,
+        language: parsed.language,
+        messages
+      }
+    });
     return NextResponse.json({
       ok: false,
       error: process.env.CLIPS_ENABLE_OPENAI === "true"
@@ -137,6 +165,12 @@ export async function POST(request: Request) {
 async function priceCard(card: DetectedScannerCard, pricingProvider: TCGCSVProvider, messages: string[]): Promise<PricedScannerCard> {
   const prices = await pricingProvider.price(card).catch((error) => {
     messages.push(`Pricing lookup failed for ${card.cardName}: ${error instanceof Error ? error.message : "unknown error"}`);
+    void logAppEvent({
+      category: "scanner",
+      severity: "warn",
+      message: "Scanner pricing lookup failed",
+      metadata: { ...errorMetadata(error), cardName: card.cardName, setName: card.setName, cardNumber: card.cardNumber }
+    });
     return [];
   });
   const price = prices[0] ?? null;

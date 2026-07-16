@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { importPokemonFromRetailerSearch } from "@/lib/catalog-importers/retailer-search";
 import { upsertImportedCatalog } from "@/lib/catalog-importers/upsert";
+import { errorMetadata, logAppEvent } from "@/lib/monitoring/log";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -78,6 +79,15 @@ export async function POST(request: Request) {
       postalCode,
       perRetailerLimit: Number(process.env.USER_DISCOVERY_RESULT_LIMIT ?? process.env.RETAILER_SEARCH_LIMIT ?? 8)
     });
+    if (imported.errors.length) {
+      await logAppEvent({
+        category: "retailer",
+        severity: "warn",
+        message: "Retailer discovery completed with errors",
+        userId: user.id,
+        metadata: { query, postalCode, errors: imported.errors.slice(0, 8) }
+      });
+    }
     const result = await upsertImportedCatalog(admin, imported);
 
     revalidatePath("/dashboard");
@@ -92,6 +102,13 @@ export async function POST(request: Request) {
       discoveryErrors: imported.errors
     });
   } catch (error) {
+    await logAppEvent({
+      category: "retailer",
+      severity: "error",
+      message: "Retailer discovery failed",
+      userId: user.id,
+      metadata: { ...errorMetadata(error), query }
+    });
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Discovery failed." }, { status: 400 });
   }
 }

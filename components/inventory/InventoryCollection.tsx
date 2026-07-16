@@ -75,7 +75,7 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
         </div>
       </div>
 
-      <div className="mt-4 max-h-[68vh] space-y-3 overflow-y-auto pr-1">
+      <div className="scroll-panel mt-4 max-h-[68vh] space-y-3 pr-1">
         {filteredItems.length ? filteredItems.map((item) => (
           <InventoryRow key={item.id} item={item} />
         )) : (

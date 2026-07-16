@@ -81,6 +81,9 @@ export async function trackCatalogOffer(offerId: string) {
   }
 
   const offer = data as CatalogOffer;
+  if (offer.active === false) {
+    throw new Error("This retailer offer has been disabled by PackWatcher.");
+  }
   const product = offer.catalog_products;
   if (!product) {
     throw new Error("Catalog product not found.");
