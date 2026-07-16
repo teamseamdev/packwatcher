@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import type { Plan } from "@/lib/types";
 
-export function AccountPlanSwitcher({ currentPlan }: { currentPlan: Plan }) {
+export function AccountPlanSwitcher({ currentPlan, className = "mt-6" }: { currentPlan: Plan; className?: string }) {
   const [promoCode, setPromoCode] = useState("");
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -29,7 +29,7 @@ export function AccountPlanSwitcher({ currentPlan }: { currentPlan: Plan }) {
   }
 
   return (
-    <section className="mt-6 rounded-lg border border-white/10 bg-white/[0.04] p-5">
+    <section className={`${className} rounded-lg border border-white/10 bg-white/[0.04] p-5`}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="font-bold text-white">Plan</h2>

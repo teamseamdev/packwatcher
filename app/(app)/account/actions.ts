@@ -25,6 +25,7 @@ export async function updatePostalCode(formData: FormData) {
   await admin.from("profiles").update(parsed).eq("id", user.id);
 
   revalidatePath("/account");
+  revalidatePath("/dashboard");
   revalidatePath("/watchlist");
   revalidatePath("/catalog");
 }

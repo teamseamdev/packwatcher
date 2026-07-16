@@ -16,20 +16,43 @@ function urlBase64ToUint8Array(base64String: string) {
   return outputArray;
 }
 
-export function PushNotificationSettings({ publicKey, subscriptionCount }: { publicKey?: string; subscriptionCount: number }) {
+type PushNotificationSettingsProps = {
+  publicKey?: string;
+  subscriptionCount: number;
+  mode?: "full" | "setup";
+  hideAfterEnable?: boolean;
+  showDisable?: boolean;
+  className?: string;
+};
+
+export function PushNotificationSettings({
+  publicKey,
+  subscriptionCount,
+  mode = "full",
+  hideAfterEnable = false,
+  showDisable = true,
+  className = ""
+}: PushNotificationSettingsProps) {
   const [permission, setPermission] = useState<NotificationPermission>("default");
   const [message, setMessage] = useState("");
+  const [isHidden, setIsHidden] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
       if (browserSupportsPush()) {
         setPermission(Notification.permission);
+        if (hideAfterEnable) {
+          void navigator.serviceWorker.getRegistration("/sw.js").then(async (registration) => {
+            const subscription = await registration?.pushManager.getSubscription();
+            if (subscription) setIsHidden(true);
+          });
+        }
       }
     }, 0);
 
     return () => window.clearTimeout(timeout);
-  }, []);
+  }, [hideAfterEnable]);
 
   function enable() {
     startTransition(async () => {
@@ -66,7 +89,15 @@ export function PushNotificationSettings({ publicKey, subscriptionCount }: { pub
       });
 
       const data = await response.json();
-      setMessage(data.ok ? "Push notifications are enabled on this device." : data.error ?? "Could not save subscription.");
+      if (data.ok) {
+        if (hideAfterEnable) {
+          setIsHidden(true);
+          return;
+        }
+        setMessage("Push notifications are enabled on this device.");
+      } else {
+        setMessage(data.error ?? "Could not save subscription.");
+      }
     });
   }
 
@@ -82,17 +113,24 @@ export function PushNotificationSettings({ publicKey, subscriptionCount }: { pub
         });
         await subscription.unsubscribe();
       }
+      setIsHidden(false);
       setMessage("Push notifications are disabled on this device.");
     });
   }
 
+  if (isHidden) return null;
+
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+    <section className={`rounded-lg border border-white/10 bg-white/[0.04] p-5 ${className}`}>
       <div className="flex items-start gap-3">
         <Smartphone className="mt-1 h-5 w-5 text-amber-300" />
         <div>
-          <h2 className="font-bold text-white">Mobile notifications</h2>
-          <p className="mt-1 text-sm leading-6 text-slate-400">Enable browser push for Android Chrome or iOS Safari after adding PackWatcher to your Home Screen.</p>
+          <h2 className="font-bold text-white">{mode === "setup" ? "Enable restock alerts" : "Mobile notifications"}</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-400">
+            {mode === "setup"
+              ? "Turn on browser push so PackWatcher can notify this device when tracked products restock."
+              : "Enable browser push for Android Chrome or iOS Safari after adding PackWatcher to your Home Screen."}
+          </p>
         </div>
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
@@ -100,11 +138,14 @@ export function PushNotificationSettings({ publicKey, subscriptionCount }: { pub
           <BellRing className="h-4 w-4" />
           Enable this device
         </button>
-        <button disabled={isPending} onClick={disable} className="h-10 rounded-lg border border-white/10 px-4 text-sm font-semibold disabled:opacity-60">
-          Disable this device
-        </button>
+        {showDisable ? (
+          <button disabled={isPending} onClick={disable} className="h-10 rounded-lg border border-white/10 px-4 text-sm font-semibold disabled:opacity-60">
+            Disable this device
+          </button>
+        ) : null}
       </div>
       <p className="mt-3 text-xs text-slate-500">Permission: {permission}. Saved devices: {subscriptionCount}.</p>
+      {mode === "setup" ? <p className="mt-2 text-xs text-slate-500">You can change this at any time in the Account tab.</p> : null}
       {message ? <p className="mt-3 rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-slate-300">{message}</p> : null}
     </section>
   );

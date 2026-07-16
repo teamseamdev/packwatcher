@@ -1,10 +1,12 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { BellRing, Boxes, Clock, ListChecks, PackageCheck, TrendingUp } from "lucide-react";
+import { BellRing, Boxes, Clock, ListChecks, MapPin, PackageCheck, TrendingUp } from "lucide-react";
+import { PushNotificationSettings } from "@/components/push-notification-settings";
 import { StatCard } from "@/components/stat-card";
 import { requireProfile } from "@/lib/auth";
 import { calculateProfit, currency } from "@/lib/profit";
 import type { InventoryItem, TrackedProduct } from "@/lib/types";
+import { updatePostalCode } from "../account/actions";
 
 function DashboardLink({ href, children }: { href: string; children: ReactNode }) {
   return (
@@ -15,13 +17,14 @@ function DashboardLink({ href, children }: { href: string; children: ReactNode }
 }
 
 export default async function DashboardPage() {
-  const { supabase, user } = await requireProfile();
-  const [{ data: products }, { data: notifications }, { data: inventory }, { data: checks }, { count: productAlertCount }] = await Promise.all([
+  const { supabase, user, profile } = await requireProfile();
+  const [{ data: products }, { data: notifications }, { data: inventory }, { data: checks }, { count: productAlertCount }, { count: subscriptionCount }] = await Promise.all([
     supabase.from("tracked_products").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).returns<TrackedProduct[]>(),
     supabase.from("notifications").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(5),
     supabase.from("inventory_items").select("*").eq("user_id", user.id).returns<InventoryItem[]>(),
     supabase.from("stock_checks").select("*, tracked_products!inner(user_id)").eq("tracked_products.user_id", user.id).order("checked_at", { ascending: false }).limit(5),
-    supabase.from("product_alerts").select("*", { count: "exact", head: true }).eq("user_id", user.id)
+    supabase.from("product_alerts").select("*", { count: "exact", head: true }).eq("user_id", user.id),
+    supabase.from("push_subscriptions").select("*", { count: "exact", head: true }).eq("user_id", user.id)
   ]);
 
   const trackedProducts = products ?? [];
@@ -34,6 +37,8 @@ export default async function DashboardPage() {
     shipping: item.shipping,
     quantity: item.quantity
   }).profit, 0);
+  const needsZip = !profile?.postal_code;
+  const needsPush = !subscriptionCount;
 
   return (
     <div className="space-y-8">
@@ -44,6 +49,44 @@ export default async function DashboardPage() {
           Jump into tracked products, alerts, inventory, and recent checks. Catalog browsing now lives in Watchlist.
         </p>
       </div>
+
+      {needsZip || needsPush ? (
+        <section className="grid gap-4 lg:grid-cols-2">
+          {needsPush ? (
+            <PushNotificationSettings
+              publicKey={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY}
+              subscriptionCount={subscriptionCount ?? 0}
+              mode="setup"
+              hideAfterEnable
+              showDisable={false}
+              className="border-amber-300/20 bg-amber-300/10"
+            />
+          ) : null}
+          {needsZip ? (
+            <section className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-5">
+              <div className="flex items-start gap-3">
+                <MapPin className="mt-1 h-5 w-5 text-amber-300" />
+                <div>
+                  <h2 className="font-bold text-white">Add your ZIP code</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-400">
+                    This helps PackWatcher prioritize nearby pickup results in Watchlist.
+                  </p>
+                </div>
+              </div>
+              <form action={updatePostalCode} className="mt-4 flex flex-col gap-3 sm:flex-row">
+                <input
+                  name="postal_code"
+                  inputMode="numeric"
+                  placeholder="ZIP code"
+                  className="h-11 flex-1 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300"
+                />
+                <button className="h-11 rounded-lg bg-amber-300 px-4 text-sm font-semibold text-slate-950">Save ZIP</button>
+              </form>
+              <p className="mt-3 text-xs text-slate-500">You can change this at any time in the Account tab.</p>
+            </section>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <DashboardLink href="/watchlist#tracked">
