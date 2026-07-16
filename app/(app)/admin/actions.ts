@@ -94,13 +94,14 @@ export async function updateUserPlan(formData: FormData) {
 }
 
 export async function sendAdminTestNotification(formData: FormData) {
-  const { supabase, profile } = await requireProfile();
+  const { profile } = await requireProfile();
   if (!isAdmin(profile)) throw new Error("Admin access required.");
   const parsed = TestNotificationSchema.parse(Object.fromEntries(formData));
+  const admin = createAdminClient();
 
   const { data: recipients } = parsed.user_id === "all"
-    ? await supabase.from("profiles").select("id").order("created_at", { ascending: false }).limit(100)
-    : await supabase.from("profiles").select("id").eq("id", parsed.user_id).limit(1);
+    ? await admin.from("profiles").select("id").order("created_at", { ascending: false }).limit(100)
+    : await admin.from("profiles").select("id").eq("id", parsed.user_id).limit(1);
 
   const recipientIds = (recipients ?? []).map((recipient) => recipient.id as string);
   if (!recipientIds.length) throw new Error("No notification recipients found.");
@@ -113,7 +114,7 @@ export async function sendAdminTestNotification(formData: FormData) {
     message: parsed.message
   }));
 
-  const { error } = await supabase.from("notifications").insert(rows);
+  const { error } = await admin.from("notifications").insert(rows);
   if (error) throw new Error(error.message);
 
   if (parsed.send_push) {
