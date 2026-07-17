@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { BellRing, Boxes, Clock, ListChecks, MapPin, PackageCheck, TrendingUp } from "lucide-react";
+import { LocationPostalCodeField } from "@/components/location-postal-code-field";
 import { PushNotificationSettings } from "@/components/push-notification-settings";
 import { StatCard } from "@/components/stat-card";
 import { requireProfile } from "@/lib/auth";
@@ -69,16 +70,17 @@ export default async function DashboardPage() {
                 <div>
                   <h2 className="font-bold text-white">Add your ZIP code</h2>
                   <p className="mt-1 text-sm leading-6 text-slate-400">
-                    This helps PackWatcher prioritize nearby pickup results in Watchlist.
+                    This helps PackWatcher prioritize nearby pickup results in Watchlist. You can type a ZIP or use your device location.
                   </p>
                 </div>
               </div>
-              <form action={updatePostalCode} className="mt-4 flex flex-col gap-3 sm:flex-row">
-                <input
+              <form action={updatePostalCode} className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <LocationPostalCodeField
                   name="postal_code"
-                  inputMode="numeric"
                   placeholder="ZIP code"
-                  className="h-11 flex-1 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300"
+                  className="min-w-0"
+                  inputClassName="h-11"
+                  buttonClassName="h-11"
                 />
                 <button className="h-11 rounded-lg bg-amber-300 px-4 text-sm font-semibold text-slate-950">Save ZIP</button>
               </form>

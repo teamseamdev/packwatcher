@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { BellOff, BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
 import { removeTrackedProduct, trackCatalogProduct, untrackCatalogProduct } from "@/app/(app)/watchlist/actions";
+import { LocationPostalCodeField } from "@/components/location-postal-code-field";
 import { isLikelyPokemonProduct } from "@/lib/catalog-importers/pokemon-product-filter";
 import { compareCatalogOffers, fulfillmentLabel, fulfillmentText, fulfillmentTone, metadataText, verificationLabel, verificationText } from "@/lib/catalog/offer-ranking";
 import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
@@ -146,7 +147,7 @@ export function CatalogOfferPicker({
         <p className="text-xs text-slate-500">{filtered.length} shown</p>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-[1fr_120px_140px_180px]">
+      <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-[1fr_220px_140px_180px]">
         <label className="relative col-span-2 lg:col-span-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <input
@@ -156,12 +157,11 @@ export function CatalogOfferPicker({
             className="h-10 w-full rounded-lg border border-white/10 bg-slate-950/70 pl-9 pr-3 text-sm outline-none focus:border-amber-300"
           />
         </label>
-        <input
+        <LocationPostalCodeField
           value={postalCode}
-          onChange={(event) => setPostalCode(event.target.value)}
-          inputMode="numeric"
+          onChange={setPostalCode}
           placeholder="ZIP"
-          className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300"
+          className="col-span-2 lg:col-span-1"
         />
         <select value={sort} onChange={(event) => setSort(event.target.value as SortMode)} className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none">
           <option value="recommended">Local first</option>
@@ -182,7 +182,7 @@ export function CatalogOfferPicker({
         </button>
       </div>
 
-      <p className="mt-2 text-xs text-slate-500">ZIP prioritizes nearby in-store pickup results. Change it here for a one-off search, or update the default in Account.</p>
+      <p className="mt-2 text-xs text-slate-500">ZIP or Locate me prioritizes nearby in-store pickup results. Change it here for a one-off search, or update the default in Account.</p>
       {message ? <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">{message}</p> : null}
 
       <div className="scroll-panel mt-3 grid max-h-[64vh] gap-2 pr-1">

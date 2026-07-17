@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { BellOff, BellPlus, ExternalLink, Loader2, PackageSearch, Search } from "lucide-react";
 import { trackCatalogOffer, trackCatalogProduct, untrackCatalogProduct } from "@/app/(app)/watchlist/actions";
+import { LocationPostalCodeField } from "@/components/location-postal-code-field";
 import { isLikelyPokemonProduct } from "@/lib/catalog-importers/pokemon-product-filter";
 import { compareCatalogOffers, fulfillmentLabel, fulfillmentText, fulfillmentTone } from "@/lib/catalog/offer-ranking";
 import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
@@ -240,12 +241,12 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
               className="h-11 w-full rounded-lg border border-white/10 bg-slate-950/70 pl-9 pr-3 text-sm outline-none focus:border-amber-300"
             />
           </label>
-          <input
+          <LocationPostalCodeField
             value={postalCode}
-            onChange={(event) => setPostalCode(event.target.value)}
-            inputMode="numeric"
+            onChange={setPostalCode}
             placeholder="ZIP optional"
-            className="h-11 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300"
+            inputClassName="h-11"
+            buttonClassName="h-11"
           />
           <select value={filter} onChange={(event) => setFilter(event.target.value as CatalogFilter)} className="h-11 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none">
             <option value="all">All products</option>

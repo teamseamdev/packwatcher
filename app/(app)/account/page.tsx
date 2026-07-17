@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { CreditCard, LogOut, MapPin, Shield, UserRound } from "lucide-react";
 import { AccountPlanSwitcher } from "@/components/account-plan-switcher";
+import { LocationPostalCodeField } from "@/components/location-postal-code-field";
 import { PushNotificationSettings } from "@/components/push-notification-settings";
 import { requireProfile } from "@/lib/auth";
 import { switchToFreePlan, updatePostalCode } from "./actions";
@@ -56,16 +57,17 @@ export default async function AccountPage() {
             <MapPin className="mt-1 h-5 w-5 text-amber-300" />
             <div>
               <h2 className="font-bold text-white">Default ZIP code</h2>
-              <p className="mt-1 text-sm leading-6 text-slate-400">Used to prioritize nearby pickup results. You can still override ZIP on Watchlist for one-off searches.</p>
+              <p className="mt-1 text-sm leading-6 text-slate-400">Used to prioritize nearby pickup results. Type a ZIP, use Locate me, or override ZIP on Watchlist for one-off searches.</p>
             </div>
           </div>
-          <form action={updatePostalCode} className="mt-4 flex flex-col gap-3 sm:flex-row">
-            <input
+          <form action={updatePostalCode} className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <LocationPostalCodeField
               name="postal_code"
               defaultValue={profile?.postal_code ?? ""}
-              inputMode="numeric"
               placeholder="ZIP code"
-              className="h-11 flex-1 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300"
+              className="min-w-0"
+              inputClassName="h-11"
+              buttonClassName="h-11"
             />
             <button className="h-11 rounded-lg bg-amber-300 px-4 text-sm font-semibold text-slate-950">Save</button>
           </form>
