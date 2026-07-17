@@ -138,10 +138,10 @@ export function CatalogOfferPicker({
   }
 
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+    <section className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-amber-200">Discover</p>
+          <p className="pw-hud text-xs font-black">Discover</p>
           <h2 className="mt-1 text-xl font-black text-white">Search Pokemon products</h2>
         </div>
         <p className="text-xs text-slate-500">{filtered.length} shown</p>
@@ -194,7 +194,7 @@ export function CatalogOfferPicker({
             const isCatalogTracked = product ? trackedCatalogProducts.has(product.id) : false;
 
             return (
-              <article key={offer.id} className="rounded-lg border border-white/10 bg-slate-950/60 p-3 transition hover:border-amber-300/30">
+              <article key={offer.id} className="rounded-lg border border-cyan-300/10 bg-black/45 p-3 transition hover:border-amber-300/35 hover:shadow-[0_0_28px_rgba(255,208,47,0.08)]">
                 <button
                   type="button"
                   onClick={() => setExpandedOfferId(expandedOfferId === offer.id ? null : offer.id)}
@@ -216,7 +216,7 @@ export function CatalogOfferPicker({
                     <span className="text-xs text-slate-500">{expandedOfferId === offer.id ? "Hide details" : "Show details"}</span>
                   </div>
                   {fulfillmentText(offer) ? <p className="mt-2 line-clamp-1 text-xs text-slate-500">{fulfillmentText(offer)}</p> : null}
-                  <p className="mt-1 text-[11px] font-semibold text-slate-500">{verificationLabel(offer)}</p>
+                  <p className="mt-1 text-[11px] font-semibold text-cyan-200/55">{verificationLabel(offer)}</p>
                 </div>
                 </button>
                 {expandedOfferId === offer.id ? (

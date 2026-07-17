@@ -30,8 +30,8 @@ export default async function InventoryPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <p className="text-sm font-semibold text-amber-200">Inventory</p>
+      <div className="pw-hero p-5 sm:p-6">
+        <p className="pw-hud text-xs font-black">Inventory</p>
         <h1 className="mt-1 text-3xl font-black text-white">Collection tracker</h1>
         <p className="mt-2 max-w-2xl text-sm text-slate-400">Scan cards into inventory from the PackWatcher scanner, then sort and review collection value here.</p>
       </div>
@@ -41,7 +41,7 @@ export default async function InventoryPage() {
         <StatCard title="ROI" value={`${roi.toFixed(1)}%`} />
       </section>
       <section className="grid gap-6 lg:grid-cols-[320px_1fr]">
-        <aside className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-5">
+        <aside className="pw-panel rounded-lg border border-amber-300/20 bg-amber-300/10 p-5">
           <h2 className="text-xl font-bold text-white">Add cards</h2>
           <p className="mt-2 text-sm text-slate-300">Use the scanner to identify cards, price them, and add them directly into inventory.</p>
           <Link href="/scanner" className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-black text-slate-950">

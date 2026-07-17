@@ -21,18 +21,18 @@ const mobileItems = desktopItems.filter((item) => ["Dashboard", "Watchlist", "In
 export function AppNav({ plan }: { plan: Plan }) {
   const pathname = usePathname();
   const itemClass = (href: string) =>
-    `inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition ${pathname.startsWith(href) ? "bg-amber-300 text-slate-950" : "text-slate-300 hover:bg-white/10 hover:text-white"}`;
+    `inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition ${pathname.startsWith(href) ? "bg-amber-300 text-slate-950 shadow-[0_0_22px_rgba(255,208,47,0.2)]" : "text-slate-300 hover:bg-cyan-300/10 hover:text-white"}`;
 
   return (
     <>
-      <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/80 backdrop-blur">
+      <header className="sticky top-0 z-20 border-b border-amber-300/15 bg-black/80 shadow-[0_18px_45px_rgba(0,0,0,0.35)] backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 md:px-6">
           <Link href="/dashboard" className="flex items-center gap-3">
             <BrandMark size="sm" />
-            <span className="hidden font-bold sm:block">PackWatcher</span>
+            <span className="hidden font-black tracking-wide text-white sm:block">PackWatcher</span>
           </Link>
           {plan === "admin" ? (
-            <Link href="/admin" aria-label="Admin" className={`inline-flex h-10 w-10 items-center justify-center rounded-lg md:hidden ${pathname.startsWith("/admin") ? "bg-amber-300 text-slate-950" : "border border-white/10 text-slate-300"}`}>
+            <Link href="/admin" aria-label="Admin" className={`inline-flex h-10 w-10 items-center justify-center rounded-md md:hidden ${pathname.startsWith("/admin") ? "bg-amber-300 text-slate-950" : "border border-amber-300/15 text-slate-300"}`}>
               <Shield className="h-5 w-5" />
             </Link>
           ) : null}
@@ -49,10 +49,12 @@ export function AppNav({ plan }: { plan: Plan }) {
           </nav>
         </div>
       </header>
-      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-white/10 bg-slate-950 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-amber-300/15 bg-black/90 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-18px_45px_rgba(0,0,0,0.45)] backdrop-blur-xl md:hidden">
         {mobileItems.map((item) => (
-          <Link key={item.href} href={item.href} className={`grid justify-items-center gap-1 px-1 py-1 text-[11px] ${pathname.startsWith(item.href) ? "text-amber-200" : "text-slate-400"}`}>
-            <item.icon className="h-5 w-5" />
+          <Link key={item.href} href={item.href} className={`grid justify-items-center gap-1 px-1 py-1 text-[11px] font-semibold ${pathname.startsWith(item.href) ? "text-amber-200" : "text-slate-400"}`}>
+            <span className={`grid h-7 w-7 place-items-center rounded-md border ${pathname.startsWith(item.href) ? "border-amber-300/50 bg-amber-300/15 shadow-[0_0_18px_rgba(255,208,47,0.18)]" : "border-transparent"}`}>
+              <item.icon className="h-5 w-5" />
+            </span>
             {item.label}
           </Link>
         ))}

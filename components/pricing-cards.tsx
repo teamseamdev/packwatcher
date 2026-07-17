@@ -99,7 +99,8 @@ export function PricingCards() {
 
   return (
     <div>
-      <div className="mb-10 max-w-3xl">
+      <div className="pw-hero mb-10 max-w-3xl p-5 sm:p-6">
+        <p className="pw-hud text-xs font-black">Membership loadout</p>
         <h2 className="text-3xl font-bold text-white sm:text-4xl">Simple pricing</h2>
         <p className="mt-4 text-slate-300">
           Start free with monthly limits, upgrade for more scans and unlimited tracking, or lock in lifetime Founder access.
@@ -110,7 +111,7 @@ export function PricingCards() {
         {plans.map((plan) => (
           <article
             key={plan.key}
-            className={`rounded-lg border p-6 ${plan.featured ? "border-amber-300/50 bg-amber-300/10" : "border-white/10 bg-white/[0.04]"}`}
+            className={`pw-panel rounded-lg border p-6 transition hover:-translate-y-0.5 ${plan.featured ? "pw-glow border-amber-300/50 bg-amber-300/10" : "border-white/10 bg-white/[0.04]"}`}
           >
             <div className="flex items-start justify-between gap-3">
               <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-amber-200">{plan.name}</h3>

@@ -30,22 +30,22 @@ export default async function WatchlistPage() {
 
   return (
     <div className="space-y-4">
-      <header className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+      <header className="pw-hero p-4 sm:p-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-amber-200">Watchlist</p>
+            <p className="pw-hud text-xs font-black">Watchlist</p>
             <h1 className="mt-1 text-2xl font-black text-white">Find and track sealed Pokemon</h1>
           </div>
           <div className="grid grid-cols-3 gap-2 text-center">
-            <a href="#tracked" className="rounded-lg bg-slate-950/70 px-3 py-2 transition hover:bg-slate-900">
+            <a href="#tracked" className="pw-stat-tile rounded-lg px-3 py-2 transition hover:border-amber-300/30">
               <p className="text-lg font-black text-white">{catalogAlertCount + trackedUrlCount}</p>
               <p className="text-[11px] text-slate-500">Tracked</p>
             </a>
-            <a href="#tracked" className="rounded-lg bg-slate-950/70 px-3 py-2 transition hover:bg-slate-900">
+            <a href="#tracked" className="pw-stat-tile rounded-lg px-3 py-2 transition hover:border-amber-300/30">
               <p className="text-lg font-black text-white">{inStockTrackedCount}</p>
               <p className="text-[11px] text-slate-500">In stock</p>
             </a>
-            <a href="#add-url" className="rounded-lg bg-slate-950/70 px-3 py-2 transition hover:bg-slate-900">
+            <a href="#add-url" className="pw-stat-tile rounded-lg px-3 py-2 transition hover:border-amber-300/30">
               <p className="text-lg font-black text-white">{trackedUrlCount}</p>
               <p className="text-[11px] text-slate-500">URLs</p>
             </a>
@@ -63,7 +63,7 @@ export default async function WatchlistPage() {
         />
       </div>
 
-      <section id="tracked" className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+      <section id="tracked" className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-4">
         <details open>
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
             <div>
@@ -167,7 +167,7 @@ export default async function WatchlistPage() {
         </details>
       </section>
 
-      <section id="add-url" className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+      <section id="add-url" className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-4">
         <details>
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
             <div>

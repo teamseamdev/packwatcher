@@ -430,7 +430,7 @@ export function CardScanner() {
 
   return (
     <div className="space-y-5">
-      <section className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+      <section className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-4">
         <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_220px]">
           <div className="relative">
             <input
@@ -485,7 +485,7 @@ export function CardScanner() {
       </section>
 
       <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+        <div className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-4">
           <div className="flex flex-wrap gap-3">
             <button
               onClick={() => {
@@ -509,7 +509,7 @@ export function CardScanner() {
           {error ? <p className="mt-4 rounded-lg border border-rose-300/30 bg-rose-500/10 p-3 text-sm text-rose-100">{error}</p> : null}
         </div>
 
-        <aside className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+        <aside className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-4">
           <h2 className="font-bold text-white">Manual add</h2>
           <p className="mt-1 text-sm text-slate-400">Use this if the camera cannot read the card yet.</p>
           <div className="mt-4 grid gap-2">
@@ -523,7 +523,7 @@ export function CardScanner() {
         </aside>
       </section>
 
-      <section className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+      <section className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-xl font-bold text-white">Scan results</h2>

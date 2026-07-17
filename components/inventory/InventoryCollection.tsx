@@ -49,7 +49,7 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
   }, [items, query, sortMode]);
 
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+    <section className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl font-bold text-white">Current inventory</h2>
@@ -94,7 +94,7 @@ function InventoryRow({ item }: { item: InventoryItem }) {
   const profitTone = result.profit >= 0 ? "text-emerald-300" : "text-rose-300";
 
   return (
-    <article className="grid grid-cols-[72px_minmax(0,1fr)] gap-3 rounded-lg border border-white/10 bg-slate-950/45 p-3">
+    <article className="grid grid-cols-[72px_minmax(0,1fr)] gap-3 rounded-lg border border-cyan-300/10 bg-black/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
       {item.image_url ? (
         <div
           aria-hidden="true"
@@ -130,7 +130,7 @@ function InventoryRow({ item }: { item: InventoryItem }) {
 
 function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
-    <div className="rounded-md bg-white/[0.04] px-2 py-2">
+    <div className="pw-stat-tile rounded-md px-2 py-2">
       <p className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-slate-500">{icon}{label}</p>
       <p className="mt-1 truncate font-bold text-slate-100">{value}</p>
     </div>

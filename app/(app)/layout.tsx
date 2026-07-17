@@ -7,7 +7,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!profile) redirect("/login");
 
   return (
-    <div className="min-h-screen overflow-x-hidden pb-[calc(5.75rem+env(safe-area-inset-bottom))] md:pb-0">
+    <div className="pw-shell min-h-screen overflow-x-hidden pb-[calc(5.75rem+env(safe-area-inset-bottom))] md:pb-0">
       <AppNav plan={profile.plan} />
       <main className="mx-auto max-w-7xl overflow-x-hidden px-4 py-6 md:px-6">{children}</main>
     </div>

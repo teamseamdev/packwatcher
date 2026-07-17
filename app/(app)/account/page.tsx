@@ -20,8 +20,8 @@ export default async function AccountPage() {
 
   return (
     <div className="max-w-5xl space-y-5">
-      <header className="rounded-lg border border-white/10 bg-gradient-to-br from-white/[0.08] to-amber-300/[0.06] p-5">
-        <p className="text-sm font-semibold text-amber-200">Account</p>
+      <header className="pw-hero p-5">
+        <p className="pw-hud text-xs font-black">Account</p>
         <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-3xl font-black text-white">Settings</h1>
@@ -35,7 +35,7 @@ export default async function AccountPage() {
       </header>
 
       <section className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+        <div className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-5">
           <div className="flex items-start gap-3">
             <UserRound className="mt-1 h-5 w-5 text-amber-300" />
             <div className="min-w-0">
@@ -52,7 +52,7 @@ export default async function AccountPage() {
           </form>
         </div>
 
-        <section className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+        <section className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-5">
           <div className="flex items-start gap-3">
             <MapPin className="mt-1 h-5 w-5 text-amber-300" />
             <div>
@@ -85,7 +85,7 @@ export default async function AccountPage() {
 
       <section className="grid gap-4 lg:grid-cols-2">
         {profile?.plan === "pro" ? (
-          <section className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+          <section className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-5">
             <h2 className="font-bold text-white">Switch to Free</h2>
             <p className="mt-2 text-sm text-slate-400">Downgrade your PackWatcher account. Stripe subscriptions are cancelled at period end when attached.</p>
             <form action={switchToFreePlan} className="mt-4">
@@ -94,7 +94,7 @@ export default async function AccountPage() {
           </section>
         ) : null}
         {profile?.plan === "admin" ? (
-          <section className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-5">
+          <section className="pw-panel rounded-lg border border-amber-300/20 bg-amber-300/10 p-5">
             <div className="flex items-start gap-3">
               <Shield className="mt-1 h-5 w-5 text-amber-300" />
               <div>
