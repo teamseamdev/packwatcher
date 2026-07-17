@@ -1,4 +1,4 @@
-export type Plan = "free" | "pro" | "admin";
+export type Plan = "free" | "pro" | "founder" | "admin";
 export type StockStatus =
   | "unknown"
   | "in_stock"

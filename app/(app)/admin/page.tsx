@@ -154,6 +154,7 @@ export default async function AdminPage() {
                   <select name="plan" defaultValue={user.plan} className="h-9 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm">
                     <option value="free">Free</option>
                     <option value="pro">Pro</option>
+                    <option value="founder">Founder</option>
                     <option value="admin">Admin</option>
                   </select>
                   <button className="h-9 rounded-lg bg-amber-300 px-3 text-xs font-semibold text-slate-950">Update</button>

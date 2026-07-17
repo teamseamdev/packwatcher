@@ -31,7 +31,7 @@ const CatalogOfferSchema = z.object({
 
 const UserPlanSchema = z.object({
   user_id: z.string().uuid(),
-  plan: z.enum(["free", "pro", "admin"])
+  plan: z.enum(["free", "pro", "founder", "admin"])
 });
 
 const TestNotificationSchema = z.object({

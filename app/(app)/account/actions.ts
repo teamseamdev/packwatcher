@@ -33,8 +33,8 @@ export async function updatePostalCode(formData: FormData) {
 export async function switchToFreePlan() {
   const { user, profile } = await requireProfile();
 
-  if (profile?.plan === "admin") {
-    throw new Error("Admin accounts cannot be downgraded from the account page.");
+  if (profile?.plan === "admin" || profile?.plan === "founder") {
+    throw new Error("This account cannot be downgraded from the account page.");
   }
 
   const admin = createAdminClient();

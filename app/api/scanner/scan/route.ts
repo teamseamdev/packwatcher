@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { OpenAICardRecognitionProvider } from "@/lib/clips/providers/card-recognition";
 import { TCGCSVProvider } from "@/lib/clips/providers/pricing";
 import { errorMetadata, logAppEvent } from "@/lib/monitoring/log";
+import { reserveUsage } from "@/lib/usage-limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -82,6 +83,21 @@ export async function POST(request: Request) {
         error: "AI scanning is missing OPENAI_API_KEY in the deployment environment.",
         messages
       }, { status: 422 });
+    }
+
+    const usage = await reserveUsage(user.id, "card_scan", {
+      language: parsed.language,
+      packHint: parsed.packHint ?? null
+    });
+    if (!usage.allowed) {
+      return NextResponse.json({
+        ok: false,
+        error: `You've used ${usage.used} of ${usage.limit} scanner attempts in your rolling 30-day window. Add cards manually or upgrade your plan.`,
+        usage
+      }, { status: 402 });
+    }
+    if (usage.limit !== null && !usage.skipped) {
+      messages.push(`Scanner usage: ${usage.used} of ${usage.limit} scans used in the current 30-day window.`);
     }
 
     try {

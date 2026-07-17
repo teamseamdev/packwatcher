@@ -139,13 +139,20 @@ What V1 includes:
 
 - Single-card camera scan.
 - Multi-card camera scan with a green confirmation after each scan, a Next scan action, and an End scan action.
-- Browser-side video frame scanning for uploaded MP4/MOV/WEBM files. Raw video is not stored for Scanner.
+- Video scanning is paused while camera scanning is stabilized.
 - Language hints for English, Japanese, Simplified Chinese, Traditional Chinese, and Korean cards.
 - Ordered card list with estimated values.
 - Manual card add fallback when AI recognition is unavailable or cannot read the card.
 - PDF export of the scan results and total estimated value.
 
 Scanner pricing uses the free TCGCSV data source. Camera/image recognition uses OpenAI only when `CLIPS_ENABLE_OPENAI=true` and `OPENAI_API_KEY` are configured. For Japanese, Chinese, and Korean cards, Scanner attempts to identify the printed card and normalize it to an English pricing name when possible. If OpenAI is unavailable, quota-limited, or the card cannot be matched, users can still manually add card names and get TCGCSV pricing.
+
+Scanner limits reset on a rolling 30-day window:
+
+- Free: 20 card scans and 1 video scan.
+- Pro: 500 card scans and 5 video scans.
+- Founder: 1,000 card scans and 15 video scans.
+- Manual inventory entry remains available after scan quota is reached.
 
 ## PackWatcher Clips Legacy
 
@@ -278,9 +285,15 @@ The app includes:
 - `POST /api/stripe/checkout`
 - `POST /api/stripe/webhook`
 - `billing_status` table
-- Free, Pro, and Admin plans
+- Free, Pro, Founder, and Admin plans
 
-Create a Stripe recurring price for the PRO plan, then set `NEXT_PUBLIC_STRIPE_PRO_PRICE_ID`.
+Create Stripe prices, then set:
+
+- `NEXT_PUBLIC_STRIPE_PRO_MONTHLY_PRICE_ID` for Pro at $4.99/month.
+- `NEXT_PUBLIC_STRIPE_PRO_YEARLY_PRICE_ID` for Pro at $45/year.
+- `NEXT_PUBLIC_STRIPE_FOUNDER_PRICE_ID` for the one-time $250 Founder membership.
+
+`NEXT_PUBLIC_STRIPE_PRO_PRICE_ID` is still accepted as a legacy fallback for Pro monthly.
 
 ## Vercel Deployment
 

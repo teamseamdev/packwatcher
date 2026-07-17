@@ -1,6 +1,6 @@
 create extension if not exists "pgcrypto";
 
-create type public.plan_type as enum ('free', 'pro', 'admin');
+create type public.plan_type as enum ('free', 'pro', 'founder', 'admin');
 create type public.stock_status as enum ('unknown', 'in_stock', 'out_of_stock');
 create type public.promo_discount_type as enum ('percent', 'amount');
 
@@ -96,6 +96,14 @@ create table public.promo_code_redemptions (
   user_id uuid not null references public.profiles(id) on delete cascade,
   stripe_checkout_session_id text not null unique,
   stripe_subscription_id text,
+  created_at timestamptz not null default now()
+);
+
+create table public.app_usage_events (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  usage_kind text not null check (usage_kind in ('card_scan', 'video_scan')),
+  metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -314,6 +322,7 @@ alter table public.inventory_items enable row level security;
 alter table public.billing_status enable row level security;
 alter table public.promo_codes enable row level security;
 alter table public.promo_code_redemptions enable row level security;
+alter table public.app_usage_events enable row level security;
 alter table public.catalog_products enable row level security;
 alter table public.catalog_offers enable row level security;
 alter table public.product_alerts enable row level security;
@@ -356,6 +365,9 @@ create policy "promo codes admin all" on public.promo_codes
   for all using (public.is_admin()) with check (public.is_admin());
 create policy "promo redemptions admin select" on public.promo_code_redemptions for select using (public.is_admin());
 create policy "promo redemptions own select" on public.promo_code_redemptions for select using (auth.uid() = user_id);
+create policy "usage events own select" on public.app_usage_events for select using (auth.uid() = user_id);
+create policy "usage events admin all" on public.app_usage_events
+  for all using (public.is_admin()) with check (public.is_admin());
 
 create policy "catalog products authenticated select" on public.catalog_products for select using (auth.role() = 'authenticated');
 create policy "catalog products admin all" on public.catalog_products
@@ -423,6 +435,7 @@ create index tracked_products_user_id_idx on public.tracked_products(user_id);
 create index stock_checks_product_id_checked_idx on public.stock_checks(tracked_product_id, checked_at desc);
 create index notifications_user_id_created_idx on public.notifications(user_id, created_at desc);
 create index inventory_items_user_id_idx on public.inventory_items(user_id);
+create index app_usage_events_user_kind_created_idx on public.app_usage_events(user_id, usage_kind, created_at desc);
 create index catalog_products_search_idx on public.catalog_products using gin (to_tsvector('english', name || ' ' || coalesce(set_name, '') || ' ' || coalesce(category, '') || ' ' || tcg));
 create index catalog_offers_product_id_idx on public.catalog_offers(catalog_product_id);
 create index catalog_offers_status_idx on public.catalog_offers(status);

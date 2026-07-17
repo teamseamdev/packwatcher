@@ -19,7 +19,7 @@ export default function UpgradePage() {
     <main className="grid min-h-screen place-items-center px-5 py-10">
       <section className="w-full max-w-xl rounded-lg border border-white/10 bg-slate-950/80 p-7">
         <h1 className="text-4xl font-black text-white">Upgrade to PRO</h1>
-        <p className="mt-4 text-slate-300">$2/month for unlimited products, instant alerts, and advanced analytics.</p>
+        <p className="mt-4 text-slate-300">$4.99/month for unlimited tracks and alerts, 500 card scans, and 5 video scans per rolling 30 days.</p>
         <div className="mt-7 flex flex-wrap gap-3">
           <button onClick={checkout} disabled={isPending} className="h-12 rounded-lg bg-amber-300 px-5 text-sm font-semibold text-slate-950 disabled:opacity-60">
             {isPending ? "Opening checkout..." : "Start checkout"}

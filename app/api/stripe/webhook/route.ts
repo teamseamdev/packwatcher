@@ -51,9 +51,13 @@ export async function POST(request: Request) {
           stripe_customer_id: String(session.customer ?? ""),
           stripe_subscription_id: String(session.subscription ?? ""),
           status: "active",
-          plan: "pro"
+          plan: session.metadata?.resulting_plan === "founder" ? "founder" : "pro"
         }, { onConflict: "user_id" });
-        await supabase.from("profiles").update({ plan: "pro" }).eq("id", userId).neq("plan", "admin");
+        await supabase
+          .from("profiles")
+          .update({ plan: session.metadata?.resulting_plan === "founder" ? "founder" : "pro" })
+          .eq("id", userId)
+          .neq("plan", "admin");
       }
     }
 
