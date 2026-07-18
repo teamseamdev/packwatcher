@@ -255,18 +255,26 @@ function InventoryRow({ item, setOptions }: { item: InventoryItem; setOptions: s
             <Metric icon={<Clock3 className="h-3.5 w-3.5" />} label="Cost" value={currency(item.purchase_price)} />
             <Metric icon={<ArrowDownAZ className="h-3.5 w-3.5" />} label="ROI" value={`${result.roi.toFixed(1)}%`} />
           </div>
-          <Link href={`/inventory/ebay/${item.id}`} className="mt-3 inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-amber-300/25 px-3 text-xs font-bold text-amber-100">
-            <ExternalLink className="h-3.5 w-3.5" />
-            Sell on eBay
-          </Link>
         </div>
       </div>
 
-      <details open={isEditing} onToggle={(event) => setIsEditing(event.currentTarget.open)} className="mt-3 rounded-lg border border-white/10 bg-slate-950/45 p-3">
-        <summary className="mx-auto flex w-fit cursor-pointer list-none items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-center text-sm font-semibold text-slate-100">
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => setIsEditing((current) => !current)}
+          className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-300/10 px-3 text-center text-sm font-semibold text-slate-100"
+        >
           Edit card details
-        </summary>
-        <form action={saveAndCollapse} className="mt-3 grid gap-3">
+        </button>
+        <Link href={`/inventory/ebay/${item.id}`} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-amber-300/25 px-3 text-center text-sm font-bold text-amber-100">
+          <ExternalLink className="h-4 w-4 shrink-0" />
+          <span className="truncate">Sell on eBay</span>
+        </Link>
+      </div>
+
+      {isEditing ? (
+        <div className="mt-3 rounded-lg border border-white/10 bg-slate-950/45 p-3">
+        <form action={saveAndCollapse} className="grid gap-3">
           <input type="hidden" name="id" value={item.id} />
           <div className="grid gap-3 sm:grid-cols-[minmax(0,1.4fr)_90px]">
             <label className="grid gap-1">
@@ -343,7 +351,8 @@ function InventoryRow({ item, setOptions }: { item: InventoryItem; setOptions: s
           </button>
           <p className="mt-2 text-xs text-slate-500">Deletes this inventory record from your collection.</p>
         </form>
-      </details>
+        </div>
+      ) : null}
     </article>
   );
 }
