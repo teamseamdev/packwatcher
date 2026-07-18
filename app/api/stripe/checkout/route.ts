@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { requireUser } from "@/lib/auth";
-import { checkoutPlans, type CheckoutPlan } from "@/lib/plans";
+import { checkoutPlans, FOUNDER_MEMBERSHIP_LIMIT, type CheckoutPlan } from "@/lib/plans";
 import { normalizePromoCode, promoHasRemainingUses, type PromoCodeRecord } from "@/lib/promo-codes";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       .eq("plan", "founder")
       .in("status", ["active", "trialing"]);
 
-    if ((count ?? 0) >= 100) {
+    if ((count ?? 0) >= FOUNDER_MEMBERSHIP_LIMIT) {
       return NextResponse.json({ ok: false, error: "Founder memberships are sold out." }, { status: 400 });
     }
   }

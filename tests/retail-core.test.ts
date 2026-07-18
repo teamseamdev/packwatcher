@@ -3,6 +3,7 @@ import test from "node:test";
 import { aggregatePrices } from "../lib/retailers/shared/price-aggregation.ts";
 import { isLikelyPokemonProduct, pokemonShoppingQuery } from "../lib/catalog-importers/pokemon-product-filter.ts";
 import { isGoogleUrl, resolveRetailerUrl } from "../lib/catalog/retailer-url.ts";
+import { FOUNDER_CARD_SCAN_LIMIT, FOUNDER_MEMBERSHIP_LIMIT, FOUNDER_VIDEO_SCAN_LIMIT, usageLimitForPlan } from "../lib/plans.ts";
 import { matchProduct } from "../lib/retailers/shared/product-matching.ts";
 import { freshnessLabel, normalizeAvailabilityStatus, normalizeTitle, normalizeUpc } from "../lib/retailers/shared/normalize.ts";
 import { notificationEventKey, shouldSendRestockAlert } from "../lib/retailers/shared/restock-events.ts";
@@ -114,4 +115,12 @@ test("resolves shopping provider Google URLs to retailer URLs", () => {
   assert.equal(isGoogleUrl(galactic), false);
   assert.equal(galactic, "https://www.galactictoys.com/search?q=Pokemon%20Mega%20Evolution%20Chaos%20Rising%20Booster%20Pack");
   assert.equal(embedded, "https://www.acehardware.com/departments/toys-and-games/pokemon");
+});
+
+test("gives admins founder-level usage without using founder membership spots", () => {
+  assert.equal(usageLimitForPlan("admin", "card_scan"), FOUNDER_CARD_SCAN_LIMIT);
+  assert.equal(usageLimitForPlan("admin", "video_scan"), FOUNDER_VIDEO_SCAN_LIMIT);
+  assert.equal(usageLimitForPlan("founder", "card_scan"), FOUNDER_CARD_SCAN_LIMIT);
+  assert.equal(usageLimitForPlan("founder", "video_scan"), FOUNDER_VIDEO_SCAN_LIMIT);
+  assert.equal(FOUNDER_MEMBERSHIP_LIMIT, 100);
 });

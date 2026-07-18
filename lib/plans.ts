@@ -2,6 +2,9 @@ import type { Plan } from "@/lib/types";
 
 export const FREE_TRACKED_PRODUCT_LIMIT = 3;
 export const USAGE_WINDOW_DAYS = 30;
+export const FOUNDER_CARD_SCAN_LIMIT = 1000;
+export const FOUNDER_VIDEO_SCAN_LIMIT = 15;
+export const FOUNDER_MEMBERSHIP_LIMIT = 100;
 
 export type UsageKind = "card_scan" | "video_scan";
 export type CheckoutPlan = "pro_monthly" | "pro_yearly" | "founder";
@@ -29,14 +32,14 @@ export const planLimits: Record<Plan, PlanLimits> = {
   founder: {
     trackedProducts: null,
     alerts: null,
-    cardScansPerWindow: 1000,
-    videoScansPerWindow: 15
+    cardScansPerWindow: FOUNDER_CARD_SCAN_LIMIT,
+    videoScansPerWindow: FOUNDER_VIDEO_SCAN_LIMIT
   },
   admin: {
     trackedProducts: null,
     alerts: null,
-    cardScansPerWindow: null,
-    videoScansPerWindow: null
+    cardScansPerWindow: FOUNDER_CARD_SCAN_LIMIT,
+    videoScansPerWindow: FOUNDER_VIDEO_SCAN_LIMIT
   }
 };
 
