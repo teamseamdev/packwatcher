@@ -58,6 +58,12 @@ const CatalogOfferIdSchema = z.object({
   offer_id: z.string().uuid()
 });
 
+const FeedbackStatusSchema = z.object({
+  feedback_id: z.string().uuid(),
+  status: z.enum(["new", "reviewed", "in_progress", "handled", "closed"]),
+  status_note: z.string().trim().max(1000).optional()
+});
+
 export async function adminCheckProduct(productId: string) {
   const { profile } = await requireProfile();
   if (!isAdmin(profile)) throw new Error("Admin access required.");
@@ -204,6 +210,52 @@ export async function disableCatalogOffer(formData: FormData) {
   revalidatePath("/admin");
   revalidatePath("/watchlist");
   revalidatePath("/catalog");
+}
+
+export async function updateFeedbackStatus(formData: FormData) {
+  const { profile, user } = await requireProfile();
+  if (!isAdmin(profile)) throw new Error("Admin access required.");
+  const parsed = FeedbackStatusSchema.parse(Object.fromEntries(formData));
+  const admin = createAdminClient();
+
+  const { data: feedback, error: feedbackError } = await admin
+    .from("feedback_items")
+    .select("id,status")
+    .eq("id", parsed.feedback_id)
+    .single();
+
+  if (feedbackError || !feedback) {
+    throw new Error(feedbackError?.message ?? "Feedback item not found.");
+  }
+
+  const note = parsed.status_note || null;
+  const now = new Date().toISOString();
+
+  const { error: updateError } = await admin
+    .from("feedback_items")
+    .update({
+      status: parsed.status,
+      status_note: note,
+      status_changed_by: user.id,
+      status_changed_at: now,
+      updated_at: now
+    })
+    .eq("id", parsed.feedback_id);
+
+  if (updateError) throw new Error(updateError.message);
+
+  const { error: eventError } = await admin.from("feedback_status_events").insert({
+    feedback_id: parsed.feedback_id,
+    admin_user_id: user.id,
+    previous_status: feedback.status,
+    next_status: parsed.status,
+    note
+  });
+
+  if (eventError) throw new Error(eventError.message);
+
+  revalidatePath("/admin");
+  revalidatePath("/account");
 }
 
 export async function addCatalogOffer(formData: FormData) {

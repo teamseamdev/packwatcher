@@ -17,6 +17,18 @@ const PostalCodeSchema = z.object({
   return { postal_code: postalCode };
 });
 
+const FeedbackSchema = z.object({
+  type: z.enum(["suggestion", "bug", "issue", "other"]),
+  title: z.string().trim().min(3, "Add a short title.").max(140),
+  message: z.string().trim().min(10, "Add a little more detail.").max(2000),
+  page_url: z.string().trim().max(500).optional(),
+  browser_info: z.string().trim().max(500).optional()
+}).transform((value) => ({
+  ...value,
+  page_url: value.page_url || null,
+  browser_info: value.browser_info || null
+}));
+
 export async function updatePostalCode(formData: FormData) {
   const { user } = await requireProfile();
   const parsed = PostalCodeSchema.parse(Object.fromEntries(formData));
@@ -28,6 +40,21 @@ export async function updatePostalCode(formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath("/watchlist");
   revalidatePath("/catalog");
+}
+
+export async function submitFeedback(formData: FormData) {
+  const { supabase, user } = await requireProfile();
+  const parsed = FeedbackSchema.parse(Object.fromEntries(formData));
+
+  const { error } = await supabase.from("feedback_items").insert({
+    user_id: user.id,
+    ...parsed
+  });
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/account");
+  revalidatePath("/admin");
 }
 
 export async function switchToFreePlan() {

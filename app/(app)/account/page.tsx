@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { CreditCard, LogOut, MapPin, Shield, UserRound } from "lucide-react";
+import { CreditCard, Lightbulb, LogOut, MapPin, MessageSquareWarning, Shield, UserRound } from "lucide-react";
 import { AccountPlanSwitcher } from "@/components/account-plan-switcher";
 import { LocationPostalCodeField } from "@/components/location-postal-code-field";
 import { PushNotificationSettings } from "@/components/push-notification-settings";
 import { requireProfile } from "@/lib/auth";
-import { switchToFreePlan, updatePostalCode } from "./actions";
+import type { FeedbackItem, FeedbackStatus } from "@/lib/types";
+import { submitFeedback, switchToFreePlan, updatePostalCode } from "./actions";
 
 async function signOut() {
   "use server";
@@ -16,7 +17,16 @@ async function signOut() {
 
 export default async function AccountPage() {
   const { supabase, user, profile } = await requireProfile();
-  const { count: subscriptionCount } = await supabase.from("push_subscriptions").select("*", { count: "exact", head: true }).eq("user_id", user.id);
+  const [{ count: subscriptionCount }, { data: feedbackItems }] = await Promise.all([
+    supabase.from("push_subscriptions").select("*", { count: "exact", head: true }).eq("user_id", user.id),
+    supabase
+      .from("feedback_items")
+      .select("*, feedback_status_events(*)")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(5)
+      .returns<FeedbackItem[]>()
+  ]);
 
   return (
     <div className="max-w-5xl space-y-5">
@@ -83,6 +93,61 @@ export default async function AccountPage() {
         <AccountPlanSwitcher currentPlan={profile?.plan ?? "free"} className="h-full" />
       </section>
 
+      <section className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+        <section className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-5">
+          <div className="flex items-start gap-3">
+            <MessageSquareWarning className="mt-1 h-5 w-5 text-amber-300" />
+            <div>
+              <h2 className="font-bold text-white">Feedback</h2>
+              <p className="mt-1 text-sm leading-6 text-slate-400">Send suggestions, bugs, or issues directly to the PackWatcher admin queue.</p>
+            </div>
+          </div>
+          <form action={submitFeedback} className="mt-4 grid gap-3">
+            <div className="grid gap-3 sm:grid-cols-[180px_1fr]">
+              <select name="type" defaultValue="suggestion" className="h-11 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300">
+                <option value="suggestion">Suggestion</option>
+                <option value="bug">Bug</option>
+                <option value="issue">Issue</option>
+                <option value="other">Other</option>
+              </select>
+              <input name="title" placeholder="Short title" maxLength={140} className="h-11 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300" />
+            </div>
+            <textarea name="message" placeholder="What happened, or what should PackWatcher improve?" maxLength={2000} className="min-h-32 rounded-lg border border-white/10 bg-slate-950/70 p-3 text-sm outline-none focus:border-amber-300" />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <input name="page_url" placeholder="Page URL, optional" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300" />
+              <input name="browser_info" placeholder="Device/browser, optional" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300" />
+            </div>
+            <button className="h-11 rounded-lg bg-amber-300 px-4 text-sm font-semibold text-slate-950">Send feedback</button>
+          </form>
+        </section>
+
+        <section className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-5">
+          <div className="flex items-start gap-3">
+            <Lightbulb className="mt-1 h-5 w-5 text-amber-300" />
+            <div>
+              <h2 className="font-bold text-white">Recent feedback</h2>
+              <p className="mt-1 text-sm text-slate-400">Status updates from the admin team.</p>
+            </div>
+          </div>
+          <div className="scroll-panel mt-4 max-h-80 space-y-3 pr-1">
+            {feedbackItems?.length ? feedbackItems.map((item) => (
+              <article key={item.id} className="rounded-lg border border-cyan-300/10 bg-black/40 p-3 text-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-white">{item.title}</p>
+                    <p className="mt-1 text-xs text-slate-500">{item.type} - {new Date(item.created_at).toLocaleString()}</p>
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-bold ${feedbackStatusClass(item.status)}`}>{feedbackStatusLabel(item.status)}</span>
+                </div>
+                {item.status_note ? <p className="mt-2 text-xs text-slate-300">{item.status_note}</p> : null}
+              </article>
+            )) : (
+              <p className="rounded-lg border border-dashed border-white/10 p-4 text-sm text-slate-400">No feedback sent yet.</p>
+            )}
+          </div>
+        </section>
+      </section>
+
       <section className="grid gap-4 lg:grid-cols-2">
         {profile?.plan === "pro" ? (
           <section className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-5">
@@ -110,5 +175,17 @@ export default async function AccountPage() {
       </section>
     </div>
   );
+}
+
+function feedbackStatusLabel(status: FeedbackStatus) {
+  return status.replace(/_/g, " ");
+}
+
+function feedbackStatusClass(status: FeedbackStatus) {
+  if (status === "handled") return "bg-emerald-400/15 text-emerald-200";
+  if (status === "in_progress") return "bg-cyan-300/15 text-cyan-100";
+  if (status === "reviewed") return "bg-amber-300/15 text-amber-100";
+  if (status === "closed") return "bg-white/10 text-slate-300";
+  return "bg-slate-700/70 text-slate-200";
 }
 

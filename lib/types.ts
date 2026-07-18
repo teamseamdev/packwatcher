@@ -115,3 +115,35 @@ export type InventoryItem = {
   image_url?: string | null;
   created_at: string;
 };
+
+export type FeedbackType = "suggestion" | "bug" | "issue" | "other";
+export type FeedbackStatus = "new" | "reviewed" | "in_progress" | "handled" | "closed";
+
+export type FeedbackStatusEvent = {
+  id: string;
+  feedback_id: string;
+  admin_user_id: string | null;
+  previous_status: FeedbackStatus | null;
+  next_status: FeedbackStatus;
+  note: string | null;
+  created_at: string;
+  profiles?: Pick<Profile, "email"> | null;
+};
+
+export type FeedbackItem = {
+  id: string;
+  user_id: string;
+  type: FeedbackType;
+  status: FeedbackStatus;
+  title: string;
+  message: string;
+  page_url: string | null;
+  browser_info: string | null;
+  status_note: string | null;
+  status_changed_by: string | null;
+  status_changed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  profiles?: Pick<Profile, "email"> | null;
+  feedback_status_events?: FeedbackStatusEvent[];
+};

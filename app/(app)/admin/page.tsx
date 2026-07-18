@@ -3,7 +3,8 @@ import { AdminSyncPanel } from "@/components/admin-sync-panel";
 import { StatCard } from "@/components/stat-card";
 import { isAdmin, requireProfile } from "@/lib/auth";
 import { formatPromoDiscount } from "@/lib/promo-codes";
-import { addCatalogOffer, adminCheckProduct, approveProductMatch, createPromoCode, disableCatalogOffer, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, rejectProductMatch, sendAdminTestNotification, setPromoCodeActive, updateUserPlan } from "./actions";
+import type { FeedbackItem, FeedbackStatus } from "@/lib/types";
+import { addCatalogOffer, adminCheckProduct, approveProductMatch, createPromoCode, disableCatalogOffer, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, rejectProductMatch, sendAdminTestNotification, setPromoCodeActive, updateFeedbackStatus, updateUserPlan } from "./actions";
 
 const panelClass = "rounded-lg border border-white/10 bg-white/[0.04] p-5";
 const scrollPanelClass = `${panelClass} scroll-panel max-h-[680px] pr-4`;
@@ -26,7 +27,8 @@ export default async function AdminPage() {
     { data: retailJobRuns },
     { data: matchReviews },
     { data: recentOffers },
-    { data: appEvents }
+    { data: appEvents },
+    { data: feedbackItems }
   ] = await Promise.all([
     supabase.from("profiles").select("*", { count: "exact", head: true }),
     supabase.from("profiles").select("*", { count: "exact", head: true }).in("plan", ["pro", "admin"]),
@@ -41,7 +43,13 @@ export default async function AdminPage() {
     supabase.from("retail_job_runs").select("*").order("started_at", { ascending: false }).limit(10),
     supabase.from("product_match_reviews").select("*").eq("status", "pending").order("created_at", { ascending: false }).limit(10),
     supabase.from("catalog_offers").select("id,title,store_name,retailer,status,last_price,price,active,created_at,url").order("created_at", { ascending: false }).limit(30),
-    supabase.from("app_events").select("*").in("severity", ["warn", "error"]).order("created_at", { ascending: false }).limit(30)
+    supabase.from("app_events").select("*").in("severity", ["warn", "error"]).order("created_at", { ascending: false }).limit(30),
+    supabase
+      .from("feedback_items")
+      .select("*, profiles!feedback_items_user_id_fkey(email), feedback_status_events(*, profiles!feedback_status_events_admin_user_id_fkey(email))")
+      .order("created_at", { ascending: false })
+      .limit(30)
+      .returns<FeedbackItem[]>()
   ]);
 
   const failedChecks = checks?.filter((check) => check.status === "unknown").length ?? 0;
@@ -182,6 +190,64 @@ export default async function AdminPage() {
             </label>
             <button className="h-10 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Send test notification</button>
           </form>
+        </div>
+
+        <div className={`${scrollPanelClass} lg:col-span-2`}>
+          <h2 className="font-bold text-white">Recent feedback</h2>
+          <p className="mt-1 text-xs text-slate-400">Review suggestions, bugs, and issues. Status changes are stored with the admin who made the update.</p>
+          <div className="mt-4 space-y-3 text-sm">
+            {feedbackItems?.length ? feedbackItems.map((item) => {
+              const events = [...(item.feedback_status_events ?? [])].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime());
+              return (
+                <article key={item.id} className="rounded-lg border border-cyan-300/10 bg-black/40 p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`rounded-full px-2 py-1 text-[11px] font-bold ${feedbackStatusClass(item.status)}`}>{feedbackStatusLabel(item.status)}</span>
+                        <span className="rounded-full border border-white/10 px-2 py-1 text-[11px] font-semibold text-slate-300">{item.type}</span>
+                      </div>
+                      <h3 className="mt-3 text-base font-bold text-white">{item.title}</h3>
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">{item.message}</p>
+                      <div className="mt-3 grid gap-1 text-xs text-slate-500">
+                        <p>From: {item.profiles?.email ?? item.user_id}</p>
+                        <p>Sent: {new Date(item.created_at).toLocaleString()}</p>
+                        {item.page_url ? <p className="break-all">Page: {item.page_url}</p> : null}
+                        {item.browser_info ? <p>Device: {item.browser_info}</p> : null}
+                      </div>
+                    </div>
+                    <form action={updateFeedbackStatus} className="grid min-w-0 gap-2 md:w-72">
+                      <input type="hidden" name="feedback_id" value={item.id} />
+                      <select name="status" defaultValue={item.status} className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm">
+                        <option value="new">New</option>
+                        <option value="reviewed">Reviewed</option>
+                        <option value="in_progress">In progress</option>
+                        <option value="handled">Handled</option>
+                        <option value="closed">Closed</option>
+                      </select>
+                      <textarea name="status_note" defaultValue={item.status_note ?? ""} placeholder="Admin note, optional" className="min-h-20 rounded-lg border border-white/10 bg-slate-950/70 p-3 text-xs outline-none focus:border-amber-300" />
+                      <button className="h-10 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Update status</button>
+                    </form>
+                  </div>
+
+                  <details className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                    <summary className="cursor-pointer list-none text-xs font-semibold text-slate-300">Status history</summary>
+                    <div className="mt-3 space-y-2">
+                      {events.length ? events.map((event) => (
+                        <div key={event.id} className="rounded-md bg-black/35 p-2 text-xs text-slate-300">
+                          <p>
+                            {feedbackStatusLabel(event.previous_status)} - {feedbackStatusLabel(event.next_status)}
+                            {" "}by {event.profiles?.email ?? event.admin_user_id ?? "admin"}
+                          </p>
+                          {event.note ? <p className="mt-1 text-slate-400">{event.note}</p> : null}
+                          <p className="mt-1 text-slate-600">{new Date(event.created_at).toLocaleString()}</p>
+                        </div>
+                      )) : <p className="text-xs text-slate-500">No status changes recorded yet.</p>}
+                    </div>
+                  </details>
+                </article>
+              );
+            }) : <p className="rounded-lg border border-dashed border-white/10 p-4 text-sm text-slate-400">No feedback submitted yet.</p>}
+          </div>
         </div>
 
         <div className={scrollPanelClass}>
@@ -334,5 +400,17 @@ export default async function AdminPage() {
       </section>
     </div>
   );
+}
+
+function feedbackStatusLabel(status: FeedbackStatus | null) {
+  return status ? status.replace(/_/g, " ") : "none";
+}
+
+function feedbackStatusClass(status: FeedbackStatus) {
+  if (status === "handled") return "bg-emerald-400/15 text-emerald-200";
+  if (status === "in_progress") return "bg-cyan-300/15 text-cyan-100";
+  if (status === "reviewed") return "bg-amber-300/15 text-amber-100";
+  if (status === "closed") return "bg-white/10 text-slate-300";
+  return "bg-slate-700/70 text-slate-200";
 }
 
