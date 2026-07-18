@@ -90,9 +90,15 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
 }
 
 function InventoryRow({ item }: { item: InventoryItem }) {
+  const [isEditing, setIsEditing] = useState(false);
   const result = inventoryProfit(item);
   const addedDate = item.created_at ? new Date(item.created_at).toLocaleDateString() : null;
   const profitTone = result.profit >= 0 ? "text-emerald-300" : "text-rose-300";
+
+  async function saveAndCollapse(formData: FormData) {
+    await updateInventoryItem(formData);
+    setIsEditing(false);
+  }
 
   return (
     <article className="rounded-lg border border-cyan-300/10 bg-black/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
@@ -128,9 +134,11 @@ function InventoryRow({ item }: { item: InventoryItem }) {
         </div>
       </div>
 
-      <details className="mt-3 rounded-lg border border-white/10 bg-slate-950/45 p-3">
-        <summary className="cursor-pointer list-none text-sm font-semibold text-slate-200">Edit card details</summary>
-        <form action={updateInventoryItem} className="mt-3 grid gap-3">
+      <details open={isEditing} onToggle={(event) => setIsEditing(event.currentTarget.open)} className="mt-3 rounded-lg border border-white/10 bg-slate-950/45 p-3">
+        <summary className="mx-auto flex w-fit cursor-pointer list-none items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-center text-sm font-semibold text-slate-100">
+          Edit card details
+        </summary>
+        <form action={saveAndCollapse} className="mt-3 grid gap-3">
           <input type="hidden" name="id" value={item.id} />
           <div className="grid gap-3 sm:grid-cols-[minmax(0,1.4fr)_90px]">
             <label className="grid gap-1">
