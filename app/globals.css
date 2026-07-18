@@ -231,7 +231,7 @@ main :is(section, article, aside, header, details)[class*="border-white/10"][cla
 }
 
 .pw-button,
-[class*="bg-amber-300"] {
+[class~="bg-amber-300"] {
   background-image:
     linear-gradient(180deg, rgba(255, 255, 255, 0.3), transparent),
     linear-gradient(90deg, #ffd02f, #ffb000) !important;
@@ -241,7 +241,7 @@ main :is(section, article, aside, header, details)[class*="border-white/10"][cla
 }
 
 .pw-button:hover,
-[class*="bg-amber-300"]:hover {
+[class~="bg-amber-300"]:hover {
   filter: brightness(1.05);
 }
 

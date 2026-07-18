@@ -43,7 +43,7 @@ export function AccountPlanSwitcher({ currentPlan, className = "mt-6" }: { curre
           <h2 className="font-bold text-white">Plan</h2>
           <p className="mt-1 text-sm text-slate-400">Current plan: <span className="font-semibold text-white">{currentPlan}</span></p>
         </div>
-        {isPaid ? <span className="rounded-full bg-amber-300 px-3 py-1 text-xs font-bold text-slate-950">Active</span> : null}
+        {isPaid ? <span className="w-fit rounded-full bg-amber-300 px-3 py-1 text-xs font-bold text-slate-950">Active</span> : null}
       </div>
 
       <div className="mt-5 grid gap-3 rounded-lg bg-white/5 p-3">
