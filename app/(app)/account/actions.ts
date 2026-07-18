@@ -29,6 +29,18 @@ const FeedbackSchema = z.object({
   browser_info: value.browser_info || null
 }));
 
+const EbayDefaultsSchema = z.object({
+  marketplace_id: z.string().trim().min(2).default("EBAY_US"),
+  category_id: z.string().trim().min(2).default("183454"),
+  merchant_location_key: z.string().trim().optional().transform((value) => value || null),
+  payment_policy_id: z.string().trim().optional().transform((value) => value || null),
+  return_policy_id: z.string().trim().optional().transform((value) => value || null),
+  fulfillment_policy_id: z.string().trim().optional().transform((value) => value || null),
+  condition: z.string().trim().min(2).default("USED_EXCELLENT"),
+  currency: z.string().trim().min(3).max(3).default("USD"),
+  listing_duration: z.string().trim().min(2).default("GTC")
+});
+
 export async function updatePostalCode(formData: FormData) {
   const { user } = await requireProfile();
   const parsed = PostalCodeSchema.parse(Object.fromEntries(formData));
@@ -55,6 +67,31 @@ export async function submitFeedback(formData: FormData) {
 
   revalidatePath("/account");
   revalidatePath("/admin");
+}
+
+export async function saveEbayDefaults(formData: FormData) {
+  const { supabase, user } = await requireProfile();
+  const parsed = EbayDefaultsSchema.parse(Object.fromEntries(formData));
+
+  const { error } = await supabase.from("ebay_listing_defaults").upsert({
+    user_id: user.id,
+    ...parsed,
+    updated_at: new Date().toISOString()
+  }, { onConflict: "user_id" });
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/account");
+  revalidatePath("/inventory");
+}
+
+export async function disconnectEbay() {
+  const { user } = await requireProfile();
+  const admin = createAdminClient();
+  const { error } = await admin.from("ebay_connections").delete().eq("user_id", user.id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/account");
+  revalidatePath("/inventory");
 }
 
 export async function switchToFreePlan() {

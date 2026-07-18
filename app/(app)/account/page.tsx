@@ -1,12 +1,13 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { CreditCard, Lightbulb, LogOut, MapPin, MessageSquareWarning, Shield, UserRound } from "lucide-react";
+import { CreditCard, ExternalLink, Lightbulb, LogOut, MapPin, MessageSquareWarning, Shield, Store, UserRound } from "lucide-react";
 import { AccountPlanSwitcher } from "@/components/account-plan-switcher";
 import { LocationPostalCodeField } from "@/components/location-postal-code-field";
 import { PushNotificationSettings } from "@/components/push-notification-settings";
 import { requireProfile } from "@/lib/auth";
-import type { FeedbackItem, FeedbackStatus } from "@/lib/types";
-import { submitFeedback, switchToFreePlan, updatePostalCode } from "./actions";
+import { createAdminClient } from "@/lib/supabase/admin";
+import type { EbayConnection, EbayListingDefaults, FeedbackItem, FeedbackStatus } from "@/lib/types";
+import { disconnectEbay, saveEbayDefaults, submitFeedback, switchToFreePlan, updatePostalCode } from "./actions";
 
 async function signOut() {
   "use server";
@@ -17,7 +18,8 @@ async function signOut() {
 
 export default async function AccountPage() {
   const { supabase, user, profile } = await requireProfile();
-  const [{ count: subscriptionCount }, { data: feedbackItems }] = await Promise.all([
+  const admin = createAdminClient();
+  const [{ count: subscriptionCount }, { data: feedbackItems }, { data: ebayConnection }, { data: ebayDefaults }] = await Promise.all([
     supabase.from("push_subscriptions").select("*", { count: "exact", head: true }).eq("user_id", user.id),
     supabase
       .from("feedback_items")
@@ -25,7 +27,9 @@ export default async function AccountPage() {
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(5)
-      .returns<FeedbackItem[]>()
+      .returns<FeedbackItem[]>(),
+    admin.from("ebay_connections").select("user_id,ebay_user_id,ebay_username,environment,token_scope,refresh_token_expires_at,connected_at,updated_at").eq("user_id", user.id).maybeSingle<EbayConnection>(),
+    supabase.from("ebay_listing_defaults").select("*").eq("user_id", user.id).maybeSingle<EbayListingDefaults>()
   ]);
 
   return (
@@ -91,6 +95,53 @@ export default async function AccountPage() {
           className="h-full"
         />
         <AccountPlanSwitcher currentPlan={profile?.plan ?? "free"} className="h-full" />
+      </section>
+
+      <section className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-start gap-3">
+            <Store className="mt-1 h-5 w-5 text-amber-300" />
+            <div>
+              <h2 className="font-bold text-white">eBay selling</h2>
+              <p className="mt-1 text-sm leading-6 text-slate-400">Connect eBay, save seller policy defaults, then publish inventory cards from the Inventory page.</p>
+              <p className="mt-2 text-xs text-slate-500">Seller Hub business policies and an inventory location are required before eBay will publish listings.</p>
+            </div>
+          </div>
+          {ebayConnection ? (
+            <form action={disconnectEbay}>
+              <button className="h-10 rounded-lg border border-rose-300/30 px-4 text-sm font-semibold text-rose-100">Disconnect eBay</button>
+            </form>
+          ) : (
+            <Link href="/api/ebay/oauth/start" className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-black text-slate-950">
+              <ExternalLink className="h-4 w-4" />
+              Connect eBay
+            </Link>
+          )}
+        </div>
+
+        <div className="mt-4 rounded-lg border border-white/10 bg-slate-950/45 p-3 text-sm">
+          <p className="font-semibold text-white">Status: {ebayConnection ? "Connected" : "Not connected"}</p>
+          {ebayConnection ? <p className="mt-1 text-xs text-slate-500">Environment: {ebayConnection.environment} - Connected {new Date(ebayConnection.connected_at).toLocaleString()}</p> : null}
+        </div>
+
+        <form action={saveEbayDefaults} className="mt-4 grid gap-3">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field name="marketplace_id" label="Marketplace" defaultValue={ebayDefaults?.marketplace_id ?? "EBAY_US"} />
+            <Field name="category_id" label="Category ID" defaultValue={ebayDefaults?.category_id ?? "183454"} />
+            <Field name="condition" label="Condition" defaultValue={ebayDefaults?.condition ?? "USED_EXCELLENT"} />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field name="merchant_location_key" label="Merchant location key" defaultValue={ebayDefaults?.merchant_location_key ?? ""} />
+            <Field name="fulfillment_policy_id" label="Shipping/fulfillment policy ID" defaultValue={ebayDefaults?.fulfillment_policy_id ?? ""} />
+            <Field name="payment_policy_id" label="Payment policy ID" defaultValue={ebayDefaults?.payment_policy_id ?? ""} />
+            <Field name="return_policy_id" label="Return policy ID" defaultValue={ebayDefaults?.return_policy_id ?? ""} />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[120px_120px_auto]">
+            <Field name="currency" label="Currency" defaultValue={ebayDefaults?.currency ?? "USD"} />
+            <Field name="listing_duration" label="Duration" defaultValue={ebayDefaults?.listing_duration ?? "GTC"} />
+            <button className="h-11 self-end rounded-lg bg-amber-300 px-4 text-sm font-semibold text-slate-950">Save eBay defaults</button>
+          </div>
+        </form>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
@@ -179,6 +230,15 @@ export default async function AccountPage() {
 
 function feedbackStatusLabel(status: FeedbackStatus) {
   return status.replace(/_/g, " ");
+}
+
+function Field({ name, label, defaultValue }: { name: string; label: string; defaultValue: string }) {
+  return (
+    <label className="grid gap-1">
+      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>
+      <input name={name} defaultValue={defaultValue} className="h-11 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300" />
+    </label>
+  );
 }
 
 function feedbackStatusClass(status: FeedbackStatus) {

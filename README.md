@@ -2,7 +2,7 @@
 
 PackWatcher is a standalone public MVP for TCG collectors: restock alerts, product watchlists, inventory tracking, and resale profit estimates. It is Pokemon-first and structured to expand into Magic, Lorcana, One Piece, sports cards, Yu-Gi-Oh, and more.
 
-PackWatcher does not implement auto-checkout, CAPTCHA bypassing, queue bypassing, account automation, retailer protection circumvention, or automated purchasing/selling.
+PackWatcher does not implement auto-checkout, CAPTCHA bypassing, queue bypassing, retailer protection circumvention, or automated purchasing/selling. eBay listing support is user-initiated only: the user reviews a draft and explicitly publishes it.
 
 ## Tech Stack
 
@@ -65,6 +65,13 @@ CLIPS_MAX_UPLOAD_MB=5120
 CLIPS_LOCAL_STORAGE_DIR=
 CLIPS_OPENAI_MODEL=gpt-4o-mini
 CLIPS_TCGCSV_MAX_GROUPS=40
+EBAY_ENVIRONMENT=production
+EBAY_CLIENT_ID=
+EBAY_CLIENT_SECRET=
+EBAY_RU_NAME=
+EBAY_TOKEN_ENCRYPTION_KEY=
+EBAY_MARKETPLACE_ID=EBAY_US
+EBAY_SCOPES=https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account
 ```
 
 `FFMPEG_PATH` is optional when `ffmpeg` is already available on your system `PATH`. On Windows, install FFmpeg and set this to the full binary path if needed, for example `C:\ffmpeg\bin\ffmpeg.exe`.
@@ -72,6 +79,40 @@ CLIPS_TCGCSV_MAX_GROUPS=40
 `OPENAI_API_KEY` is optional for PackWatcher Clips. Keep `CLIPS_ENABLE_OPENAI=false` to force free local/manual mode. If OpenAI is unavailable or quota-limited, the Clips workflow still works with FFmpeg thumbnails and manual confirmation.
 
 When `CLIPS_ENABLE_OPENAI=true`, Clips sends extracted reveal thumbnails to OpenAI for card-name recognition. Recognized card names are priced through the free TCGCSV data source. `CLIPS_TCGCSV_MAX_GROUPS` limits how many Pokemon set groups the value lookup scans per processing run.
+
+## eBay Selling
+
+PackWatcher can create user-reviewed eBay listings from Inventory cards through the official eBay OAuth and Sell Inventory APIs.
+
+Required setup:
+
+1. Create an eBay Developer application.
+2. Configure the app's OAuth accept URL to your PackWatcher callback:
+   - Local: `http://localhost:3000/api/ebay/oauth/callback`
+   - Production: `https://your-domain.com/api/ebay/oauth/callback`
+3. Copy the app Client ID, Client Secret, and RuName into `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`, and `EBAY_RU_NAME`.
+4. Set `EBAY_TOKEN_ENCRYPTION_KEY` to a long random secret. Changing it invalidates stored eBay refresh tokens.
+5. Add the eBay scopes in `.env.example`.
+6. Run `supabase/migrations/016_ebay_selling.sql`.
+7. In Account, connect eBay and save seller defaults:
+   - Merchant location key
+   - Payment policy ID
+   - Return policy ID
+   - Fulfillment/shipping policy ID
+   - Marketplace, category, condition, currency, duration
+
+The default Pokemon single-card category ID is `183454` for eBay's Individual Collectible Card Game Cards category. Users can override it per account or per listing.
+
+How to test:
+
+1. Connect eBay from Account.
+2. Save eBay listing defaults.
+3. Open Inventory.
+4. Click `Sell on eBay` on a card.
+5. Review the listing draft.
+6. Click `Publish and open eBay listing`.
+
+If eBay rejects the listing, PackWatcher stores the failed attempt and displays the eBay error on the listing draft page. Common failures are missing business policies, missing inventory location, invalid category, missing card image, or seller account restrictions.
 
 ## Supabase Setup
 

@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { ArrowDownAZ, CheckCircle2, Clock3, DollarSign, Grid2X2, Layers3, Save, Search, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { ArrowDownAZ, CheckCircle2, Clock3, DollarSign, ExternalLink, Grid2X2, Layers3, Save, Search, Trash2 } from "lucide-react";
 import { deleteInventoryItem, updateInventoryItem } from "@/app/(app)/inventory/actions";
 import { SetCombobox } from "@/components/set-combobox";
 import { calculateProfit, currency } from "@/lib/profit";
@@ -254,6 +255,10 @@ function InventoryRow({ item, setOptions }: { item: InventoryItem; setOptions: s
             <Metric icon={<Clock3 className="h-3.5 w-3.5" />} label="Cost" value={currency(item.purchase_price)} />
             <Metric icon={<ArrowDownAZ className="h-3.5 w-3.5" />} label="ROI" value={`${result.roi.toFixed(1)}%`} />
           </div>
+          <Link href={`/inventory/ebay/${item.id}`} className="mt-3 inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-amber-300/25 px-3 text-xs font-bold text-amber-100">
+            <ExternalLink className="h-3.5 w-3.5" />
+            Sell on eBay
+          </Link>
         </div>
       </div>
 

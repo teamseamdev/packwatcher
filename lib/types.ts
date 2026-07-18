@@ -122,6 +122,49 @@ export type InventoryItem = {
   created_at: string;
 };
 
+export type EbayConnection = {
+  user_id: string;
+  ebay_user_id: string | null;
+  ebay_username: string | null;
+  environment: string;
+  token_scope: string | null;
+  refresh_token_expires_at: string | null;
+  connected_at: string;
+  updated_at: string;
+};
+
+export type EbayListingDefaults = {
+  user_id: string;
+  marketplace_id: string;
+  category_id: string;
+  merchant_location_key: string | null;
+  payment_policy_id: string | null;
+  return_policy_id: string | null;
+  fulfillment_policy_id: string | null;
+  condition: string;
+  currency: string;
+  listing_duration: string;
+  updated_at: string;
+};
+
+export type EbayListing = {
+  id: string;
+  user_id: string;
+  inventory_item_id: string | null;
+  sku: string;
+  offer_id: string | null;
+  listing_id: string | null;
+  listing_url: string | null;
+  status: string;
+  title: string;
+  price: number;
+  quantity: number;
+  payload: Record<string, unknown> | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type FeedbackType = "suggestion" | "bug" | "issue" | "other";
 export type FeedbackStatus = "new" | "reviewed" | "in_progress" | "handled" | "closed";
 

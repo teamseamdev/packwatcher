@@ -8,7 +8,7 @@ export default function PrivacyPage() {
       <div className="mt-8 space-y-6 text-sm leading-7">
         <section>
           <h2 className="text-lg font-bold text-white">What We Collect</h2>
-          <p className="mt-2">PackWatcher collects account information such as your email address, plan status, saved ZIP code, tracked products, inventory entries, notification preferences, push subscription records, and usage data needed to operate the service.</p>
+          <p className="mt-2">PackWatcher collects account information such as your email address, plan status, saved ZIP code, tracked products, inventory entries, notification preferences, push subscription records, linked marketplace settings, and usage data needed to operate the service.</p>
         </section>
         <section>
           <h2 className="text-lg font-bold text-white">How We Use Data</h2>
@@ -17,6 +17,10 @@ export default function PrivacyPage() {
         <section>
           <h2 className="text-lg font-bold text-white">Payments</h2>
           <p className="mt-2">Payments are processed by Stripe. PackWatcher does not store full payment card numbers on its servers.</p>
+        </section>
+        <section>
+          <h2 className="text-lg font-bold text-white">Linked Marketplaces</h2>
+          <p className="mt-2">If you connect eBay, PackWatcher stores encrypted eBay authorization tokens and seller listing defaults so you can create listings from your inventory. You can disconnect eBay from the Account tab.</p>
         </section>
         <section>
           <h2 className="text-lg font-bold text-white">Notifications</h2>

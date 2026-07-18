@@ -83,6 +83,50 @@ create table public.billing_status (
   plan public.plan_type not null default 'free'
 );
 
+create table public.ebay_connections (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  ebay_user_id text,
+  ebay_username text,
+  environment text not null default 'production',
+  refresh_token_encrypted text not null,
+  token_scope text,
+  refresh_token_expires_at timestamptz,
+  connected_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table public.ebay_listing_defaults (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  marketplace_id text not null default 'EBAY_US',
+  category_id text not null default '183454',
+  merchant_location_key text,
+  payment_policy_id text,
+  return_policy_id text,
+  fulfillment_policy_id text,
+  condition text not null default 'USED_EXCELLENT',
+  currency text not null default 'USD',
+  listing_duration text not null default 'GTC',
+  updated_at timestamptz not null default now()
+);
+
+create table public.ebay_listings (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  inventory_item_id uuid references public.inventory_items(id) on delete set null,
+  sku text not null,
+  offer_id text,
+  listing_id text,
+  listing_url text,
+  status text not null default 'draft',
+  title text not null,
+  price numeric(10,2) not null default 0,
+  quantity integer not null default 1,
+  payload jsonb,
+  error_message text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table public.promo_codes (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
@@ -326,6 +370,9 @@ alter table public.stock_checks enable row level security;
 alter table public.notifications enable row level security;
 alter table public.inventory_items enable row level security;
 alter table public.billing_status enable row level security;
+alter table public.ebay_connections enable row level security;
+alter table public.ebay_listing_defaults enable row level security;
+alter table public.ebay_listings enable row level security;
 alter table public.promo_codes enable row level security;
 alter table public.promo_code_redemptions enable row level security;
 alter table public.app_usage_events enable row level security;
@@ -366,6 +413,15 @@ create policy "inventory admin select" on public.inventory_items for select usin
 
 create policy "billing own select" on public.billing_status for select using (auth.uid() = user_id);
 create policy "billing admin select" on public.billing_status for select using (public.is_admin());
+
+create policy "ebay connections admin all" on public.ebay_connections
+  for all using (public.is_admin()) with check (public.is_admin());
+create policy "ebay listing defaults own all" on public.ebay_listing_defaults
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "ebay listing defaults admin select" on public.ebay_listing_defaults for select using (public.is_admin());
+create policy "ebay listings own all" on public.ebay_listings
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "ebay listings admin select" on public.ebay_listings for select using (public.is_admin());
 
 create policy "promo codes admin all" on public.promo_codes
   for all using (public.is_admin()) with check (public.is_admin());
@@ -443,6 +499,9 @@ create index notifications_user_id_created_idx on public.notifications(user_id, 
 create index inventory_items_user_id_idx on public.inventory_items(user_id);
 create index inventory_items_user_set_idx on public.inventory_items(user_id, set_name);
 create index inventory_items_user_card_number_idx on public.inventory_items(user_id, card_number);
+create index ebay_listings_user_id_idx on public.ebay_listings(user_id);
+create index ebay_listings_inventory_item_id_idx on public.ebay_listings(inventory_item_id);
+create index ebay_listings_listing_id_idx on public.ebay_listings(listing_id);
 create index app_usage_events_user_kind_created_idx on public.app_usage_events(user_id, usage_kind, created_at desc);
 create index catalog_products_search_idx on public.catalog_products using gin (to_tsvector('english', name || ' ' || coalesce(set_name, '') || ' ' || coalesce(category, '') || ' ' || tcg));
 create index catalog_offers_product_id_idx on public.catalog_offers(catalog_product_id);
