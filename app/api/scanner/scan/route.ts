@@ -16,6 +16,7 @@ const ScanSchema = z.object({
   setName: z.string().trim().optional(),
   cardNumber: z.string().trim().optional(),
   variant: z.string().trim().optional(),
+  foilPreference: z.enum(["auto", "normal", "foil", "reverse_holo"]).default("auto"),
   packHint: z.string().trim().optional(),
   language: z.enum(["auto", "english", "japanese", "chinese_simplified", "chinese_traditional", "korean"]).default("auto")
 });
@@ -25,6 +26,7 @@ type DetectedScannerCard = {
   setName: string | null;
   cardNumber: string | null;
   variant: string | null;
+  foil: boolean;
   language: string | null;
   originalName: string | null;
   confidence: number;
@@ -36,6 +38,7 @@ type PricedScannerCard = {
   setName: string | null;
   cardNumber: string | null;
   variant: string | null;
+  foil: boolean;
   language: string | null;
   originalName: string | null;
   confidence: number;
@@ -60,7 +63,8 @@ export async function POST(request: Request) {
         cardName: parsed.cardName,
         setName: parsed.setName || null,
         cardNumber: normalizeCardNumber(parsed.cardNumber, parsed.packHint, parsed.setName),
-        variant: parsed.variant || null,
+        variant: parsed.variant || variantFromFoilPreference(parsed.foilPreference),
+        foil: isFoilVariant(parsed.variant || variantFromFoilPreference(parsed.foilPreference)),
         language: parsed.language,
         originalName: null,
         confidence: 1,
@@ -104,13 +108,14 @@ export async function POST(request: Request) {
       const candidates = await recognitionProvider.recognize({
         imageBase64: parsed.imageBase64,
         mimeType: parsed.mimeType ?? "image/jpeg",
-        notes: scannerScanNotes(parsed.language, parsed.packHint)
+        notes: scannerScanNotes(parsed.language, parsed.packHint, parsed.foilPreference)
       });
       detectedCards = candidates.map((candidate) => ({
             cardName: candidate.cardName,
             setName: candidate.setName ?? null,
             cardNumber: normalizeCardNumber(candidate.cardNumber, parsed.packHint, candidate.setName),
-            variant: candidate.variant ?? null,
+            variant: candidate.variant ?? variantFromFoilPreference(parsed.foilPreference),
+            foil: isFoilVariant(candidate.variant ?? variantFromFoilPreference(parsed.foilPreference)),
             language: normalizeDetectedLanguage(candidate.language ?? parsed.language, candidate.cardName, candidate.originalName, parsed.language),
             originalName: normalizeOriginalName(candidate.originalName, candidate.cardName),
             confidence: candidate.confidence,
@@ -196,6 +201,7 @@ async function priceCard(card: DetectedScannerCard, pricingProvider: TCGCSVProvi
     setName: card.setName ?? null,
     cardNumber: card.cardNumber ?? null,
     variant: card.variant ?? null,
+    foil: card.foil,
     language: card.language ?? null,
     originalName: card.originalName ?? null,
     confidence: card.confidence,
@@ -208,16 +214,35 @@ async function priceCard(card: DetectedScannerCard, pricingProvider: TCGCSVProvi
   };
 }
 
-function scannerScanNotes(language: z.infer<typeof ScanSchema>["language"], packHint?: string) {
+function scannerScanNotes(language: z.infer<typeof ScanSchema>["language"], packHint?: string, foilPreference: z.infer<typeof ScanSchema>["foilPreference"] = "auto") {
   return [
     scannerLanguageLabel(language),
     packHint ? `User pack/set hint: ${packHint}. Use this as context for likely set, expansion, language, and card numbering. If a collector number is clearly visible, combine that exact visible number with this pack/set hint to identify the exact card.` : null,
+    foilPreference !== "auto" ? `User selected finish/variant preference: ${variantFromFoilPreference(foilPreference)}. Use that for pricing unless the visible card clearly contradicts it.` : null,
     "Prioritize the card name/title text near the top edge of the card.",
     "Prioritize the collector number, set code, rarity, and regulation mark near the lower-left or lower edge.",
     "Only return cardNumber when you can read the number directly on this card image. Do not infer, reuse, copy from another card, or invent a collector number. If the number is blurry or blocked, return null.",
     "Do not use example collector numbers in your response.",
     "Ignore fingers, sleeves, playmats, pack wrappers, and background objects unless they clarify the set."
   ].filter(Boolean).join(" ");
+}
+
+function variantFromFoilPreference(preference: z.infer<typeof ScanSchema>["foilPreference"]) {
+  switch (preference) {
+    case "normal":
+      return "Normal";
+    case "foil":
+      return "Holofoil";
+    case "reverse_holo":
+      return "Reverse Holofoil";
+    case "auto":
+    default:
+      return null;
+  }
+}
+
+function isFoilVariant(variant?: string | null) {
+  return /foil|holo/i.test(variant ?? "");
 }
 
 function scannerLanguageLabel(language: z.infer<typeof ScanSchema>["language"]) {

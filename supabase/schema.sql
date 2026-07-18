@@ -65,6 +65,12 @@ create table public.inventory_items (
   shipping numeric(10,2) not null default 0,
   notes text,
   image_url text,
+  card_name text,
+  set_name text,
+  card_number text,
+  variant text,
+  foil boolean not null default false,
+  language text,
   created_at timestamptz not null default now()
 );
 
@@ -435,6 +441,8 @@ create index tracked_products_user_id_idx on public.tracked_products(user_id);
 create index stock_checks_product_id_checked_idx on public.stock_checks(tracked_product_id, checked_at desc);
 create index notifications_user_id_created_idx on public.notifications(user_id, created_at desc);
 create index inventory_items_user_id_idx on public.inventory_items(user_id);
+create index inventory_items_user_set_idx on public.inventory_items(user_id, set_name);
+create index inventory_items_user_card_number_idx on public.inventory_items(user_id, card_number);
 create index app_usage_events_user_kind_created_idx on public.app_usage_events(user_id, usage_kind, created_at desc);
 create index catalog_products_search_idx on public.catalog_products using gin (to_tsvector('english', name || ' ' || coalesce(set_name, '') || ' ' || coalesce(category, '') || ' ' || tcg));
 create index catalog_offers_product_id_idx on public.catalog_offers(catalog_product_id);

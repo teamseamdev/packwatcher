@@ -65,7 +65,13 @@ async function hydrateInventoryImages(items: InventoryItem[]) {
       continue;
     }
 
-    const lookup = parseInventoryLookup(item.name);
+    const lookup = {
+      ...parseInventoryLookup(item.name),
+      cardName: item.card_name ?? parseInventoryLookup(item.name).cardName,
+      cardNumber: item.card_number ?? parseInventoryLookup(item.name).cardNumber,
+      setName: item.set_name ?? parseInventoryLookup(item.name).setName,
+      variant: item.variant ?? null
+    };
     if (!lookup.cardName) {
       hydrated.push(item);
       continue;

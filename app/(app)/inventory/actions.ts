@@ -6,6 +6,12 @@ import { requireUser } from "@/lib/auth";
 
 const ItemSchema = z.object({
   name: z.string().min(1),
+  card_name: z.string().trim().optional().transform((value) => value || null),
+  set_name: z.string().trim().optional().transform((value) => value || null),
+  card_number: z.string().trim().optional().transform((value) => value || null),
+  variant: z.string().trim().optional().transform((value) => value || null),
+  foil: z.preprocess((value) => value === "on" || value === "true", z.boolean()),
+  language: z.string().trim().optional().transform((value) => value || null),
   quantity: z.coerce.number().int().min(1),
   purchase_price: z.coerce.number().min(0),
   purchase_date: z.string().optional().transform((value) => value || null),

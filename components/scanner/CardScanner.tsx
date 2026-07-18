@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/browser";
 
 type ScannerMode = "scanner";
 type ScannerLanguage = "auto" | "english" | "japanese" | "chinese_simplified" | "chinese_traditional" | "korean";
+type FoilPreference = "auto" | "normal" | "foil" | "reverse_holo";
 type ScanPhase = "idle" | "capturing" | "recognizing" | "pricing";
 type ScannerCard = {
   id: string;
@@ -16,6 +17,7 @@ type ScannerCard = {
   setName: string | null;
   cardNumber: string | null;
   variant: string | null;
+  foil: boolean;
   estimatedValue: number;
   confidence: number;
   recognitionSource: string;
@@ -68,6 +70,7 @@ export function CardScanner() {
   const [manualSet, setManualSet] = useState("");
   const [packHint, setPackHint] = useState("");
   const [language, setLanguage] = useState<ScannerLanguage>("auto");
+  const [foilPreference, setFoilPreference] = useState<FoilPreference>("auto");
   const [scanPhase, setScanPhase] = useState<ScanPhase>("idle");
   const [successFlash, setSuccessFlash] = useState(false);
   const [packOptions, setPackOptions] = useState<string[]>(FALLBACK_PACK_OPTIONS);
@@ -292,7 +295,7 @@ export function CardScanner() {
       const response = await fetch("/api/scanner/scan", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...dataUrlToPayload(variant), language, packHint: packHint.trim() || undefined })
+        body: JSON.stringify({ ...dataUrlToPayload(variant), language, foilPreference, packHint: packHint.trim() || undefined })
       });
       const scanned = await handleScanResponse(response, options);
       if (scanned) return scanned;
@@ -305,7 +308,7 @@ export function CardScanner() {
     const response = await fetch("/api/scanner/scan", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cardName, setName: setName || undefined, cardNumber: cardNumber || undefined, language, packHint: packHint.trim() || undefined })
+      body: JSON.stringify({ cardName, setName: setName || undefined, cardNumber: cardNumber || undefined, language, foilPreference, packHint: packHint.trim() || undefined })
     });
     return handleScanResponse(response);
   }
@@ -331,6 +334,7 @@ export function CardScanner() {
   function addCard(card: Omit<ScannerCard, "id" | "order" | "imageDataUrl">, imageDataUrl?: string | null) {
     const next: ScannerCard = {
       ...card,
+      foil: card.foil ?? isFoilVariant(card.variant),
       id: crypto.randomUUID(),
       order: cards.length + 1,
       imageDataUrl
@@ -377,6 +381,12 @@ export function CardScanner() {
     const rows = cards.map((card) => ({
       user_id: userId,
       name: [card.cardName, card.cardNumber, card.setName].filter(Boolean).join(" - "),
+      card_name: card.cardName,
+      set_name: card.setName,
+      card_number: card.cardNumber,
+      variant: card.variant,
+      foil: card.foil,
+      language: card.language,
       quantity: 1,
       purchase_price: roundMoney(purchasePricePerCard),
       estimated_sale_price: Number(card.estimatedValue || 0),
@@ -387,11 +397,17 @@ export function CardScanner() {
         "Added from PackWatcher Scanner",
         purchasePricePerCard > 0 ? `Allocated cost: ${currency(purchasePricePerCard)} per card from ${currency(totalScanCost)} total scan cost across ${cards.length} cards` : "Added without purchase cost",
         card.originalName ? `Printed name: ${card.originalName}` : null,
-        card.variant ? `Variant: ${card.variant}` : null
+        card.variant ? `Variant: ${card.variant}` : null,
+        card.foil ? "Foil: yes" : "Foil: no"
       ].filter(Boolean).join("\n")
     }));
 
     let { error: insertError } = await supabase.from("inventory_items").insert(rows);
+    if (insertError && /card_name|set_name|card_number|variant|foil|language|column/i.test(insertError.message)) {
+      const legacyRows = rows.map(({ card_name: _cardName, set_name: _setName, card_number: _cardNumber, variant: _variant, foil: _foil, language: _language, ...row }) => row);
+      const retry = await supabase.from("inventory_items").insert(legacyRows);
+      insertError = retry.error;
+    }
     if (insertError && /image_url/i.test(insertError.message)) {
       const rowsWithoutImages = rows.map(({ image_url: _imageUrl, ...row }) => row);
       const retry = await supabase.from("inventory_items").insert(rowsWithoutImages);
@@ -429,6 +445,7 @@ export function CardScanner() {
       setName: scanned.setName,
       cardNumber: scanned.cardNumber,
       variant: scanned.variant,
+      foil: scanned.foil,
       estimatedValue: scanned.estimatedValue,
       confidence: scanned.confidence,
       recognitionSource: scanned.recognitionSource,
@@ -440,7 +457,7 @@ export function CardScanner() {
   return (
     <div className="space-y-5">
       <section className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-4">
-        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_220px]">
+        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_220px_190px]">
           <div className="relative">
             <input
               value={packHint}
@@ -484,6 +501,16 @@ export function CardScanner() {
             <option value="chinese_simplified">Chinese simplified</option>
             <option value="chinese_traditional">Chinese traditional</option>
             <option value="korean">Korean</option>
+          </select>
+          <select
+            value={foilPreference}
+            onChange={(event) => setFoilPreference(event.target.value as FoilPreference)}
+            className="h-12 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm font-semibold text-slate-200 outline-none focus:border-amber-300"
+          >
+            <option value="auto">Auto finish</option>
+            <option value="normal">Normal / non-foil</option>
+            <option value="foil">Foil / holo</option>
+            <option value="reverse_holo">Reverse holo</option>
           </select>
         </div>
         <div className="mt-3">
@@ -624,7 +651,7 @@ export function CardScanner() {
                 />
               ) : <div className="grid h-20 w-16 place-items-center rounded-md bg-white/5 text-xs text-slate-500">Manual</div>}
               <div className="min-w-0">
-                <div className="grid gap-2 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_110px_120px]">
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_110px_140px_120px]">
                   <input
                     value={card.cardName}
                     onChange={(event) => updateCard(card.id, { cardName: event.target.value })}
@@ -645,6 +672,19 @@ export function CardScanner() {
                     className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-slate-100 outline-none focus:border-amber-300"
                     aria-label={`Card ${card.order} number`}
                   />
+                  <select
+                    value={card.variant ?? (card.foil ? "Holofoil" : "Normal")}
+                    onChange={(event) => {
+                      const variant = event.target.value || null;
+                      updateCard(card.id, { variant, foil: isFoilVariant(variant) });
+                    }}
+                    className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-slate-100 outline-none focus:border-amber-300"
+                    aria-label={`Card ${card.order} finish`}
+                  >
+                    <option value="Normal">Normal</option>
+                    <option value="Holofoil">Foil / holo</option>
+                    <option value="Reverse Holofoil">Reverse holo</option>
+                  </select>
                   <input
                     value={String(card.estimatedValue || 0)}
                     type="number"
@@ -809,7 +849,7 @@ function FullScreenScanner({
                 ) : <div className="grid h-20 w-14 shrink-0 place-items-center rounded-lg bg-white/10 text-[10px] text-white/50">Manual</div>}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-black">{card.cardName}</p>
-                  <p className="truncate text-xs text-white/60">{[card.cardNumber, card.setName].filter(Boolean).join(" - ") || "No set details"}</p>
+                  <p className="truncate text-xs text-white/60">{[card.cardNumber, card.setName, card.variant].filter(Boolean).join(" - ") || "No set details"}</p>
                   <p className="mt-1 text-base font-black text-emerald-300">{currency(card.estimatedValue)}</p>
                 </div>
               </div>
@@ -1062,6 +1102,10 @@ function languageLabel(language: string | null) {
   return language.replace(/_/g, " ");
 }
 
+function isFoilVariant(variant?: string | null) {
+  return /foil|holo/i.test(variant ?? "");
+}
+
 function cleanOption(value: string | null | undefined) {
   const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
   if (!text || text.length < 2) return null;
@@ -1086,6 +1130,7 @@ function exportResultsPdf(cards: ScannerCard[], totalValue: number, totalCost = 
       `${card.order}. ${card.cardName} - ${currency(card.estimatedValue)}`,
       totalCost > 0 ? `   Allocated cost: ${currency(costPerCard)} | Profit/Loss: ${currency(card.estimatedValue - costPerCard)}` : "",
       card.originalName ? `   Printed name: ${card.originalName}` : "",
+      `   Finish: ${card.variant ?? (card.foil ? "Foil" : "Normal")}`,
       `   ${[card.setName, card.cardNumber, card.variant, languageLabel(card.language)].filter(Boolean).join(" | ") || "No set details"}`,
       ""
     ])

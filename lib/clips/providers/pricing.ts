@@ -7,6 +7,15 @@ export type PricingCandidate = {
   imageUrl?: string | null;
 };
 
+export type SetChecklistCard = {
+  key: string;
+  name: string;
+  setName: string;
+  cardNumber: string | null;
+  variant: string | null;
+  imageUrl: string | null;
+};
+
 export type PricingProvider = {
   name: string;
   price(input: { cardName: string; setName?: string | null; cardNumber?: string | null; variant?: string | null }): Promise<PricingCandidate[]>;
@@ -25,6 +34,10 @@ export class TCGCSVProvider implements PricingProvider {
 
   async price(input: { cardName: string; setName?: string | null; cardNumber?: string | null; variant?: string | null }): Promise<PricingCandidate[]> {
     return searchTcgCsvPrice(input);
+  }
+
+  async listSetCards(setName: string): Promise<SetChecklistCard[]> {
+    return listTcgCsvSetCards(setName);
   }
 }
 
@@ -114,6 +127,34 @@ async function searchTcgCsvPrice(input: { cardName: string; setName?: string | n
   return candidates.sort((a, b) => b.confidence - a.confidence);
 }
 
+async function listTcgCsvSetCards(setName: string) {
+  const normalizedSet = normalize(setName);
+  if (!normalizedSet) return [];
+
+  const groups = await getGroups();
+  const selectedGroups = selectGroups(groups, setName)
+    .filter((group) => {
+      const groupName = normalize(group.name);
+      return groupName.includes(normalizedSet) || normalizedSet.includes(groupName);
+    })
+    .slice(0, 4);
+
+  const cards = new Map<string, SetChecklistCard>();
+  for (const group of selectedGroups) {
+    const data = await getGroupData(group);
+    for (const product of data.products) {
+      if (isLikelySealedProduct(product.name)) continue;
+      const parsed = parseProductCard(product, group.name);
+      if (!parsed.name || (!parsed.cardNumber && cards.size > 220)) continue;
+      const key = checklistKey(parsed.name, parsed.cardNumber);
+      const existing = cards.get(key);
+      if (!existing || preferChecklistProduct(parsed, existing)) cards.set(key, parsed);
+    }
+  }
+
+  return Array.from(cards.values()).sort(compareChecklistCards);
+}
+
 async function tcgcsvFetch<T>(path: string): Promise<T[]> {
   const response = await fetch(`${TCGCSV_BASE}${path}`, {
     headers: { "user-agent": "PackWatcher/0.1 clips pricing" },
@@ -162,6 +203,7 @@ function bestProductMatch(products: TcgCsvProduct[], input: { cardName: string; 
 }
 
 function scoreProduct(product: TcgCsvProduct, input: { cardName: string; cardNumber?: string | null; variant?: string | null }) {
+  const rawProductName = `${product.cleanName ?? product.name}`.toLowerCase();
   const productName = normalize(product.cleanName ?? product.name);
   const cardName = normalize(input.cardName);
   if (!productName || !cardName) return 0;
@@ -172,9 +214,22 @@ function scoreProduct(product: TcgCsvProduct, input: { cardName: string; cardNum
   else score += tokenSimilarity(productName, cardName) * 0.72;
 
   if (input.cardNumber && productName.includes(normalize(input.cardNumber))) score += 0.12;
-  if (input.variant && productName.includes(normalize(input.variant))) score += 0.08;
+  const variantScore = scoreVariant(rawProductName, input.variant);
+  score += variantScore;
 
   return Math.min(1, score);
+}
+
+function scoreVariant(productName: string, variant?: string | null) {
+  const requested = normalizeVariant(variant);
+  if (!requested) return 0;
+
+  const isReverse = /reverse\s*holo|reverse\s*holofoil/.test(productName);
+  const isFoil = /holofoil|holo\s*foil|foil|holo/.test(productName);
+  if (requested === "reverse_holo") return isReverse ? 0.16 : -0.12;
+  if (requested === "foil") return isFoil && !isReverse ? 0.14 : -0.08;
+  if (requested === "normal") return !isFoil ? 0.08 : -0.06;
+  return 0;
 }
 
 function tokenSimilarity(left: string, right: string) {
@@ -209,4 +264,70 @@ function thisSource(product: TcgCsvProduct, group: TcgCsvGroup) {
 
 function productImageUrl(product: TcgCsvProduct) {
   return product.imageUrl ?? product.image_url ?? product.image ?? `https://tcgplayer-cdn.tcgplayer.com/product/${product.productId}_in_1000x1000.jpg`;
+}
+
+function parseProductCard(product: TcgCsvProduct, setName: string): SetChecklistCard {
+  const rawName = product.cleanName ?? product.name;
+  const parts = rawName.split(" - ").map((part) => part.trim()).filter(Boolean);
+  const cardNumber = rawName.match(/\b\d{1,4}\s*\/\s*\d{1,4}\b/)?.[0]?.replace(/\s+/g, "") ?? null;
+  const variant = extractVariant(rawName);
+  const name = cleanCardName(parts[0] ?? rawName);
+  return {
+    key: checklistKey(name, cardNumber),
+    name,
+    setName,
+    cardNumber,
+    variant,
+    imageUrl: productImageUrl(product)
+  };
+}
+
+function cleanCardName(value: string) {
+  return value
+    .replace(/\b(reverse holofoil|holofoil|normal)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractVariant(value: string) {
+  const text = value.toLowerCase();
+  if (/reverse\s*holo|reverse\s*holofoil/.test(text)) return "Reverse Holofoil";
+  if (/holofoil|holo\s*foil|foil|holo/.test(text)) return "Holofoil";
+  return null;
+}
+
+function normalizeVariant(value?: string | null) {
+  const text = (value ?? "").toLowerCase();
+  if (!text || text === "auto") return null;
+  if (/reverse/.test(text)) return "reverse_holo";
+  if (/foil|holo/.test(text)) return "foil";
+  if (/normal|nonfoil|non-foil/.test(text)) return "normal";
+  return null;
+}
+
+function checklistKey(name: string, cardNumber?: string | null) {
+  return `${normalize(cardNumber ?? "") || "no-number"}:${normalize(name)}`;
+}
+
+function preferChecklistProduct(next: SetChecklistCard, existing: SetChecklistCard) {
+  if (next.cardNumber && !existing.cardNumber) return true;
+  if (next.imageUrl && !existing.imageUrl) return true;
+  if (!next.variant && existing.variant) return true;
+  return false;
+}
+
+function compareChecklistCards(left: SetChecklistCard, right: SetChecklistCard) {
+  const leftNumber = collectorNumberValue(left.cardNumber);
+  const rightNumber = collectorNumberValue(right.cardNumber);
+  if (leftNumber !== rightNumber) return leftNumber - rightNumber;
+  return left.name.localeCompare(right.name);
+}
+
+function collectorNumberValue(value?: string | null) {
+  const match = value?.match(/\d{1,4}/);
+  return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
+}
+
+function isLikelySealedProduct(name: string) {
+  return /\b(booster|bundle|box|elite trainer|collection|tin|sleeved|blister|pack|deck|toolkit|stadium|display)\b/i.test(name);
 }
