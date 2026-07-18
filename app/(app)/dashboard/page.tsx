@@ -31,6 +31,7 @@ export default async function DashboardPage() {
   const trackedProducts = products ?? [];
   const owned = inventory ?? [];
   const collectionValue = owned.reduce((sum, item) => sum + item.estimated_sale_price * item.quantity, 0);
+  const collectionCost = owned.reduce((sum, item) => sum + item.purchase_price * item.quantity, 0);
   const estimatedProfit = owned.reduce((sum, item) => sum + calculateProfit({
     estimatedSalePrice: item.estimated_sale_price,
     purchasePrice: item.purchase_price,
@@ -38,6 +39,7 @@ export default async function DashboardPage() {
     shipping: item.shipping,
     quantity: item.quantity
   }).profit, 0);
+  const collectionRoi = collectionCost > 0 ? (estimatedProfit / collectionCost) * 100 : 0;
   const needsZip = !profile?.postal_code;
   const needsPush = !subscriptionCount;
 
@@ -105,6 +107,9 @@ export default async function DashboardPage() {
         </DashboardLink>
         <DashboardLink href="/inventory">
           <StatCard title="Estimated Profit" value={currency(estimatedProfit)} detail="Open profit details" icon={<TrendingUp />} />
+        </DashboardLink>
+        <DashboardLink href="/inventory">
+          <StatCard title="Inventory ROI" value={`${collectionRoi.toFixed(1)}%`} detail={`Cost basis ${currency(collectionCost)}`} icon={<TrendingUp />} />
         </DashboardLink>
         <DashboardLink href="/watchlist#tracked">
           <StatCard title="Last Stock Checks" value={checks?.length ?? 0} detail={checks?.[0]?.checked_at ? new Date(checks[0].checked_at).toLocaleString() : "No checks yet"} icon={<Clock />} />

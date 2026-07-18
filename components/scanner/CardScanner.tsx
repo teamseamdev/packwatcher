@@ -73,8 +73,14 @@ export function CardScanner() {
   const [packOptions, setPackOptions] = useState<string[]>(FALLBACK_PACK_OPTIONS);
   const [packOptionsOpen, setPackOptionsOpen] = useState(false);
   const [cardReady, setCardReady] = useState(false);
+  const [inventoryCostOpen, setInventoryCostOpen] = useState(false);
+  const [scanTotalCost, setScanTotalCost] = useState("");
 
   const totalValue = useMemo(() => cards.reduce((sum, card) => sum + card.estimatedValue, 0), [cards]);
+  const totalScanCost = Number(scanTotalCost || 0);
+  const costPerCard = cards.length && Number.isFinite(totalScanCost) ? totalScanCost / cards.length : 0;
+  const scanProfit = totalValue - (Number.isFinite(totalScanCost) ? totalScanCost : 0);
+  const scanRoi = totalScanCost > 0 ? (scanProfit / totalScanCost) * 100 : 0;
   const visiblePackOptions = useMemo(() => {
     const query = packHint.trim().toLowerCase();
     const options = query
@@ -352,7 +358,7 @@ export function CardScanner() {
     removeCard(id);
   }
 
-  async function addScansToInventory() {
+  async function addScansToInventory(purchasePricePerCard: number) {
     if (!cards.length) return;
 
     setIsScanning(true);
@@ -372,13 +378,14 @@ export function CardScanner() {
       user_id: userId,
       name: [card.cardName, card.cardNumber, card.setName].filter(Boolean).join(" - "),
       quantity: 1,
-      purchase_price: 0,
+      purchase_price: roundMoney(purchasePricePerCard),
       estimated_sale_price: Number(card.estimatedValue || 0),
       fees: 0,
       shipping: 0,
       image_url: card.referenceImageUrl ?? card.imageDataUrl ?? null,
       notes: [
         "Added from PackWatcher Scanner",
+        purchasePricePerCard > 0 ? `Allocated cost: ${currency(purchasePricePerCard)} per card from ${currency(totalScanCost)} total scan cost across ${cards.length} cards` : "Added without purchase cost",
         card.originalName ? `Printed name: ${card.originalName}` : null,
         card.variant ? `Variant: ${card.variant}` : null
       ].filter(Boolean).join("\n")
@@ -396,7 +403,9 @@ export function CardScanner() {
       setError(`Could not add scans to inventory: ${insertError.message}`);
       return;
     }
-    setNotice(`Added ${cards.length} scanned card${cards.length === 1 ? "" : "s"} to inventory.`);
+    setInventoryCostOpen(false);
+    setScanTotalCost("");
+    setNotice(`Added ${cards.length} scanned card${cards.length === 1 ? "" : "s"} to inventory${purchasePricePerCard > 0 ? ` with ${currency(purchasePricePerCard)} cost per card` : " without purchase cost"}.`);
   }
 
   async function lookupCard(card: ScannerCard) {
@@ -530,16 +539,79 @@ export function CardScanner() {
             <p className="mt-1 text-sm text-slate-400">{cards.length} card{cards.length === 1 ? "" : "s"} scanned - Total value {currency(totalValue)}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => void addScansToInventory()} disabled={!cards.length || isScanning} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-emerald-300/40 px-4 text-sm font-bold text-emerald-100 disabled:opacity-50">
+            <button onClick={() => setInventoryCostOpen(true)} disabled={!cards.length || isScanning} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-emerald-300/40 px-4 text-sm font-bold text-emerald-100 disabled:opacity-50">
               <Plus className="h-4 w-4" />
               Add to inventory
             </button>
-            <button onClick={() => exportResultsPdf(cards, totalValue)} disabled={!cards.length} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-bold text-slate-950 disabled:opacity-50">
+            <button onClick={() => exportResultsPdf(cards, totalValue, Number.isFinite(totalScanCost) ? totalScanCost : 0)} disabled={!cards.length} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-bold text-slate-950 disabled:opacity-50">
               <FileDown className="h-4 w-4" />
               Export PDF
             </button>
           </div>
         </div>
+
+        {cards.length ? (
+          <div className="mt-4 rounded-lg border border-cyan-300/15 bg-cyan-300/5 p-4">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_repeat(3,120px)]">
+              <label>
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total pack/card cost</span>
+                <input
+                  value={scanTotalCost}
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  onChange={(event) => setScanTotalCost(event.target.value)}
+                  placeholder="Optional, e.g. 42.00"
+                  className="mt-1 h-11 w-full rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300"
+                />
+              </label>
+              <ScanMetric label="Cost/card" value={currency(costPerCard)} />
+              <ScanMetric label="Profit" value={currency(scanProfit)} tone={scanProfit >= 0 ? "positive" : "negative"} />
+              <ScanMetric label="ROI" value={totalScanCost > 0 ? `${scanRoi.toFixed(1)}%` : "0.0%"} />
+            </div>
+            <p className="mt-2 text-xs text-slate-500">This cost is used for inventory purchase cost and PDF ROI. Leave blank if you do not know the pack cost.</p>
+          </div>
+        ) : null}
+
+        {inventoryCostOpen ? (
+          <div className="mt-4 rounded-lg border border-emerald-300/25 bg-emerald-400/10 p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <h3 className="font-bold text-white">Confirm inventory cost</h3>
+                <p className="mt-1 text-sm leading-6 text-slate-300">
+                  Enter the total cost of the packs/cards scanned. PackWatcher will divide it across {cards.length} scanned card{cards.length === 1 ? "" : "s"}.
+                </p>
+              </div>
+              <button type="button" onClick={() => setInventoryCostOpen(false)} className="h-9 rounded-lg border border-white/10 px-3 text-xs font-semibold text-slate-200">
+                Cancel
+              </button>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <ScanMetric label="Total cost" value={currency(totalScanCost)} />
+              <ScanMetric label="Cost/card" value={currency(costPerCard)} />
+              <ScanMetric label="Inventory ROI" value={totalScanCost > 0 ? `${scanRoi.toFixed(1)}%` : "0.0%"} />
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void addScansToInventory(costPerCard)}
+                disabled={isScanning || !cards.length || totalScanCost <= 0}
+                className="inline-flex h-10 items-center justify-center rounded-lg bg-amber-300 px-4 text-sm font-bold text-slate-950 disabled:opacity-50"
+              >
+                Add with cost
+              </button>
+              <button
+                type="button"
+                onClick={() => void addScansToInventory(0)}
+                disabled={isScanning || !cards.length}
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-white/10 px-4 text-sm font-semibold text-slate-200 disabled:opacity-50"
+              >
+                Confirm add without cost
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-4 max-h-[520px] space-y-3 overflow-y-auto pr-1">
           {cards.length ? cards.map((card) => (
@@ -767,6 +839,16 @@ function reorderCards(cards: ScannerCard[]) {
   return cards.map((card, index) => ({ ...card, order: index + 1 }));
 }
 
+function ScanMetric({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "neutral" | "positive" | "negative" }) {
+  const toneClass = tone === "positive" ? "text-emerald-200" : tone === "negative" ? "text-rose-200" : "text-white";
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/30 p-3">
+      <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
+      <p className={`mt-1 text-xl font-black ${toneClass}`}>{value}</p>
+    </div>
+  );
+}
+
 function captureVideoFrame(video: HTMLVideoElement) {
   const canvas = document.createElement("canvas");
   canvas.width = video.videoWidth || 960;
@@ -971,6 +1053,10 @@ function currency(value: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value || 0);
 }
 
+function roundMoney(value: number) {
+  return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+}
+
 function languageLabel(language: string | null) {
   if (!language || language === "auto") return null;
   return language.replace(/_/g, " ");
@@ -982,15 +1068,23 @@ function cleanOption(value: string | null | undefined) {
   return text;
 }
 
-function exportResultsPdf(cards: ScannerCard[], totalValue: number) {
+function exportResultsPdf(cards: ScannerCard[], totalValue: number, totalCost = 0) {
+  const costPerCard = cards.length && totalCost > 0 ? totalCost / cards.length : 0;
+  const profit = totalValue - totalCost;
+  const roi = totalCost > 0 ? (profit / totalCost) * 100 : 0;
   const lines = [
     "PackWatcher Scanner Results",
     `Generated: ${new Date().toLocaleString()}`,
     `Cards scanned: ${cards.length}`,
     `Total estimated value: ${currency(totalValue)}`,
+    `Total cost: ${currency(totalCost)}`,
+    `Cost per card: ${currency(costPerCard)}`,
+    `Profit/Loss: ${currency(profit)}`,
+    `ROI: ${totalCost > 0 ? `${roi.toFixed(1)}%` : "0.0%"}`,
     "",
     ...cards.flatMap((card) => [
       `${card.order}. ${card.cardName} - ${currency(card.estimatedValue)}`,
+      totalCost > 0 ? `   Allocated cost: ${currency(costPerCard)} | Profit/Loss: ${currency(card.estimatedValue - costPerCard)}` : "",
       card.originalName ? `   Printed name: ${card.originalName}` : "",
       `   ${[card.setName, card.cardNumber, card.variant, languageLabel(card.language)].filter(Boolean).join(" | ") || "No set details"}`,
       ""
