@@ -2,6 +2,7 @@
 
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCircle2, FileDown, Loader2, Plus, ScanLine, Search, Trash2, X } from "lucide-react";
+import { SetCombobox } from "@/components/set-combobox";
 import { createClient } from "@/lib/supabase/browser";
 
 type ScannerMode = "scanner";
@@ -35,7 +36,7 @@ type ScanResponse = {
 };
 
 const CARD_READINESS_INTERVAL_MS = 450;
-const FALLBACK_PACK_OPTIONS = [
+const FALLBACK_SET_OPTIONS = [
   "Pokemon 151",
   "Prismatic Evolutions",
   "Surging Sparks",
@@ -73,8 +74,7 @@ export function CardScanner() {
   const [foilPreference, setFoilPreference] = useState<FoilPreference>("auto");
   const [scanPhase, setScanPhase] = useState<ScanPhase>("idle");
   const [successFlash, setSuccessFlash] = useState(false);
-  const [packOptions, setPackOptions] = useState<string[]>(FALLBACK_PACK_OPTIONS);
-  const [packOptionsOpen, setPackOptionsOpen] = useState(false);
+  const [setOptions, setSetOptions] = useState<string[]>(FALLBACK_SET_OPTIONS);
   const [cardReady, setCardReady] = useState(false);
   const [inventoryCostOpen, setInventoryCostOpen] = useState(false);
   const [scanTotalCost, setScanTotalCost] = useState("");
@@ -84,14 +84,6 @@ export function CardScanner() {
   const costPerCard = cards.length && Number.isFinite(totalScanCost) ? totalScanCost / cards.length : 0;
   const scanProfit = totalValue - (Number.isFinite(totalScanCost) ? totalScanCost : 0);
   const scanRoi = totalScanCost > 0 ? (scanProfit / totalScanCost) * 100 : 0;
-  const visiblePackOptions = useMemo(() => {
-    const query = packHint.trim().toLowerCase();
-    const options = query
-      ? packOptions.filter((option) => option.toLowerCase().includes(query))
-      : packOptions;
-    return options.slice(0, 40);
-  }, [packHint, packOptions]);
-
   useEffect(() => {
     return () => {
       stopCamera();
@@ -131,33 +123,25 @@ export function CardScanner() {
   useEffect(() => {
     let ignore = false;
 
-    async function loadPackOptions() {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("catalog_products")
-        .select("name,title,set_name,product_type")
-        .eq("tcg", "pokemon")
-        .order("tracking_count", { ascending: false })
-        .limit(400);
-
-      if (ignore || !data?.length) return;
-      const names = new Set<string>();
-      for (const product of data) {
-        const name = cleanOption(product.title || product.name);
-        if (name) names.add(name);
-        const setName = cleanOption(product.set_name);
-        if (setName) names.add(setName);
-      }
-      setPackOptions(Array.from(new Set([...Array.from(names), ...FALLBACK_PACK_OPTIONS])).slice(0, 500));
+    async function loadSetOptions() {
+      const response = await fetch("/api/card-sets");
+      const body = await response.json().catch(() => null) as { ok?: boolean; sets?: string[] } | null;
+      if (ignore || !response.ok || !body?.sets?.length) return;
+      setSetOptions(Array.from(new Set([...body.sets, ...FALLBACK_SET_OPTIONS])).sort((left, right) => left.localeCompare(right)));
     }
 
-    void loadPackOptions();
+    void loadSetOptions();
     return () => {
       ignore = true;
     };
   }, []);
 
   async function startCamera(nextMode = mode) {
+    if (!packHint.trim()) {
+      const shouldContinue = window.confirm("No Pokemon set is selected. You can proceed, but scanning and pricing may be less accurate. Continue without a set?");
+      if (!shouldContinue) return;
+    }
+
     setError(null);
     setNotice(null);
     setMode(nextMode);
@@ -256,7 +240,7 @@ export function CardScanner() {
         return;
       }
 
-      const card = addCard(scanned, scannedImage);
+      const card = addCard({ ...scanned, setName: packHint.trim() || scanned.setName }, scannedImage);
       showScannedCard(card);
       setNotice(null);
     } finally {
@@ -274,7 +258,7 @@ export function CardScanner() {
     setIsScanning(true);
     setScanPhase("pricing");
     setError(null);
-    const scanned = await scanManualCard(manualName, manualSet);
+    const scanned = await scanManualCard(manualName, manualSet || packHint);
     setIsScanning(false);
     setScanPhase("idle");
     if (!scanned) return;
@@ -458,38 +442,7 @@ export function CardScanner() {
     <div className="space-y-5">
       <section className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-4">
         <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_220px_190px]">
-          <div className="relative">
-            <input
-              value={packHint}
-              onChange={(event) => {
-                setPackHint(event.target.value);
-                setPackOptionsOpen(true);
-              }}
-              onFocus={() => setPackOptionsOpen(true)}
-              onBlur={() => window.setTimeout(() => setPackOptionsOpen(false), 120)}
-              placeholder="Choose pack, box, or set"
-              autoComplete="off"
-              className="h-12 w-full rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-slate-100 outline-none focus:border-amber-300"
-            />
-            {packOptionsOpen && visiblePackOptions.length ? (
-              <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-30 max-h-56 overflow-y-auto rounded-lg border border-white/10 bg-slate-950 p-1 shadow-2xl">
-                {visiblePackOptions.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => {
-                      setPackHint(option);
-                      setPackOptionsOpen(false);
-                    }}
-                    className="block w-full rounded-md px-3 py-2 text-left text-sm text-slate-100 hover:bg-white/10"
-                  >
-                    {option}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
+          <SetCombobox value={packHint} onChange={setPackHint} options={setOptions} placeholder="Search Pokemon set" />
           <select
             value={language}
             onChange={(event) => setLanguage(event.target.value as ScannerLanguage)}
@@ -515,7 +468,7 @@ export function CardScanner() {
         </div>
         <div className="mt-3">
           <p className="rounded-lg border border-white/10 bg-slate-950/40 px-3 py-2 text-xs text-slate-400">
-            Helps match card names, numbers, and set context.
+            Choose the set before scanning. Every scanned card will be saved to this set unless you edit it afterward.
           </p>
         </div>
       </section>
@@ -550,7 +503,7 @@ export function CardScanner() {
           <p className="mt-1 text-sm text-slate-400">Use this if the camera cannot read the card yet.</p>
           <div className="mt-4 grid gap-2">
             <input value={manualName} onChange={(event) => setManualName(event.target.value)} placeholder="Card name" className="h-11 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300" />
-            <input value={manualSet} onChange={(event) => setManualSet(event.target.value)} placeholder="Optional set name" className="h-11 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300" />
+            <SetCombobox value={manualSet} onChange={setManualSet} options={setOptions} placeholder={packHint ? `Default: ${packHint}` : "Search set"} />
             <button onClick={() => void addManualCard()} disabled={isScanning} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-white/10 px-4 text-sm font-semibold text-slate-200">
               <Plus className="h-4 w-4" />
               Add card

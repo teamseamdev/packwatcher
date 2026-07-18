@@ -39,6 +39,14 @@ export class TCGCSVProvider implements PricingProvider {
   async listSetCards(setName: string): Promise<SetChecklistCard[]> {
     return listTcgCsvSetCards(setName);
   }
+
+  async listSets(): Promise<string[]> {
+    const groups = await getGroups();
+    return groups
+      .map((group) => group.name)
+      .filter((name) => !isLikelySealedProduct(name))
+      .sort((left, right) => left.localeCompare(right));
+  }
 }
 
 export class PriceChartingProvider implements PricingProvider {
@@ -132,12 +140,7 @@ async function listTcgCsvSetCards(setName: string) {
   if (!normalizedSet) return [];
 
   const groups = await getGroups();
-  const selectedGroups = selectGroups(groups, setName)
-    .filter((group) => {
-      const groupName = normalize(group.name);
-      return groupName.includes(normalizedSet) || normalizedSet.includes(groupName);
-    })
-    .slice(0, 4);
+  const selectedGroups = selectChecklistGroups(groups, setName).slice(0, 3);
 
   const cards = new Map<string, SetChecklistCard>();
   for (const group of selectedGroups) {
@@ -192,6 +195,33 @@ function selectGroups(groups: TcgCsvGroup[], setName?: string | null) {
   const preferred = groups.filter((group) => normalize(group.name).includes(normalizedSet) || normalizedSet.includes(normalize(group.name)));
   const rest = groups.filter((group) => !preferred.includes(group));
   return [...preferred, ...rest];
+}
+
+function selectChecklistGroups(groups: TcgCsvGroup[], setName: string) {
+  const normalizedSet = normalize(setName);
+  const queryTokens = setTokens(normalizedSet);
+
+  return groups
+    .map((group) => {
+      const groupName = normalize(group.name);
+      const groupTokens = setTokens(groupName);
+      const tokenHits = queryTokens.filter((token) => groupTokens.includes(token)).length;
+      const score = groupName === normalizedSet
+        ? 10
+        : groupName.includes(normalizedSet) || normalizedSet.includes(groupName)
+          ? 8
+          : queryTokens.length
+            ? tokenHits / queryTokens.length
+            : 0;
+      return { group, score };
+    })
+    .filter((item) => item.score >= 0.45)
+    .sort((left, right) => right.score - left.score)
+    .map((item) => item.group);
+}
+
+function setTokens(value: string) {
+  return value.split(" ").filter((token) => token.length > 2 && !["the", "and", "set", "card", "cards"].includes(token));
 }
 
 function bestProductMatch(products: TcgCsvProduct[], input: { cardName: string; cardNumber?: string | null; variant?: string | null }) {

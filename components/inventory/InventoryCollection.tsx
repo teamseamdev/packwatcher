@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { ArrowDownAZ, CheckCircle2, Clock3, DollarSign, Grid2X2, Layers3, Save, Search, Trash2 } from "lucide-react";
 import { deleteInventoryItem, updateInventoryItem } from "@/app/(app)/inventory/actions";
+import { SetCombobox } from "@/components/set-combobox";
 import { calculateProfit, currency } from "@/lib/profit";
 import type { InventoryItem } from "@/lib/types";
 
@@ -33,6 +34,7 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
   const [setFilter, setSetFilter] = useState("all");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [checklist, setChecklist] = useState<SetChecklistCard[]>([]);
+  const [allSetOptions, setAllSetOptions] = useState<string[]>([]);
   const [checklistStatus, setChecklistStatus] = useState<"idle" | "loading" | "ready" | "failed">("idle");
 
   const setOptions = useMemo(() => {
@@ -45,6 +47,23 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
   }, [items]);
 
   const selectedSet = setFilter !== "all" ? setFilter : setOptions[0] ?? "";
+  const searchableSetOptions = useMemo(
+    () => Array.from(new Set([...allSetOptions, ...setOptions])).sort((left, right) => left.localeCompare(right)),
+    [allSetOptions, setOptions]
+  );
+
+  useEffect(() => {
+    let ignore = false;
+    async function loadSets() {
+      const response = await fetch("/api/card-sets");
+      const body = await response.json().catch(() => null) as { ok?: boolean; sets?: string[] } | null;
+      if (!ignore && response.ok && body?.sets?.length) setAllSetOptions(body.sets);
+    }
+    void loadSets();
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (viewMode !== "set" || !selectedSet) return;
@@ -110,7 +129,7 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
     () => items.filter((item) => selectedSet && inventorySetName(item) === selectedSet),
     [items, selectedSet]
   );
-  const ownedChecklist = useMemo(() => buildOwnedSetChecklist(checklist, selectedSetItems, selectedSet), [checklist, selectedSetItems, selectedSet]);
+  const ownedChecklist = useMemo(() => buildOwnedSetChecklist(checklist, selectedSetItems), [checklist, selectedSetItems]);
 
   return (
     <section className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-4">
@@ -135,7 +154,7 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
             className="h-11 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm font-semibold text-slate-200 outline-none focus:border-amber-300 sm:max-w-56"
           >
             <option value="all">All sets</option>
-            {setOptions.map((setName) => <option key={setName} value={setName}>{setName}</option>)}
+            {searchableSetOptions.map((setName) => <option key={setName} value={setName}>{setName}</option>)}
           </select>
           <select
             value={sortMode}
@@ -169,7 +188,7 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
       <div className="scroll-panel mt-4 max-h-[68vh] space-y-3 pr-1">
         {viewMode === "list" ? (
           filteredItems.length ? filteredItems.map((item) => (
-            <InventoryRow key={item.id} item={item} />
+            <InventoryRow key={item.id} item={item} setOptions={searchableSetOptions} />
           )) : (
             <div className="rounded-lg border border-dashed border-white/10 p-8 text-center text-sm text-slate-400">
               No inventory items match this filter.
@@ -188,7 +207,7 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
   );
 }
 
-function InventoryRow({ item }: { item: InventoryItem }) {
+function InventoryRow({ item, setOptions }: { item: InventoryItem; setOptions: string[] }) {
   const [isEditing, setIsEditing] = useState(false);
   const result = inventoryProfit(item);
   const addedDate = item.created_at ? new Date(item.created_at).toLocaleDateString() : null;
@@ -261,7 +280,7 @@ function InventoryRow({ item }: { item: InventoryItem }) {
             </label>
             <label className="grid gap-1">
               <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Set</span>
-              <input name="set_name" defaultValue={setName ?? ""} className={fieldClass} />
+              <SetCombobox name="set_name" value={setName ?? ""} options={setOptions} placeholder="Search set" />
             </label>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
@@ -419,7 +438,7 @@ function inventoryProfit(item: InventoryItem) {
   });
 }
 
-function buildOwnedSetChecklist(checklist: SetChecklistCard[], ownedItems: InventoryItem[], setName: string) {
+function buildOwnedSetChecklist(checklist: SetChecklistCard[], ownedItems: InventoryItem[]) {
   const ownedByNumber = new Map<string, InventoryItem>();
   const ownedByName = new Map<string, InventoryItem>();
 
@@ -431,21 +450,7 @@ function buildOwnedSetChecklist(checklist: SetChecklistCard[], ownedItems: Inven
     if (cardName) ownedByName.set(cardName, item);
   }
 
-  const sourceChecklist = checklist.length
-    ? checklist
-    : ownedItems.map((item) => {
-        const lookup = parseInventoryLookup(item.name);
-        return {
-          key: item.id,
-          name: item.card_name ?? lookup.cardName ?? item.name,
-          setName,
-          cardNumber: item.card_number ?? lookup.cardNumber,
-          variant: item.variant ?? null,
-          imageUrl: item.image_url ?? null
-        };
-      });
-
-  return sourceChecklist.map((card) => {
+  return checklist.map((card) => {
     const numberMatch = normalizeCollectorNumber(card.cardNumber);
     const nameMatch = normalizeLookup(card.name);
     const ownedItem = (numberMatch ? ownedByNumber.get(numberMatch) : null) ?? ownedByName.get(nameMatch) ?? null;

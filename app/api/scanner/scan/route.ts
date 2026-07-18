@@ -59,10 +59,10 @@ export async function POST(request: Request) {
   const messages: string[] = [];
 
   let detectedCards: DetectedScannerCard[] = parsed.cardName
-    ? [{
+      ? [{
         cardName: parsed.cardName,
-        setName: parsed.setName || null,
-        cardNumber: normalizeCardNumber(parsed.cardNumber, parsed.packHint, parsed.setName),
+        setName: parsed.setName || parsed.packHint || null,
+        cardNumber: normalizeCardNumber(parsed.cardNumber, parsed.packHint, parsed.setName || parsed.packHint),
         variant: parsed.variant || variantFromFoilPreference(parsed.foilPreference),
         foil: isFoilVariant(parsed.variant || variantFromFoilPreference(parsed.foilPreference)),
         language: parsed.language,
@@ -112,8 +112,8 @@ export async function POST(request: Request) {
       });
       detectedCards = candidates.map((candidate) => ({
             cardName: candidate.cardName,
-            setName: candidate.setName ?? null,
-            cardNumber: normalizeCardNumber(candidate.cardNumber, parsed.packHint, candidate.setName),
+            setName: parsed.packHint || candidate.setName || null,
+            cardNumber: normalizeCardNumber(candidate.cardNumber, parsed.packHint, parsed.packHint || candidate.setName),
             variant: candidate.variant ?? variantFromFoilPreference(parsed.foilPreference),
             foil: isFoilVariant(candidate.variant ?? variantFromFoilPreference(parsed.foilPreference)),
             language: normalizeDetectedLanguage(candidate.language ?? parsed.language, candidate.cardName, candidate.originalName, parsed.language),
