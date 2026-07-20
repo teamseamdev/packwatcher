@@ -1,7 +1,7 @@
 "use client";
 
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCircle2, FileDown, Loader2, Plus, ScanLine, Search, Trash2, X } from "lucide-react";
+import { Check, CheckCircle2, FileDown, Flashlight, FlashlightOff, Loader2, Plus, ScanLine, Search, Trash2, X } from "lucide-react";
 import { SetCombobox } from "@/components/set-combobox";
 import { createClient } from "@/lib/supabase/browser";
 
@@ -33,6 +33,11 @@ type ScanResponse = {
   cards?: Array<Omit<ScannerCard, "id" | "order" | "imageDataUrl">>;
   error?: string;
   messages?: string[];
+};
+
+type TorchTrack = MediaStreamTrack & {
+  getCapabilities?: () => MediaTrackCapabilities & { torch?: boolean };
+  applyConstraints: (constraints: MediaTrackConstraints & { advanced?: Array<MediaTrackConstraintSet & { torch?: boolean }> }) => Promise<void>;
 };
 
 const CARD_READINESS_INTERVAL_MS = 450;
@@ -78,6 +83,9 @@ export function CardScanner() {
   const [cardReady, setCardReady] = useState(false);
   const [inventoryCostOpen, setInventoryCostOpen] = useState(false);
   const [scanTotalCost, setScanTotalCost] = useState("");
+  const [hasTorch, setHasTorch] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
+  const [lightingLow, setLightingLow] = useState(false);
 
   const totalValue = useMemo(() => cards.reduce((sum, card) => sum + card.estimatedValue, 0), [cards]);
   const totalScanCost = Number(scanTotalCost || 0);
@@ -110,8 +118,9 @@ export function CardScanner() {
     if (!isCameraReady) return;
 
     cardReadinessIntervalRef.current = window.setInterval(() => {
-      const ready = videoRef.current ? isCardReadyForScan(videoRef.current) : false;
-      setCardReady(ready);
+      const readiness = videoRef.current ? analyzeCardReadiness(videoRef.current) : { ready: false, lowLight: false };
+      setCardReady(readiness.ready);
+      setLightingLow(readiness.lowLight);
     }, CARD_READINESS_INTERVAL_MS);
 
     return () => {
@@ -158,6 +167,10 @@ export function CardScanner() {
         audio: false
       });
       streamRef.current = stream;
+      const track = getTorchTrack(stream);
+      const capabilities = track?.getCapabilities?.() as (MediaTrackCapabilities & { torch?: boolean }) | undefined;
+      setHasTorch(Boolean(capabilities?.torch));
+      setTorchOn(false);
       if (videoRef.current) videoRef.current.srcObject = stream;
       setIsCameraReady(true);
     } catch (cameraError) {
@@ -172,7 +185,29 @@ export function CardScanner() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     setCardReady(false);
+    setHasTorch(false);
+    setTorchOn(false);
+    setLightingLow(false);
     setIsCameraReady(false);
+  }
+
+  async function toggleTorch() {
+    const track = streamRef.current ? getTorchTrack(streamRef.current) : null;
+    if (!track) {
+      setHasTorch(false);
+      return;
+    }
+
+    const nextTorchState = !torchOn;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: nextTorchState }] });
+      setTorchOn(nextTorchState);
+      setHasTorch(true);
+    } catch {
+      setHasTorch(false);
+      setTorchOn(false);
+      setNotice("Flashlight control is not available in this browser. Try stronger room lighting.");
+    }
   }
 
   function clearScannerTimers() {
@@ -678,12 +713,16 @@ export function CardScanner() {
           isScanning={isScanning}
           successFlash={successFlash}
           cardReady={cardReady}
+          hasTorch={hasTorch}
+          torchOn={torchOn}
+          lightingLow={lightingLow}
           lastCard={lastCard}
           totalCards={cards.length}
           totalValue={totalValue}
           error={error}
           notice={notice}
           onScan={() => void scanCameraFrame()}
+          onToggleTorch={() => void toggleTorch()}
           onRemove={removeCardFromScanner}
           onClose={() => {
             setIsComplete(true);
@@ -707,12 +746,16 @@ function FullScreenScanner({
   isScanning,
   successFlash,
   cardReady,
+  hasTorch,
+  torchOn,
+  lightingLow,
   lastCard,
   totalCards,
   totalValue,
   error,
   notice,
   onScan,
+  onToggleTorch,
   onRemove,
   onClose,
   onEnd
@@ -722,12 +765,16 @@ function FullScreenScanner({
   isScanning: boolean;
   successFlash: boolean;
   cardReady: boolean;
+  hasTorch: boolean;
+  torchOn: boolean;
+  lightingLow: boolean;
   lastCard: ScannerCard | null;
   totalCards: number;
   totalValue: number;
   error: string | null;
   notice: string | null;
   onScan: () => void;
+  onToggleTorch: () => void;
   onRemove: (id: string) => void;
   onClose: () => void;
   onEnd: () => void;
@@ -752,10 +799,24 @@ function FullScreenScanner({
         <div className="rounded-full bg-black/50 px-4 py-2 text-sm font-bold text-white/75 shadow-lg backdrop-blur">
           Manual scan
         </div>
-        <div className="w-12" />
+        {hasTorch ? (
+          <button
+            onClick={onToggleTorch}
+            className={`grid h-12 w-12 place-items-center rounded-full shadow-lg backdrop-blur ${torchOn ? "bg-amber-300 text-slate-950" : "bg-black/50 text-white"}`}
+            aria-label={torchOn ? "Turn flashlight off" : "Turn flashlight on"}
+          >
+            {torchOn ? <FlashlightOff className="h-5 w-5" /> : <Flashlight className="h-5 w-5" />}
+          </button>
+        ) : <div className="w-12" />}
       </div>
 
-      <div className="pointer-events-none absolute inset-x-8 top-[18vh] mx-auto max-w-[285px] sm:max-w-[320px]">
+      {lightingLow ? (
+        <div className="pointer-events-none absolute left-5 right-5 top-[calc(env(safe-area-inset-top)+76px)] rounded-2xl border border-amber-300/30 bg-black/65 px-4 py-3 text-center text-sm font-bold text-amber-100 shadow-lg backdrop-blur">
+          {hasTorch && !torchOn ? "Lighting looks low. Try the flashlight." : "Need better lighting for a cleaner scan."}
+        </div>
+      ) : null}
+
+      <div className="pointer-events-none absolute inset-x-8 top-[20vh] mx-auto max-w-[285px] sm:max-w-[320px]">
         <div className={`relative aspect-[63/88] rounded-[10px] border-[5px] shadow-[0_0_30px_rgba(148,163,184,0.25)] ${cardReady ? "border-emerald-400 shadow-[0_0_30px_rgba(74,222,128,0.5)]" : "border-slate-400/80"}`}>
           <div className={`absolute -left-3 -top-3 h-6 w-6 rounded-full ${cardReady ? "bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" : "bg-slate-400"}`} />
           <div className={`absolute -right-3 -top-3 h-6 w-6 rounded-full ${cardReady ? "bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" : "bg-slate-400"}`} />
@@ -852,14 +913,14 @@ function captureVideoFrame(video: HTMLVideoElement) {
   return canvas.toDataURL("image/jpeg", 0.82);
 }
 
-function isCardReadyForScan(video: HTMLVideoElement) {
-  if (!video.videoWidth || !video.videoHeight) return false;
+function analyzeCardReadiness(video: HTMLVideoElement) {
+  if (!video.videoWidth || !video.videoHeight) return { ready: false, lowLight: false };
 
   const canvas = document.createElement("canvas");
   canvas.width = 96;
   canvas.height = 128;
   const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) return false;
+  if (!context) return { ready: false, lowLight: false };
 
   const crop = centerCrop(video.videoWidth, video.videoHeight, 0.72, 0.78, -0.02);
   context.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
@@ -908,7 +969,9 @@ function isCardReadyForScan(video: HTMLVideoElement) {
   const brightRatio = bright / pixels;
   const darkRatio = veryDark / pixels;
 
-  return mean > 55 && contrast > 34 && edgeScore > 15 && saturationRatio > 0.1 && brightRatio > 0.08 && darkRatio < 0.42;
+  const lowLight = mean < 58 || brightRatio < 0.06 || darkRatio > 0.48;
+  const ready = mean > 55 && contrast > 34 && edgeScore > 15 && saturationRatio > 0.1 && brightRatio > 0.08 && darkRatio < 0.42;
+  return { ready, lowLight };
 }
 
 async function captureCameraBurst(video: HTMLVideoElement) {
@@ -1057,6 +1120,13 @@ function languageLabel(language: string | null) {
 
 function isFoilVariant(variant?: string | null) {
   return /foil|holo/i.test(variant ?? "");
+}
+
+function getTorchTrack(stream: MediaStream) {
+  const track = stream.getVideoTracks()[0] as TorchTrack | undefined;
+  if (!track) return null;
+  const capabilities = track.getCapabilities?.() as (MediaTrackCapabilities & { torch?: boolean }) | undefined;
+  return capabilities?.torch ? track : null;
 }
 
 function cleanOption(value: string | null | undefined) {
