@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildPreparedSetScannerIndex } from "../lib/scanner/set-pack.ts";
 import { ScanCoordinator } from "../lib/scanner/scan-coordinator.ts";
+import { CAPTURE_POLICIES, computeAutoReadiness } from "../lib/scanner/capture-policy.ts";
 import type { CanonicalCardCandidate } from "../lib/cards/set-matching.ts";
 
 test("scan coordinator permits only one active request", async () => {
@@ -40,6 +41,47 @@ test("prepared scanner set pack builds compact lookup indexes", () => {
   assert.deepEqual(pack.byNumericPortion["25"], ["c"]);
 });
 
+test("manual capture policy does not inherit auto stable-duration requirements", () => {
+  assert.equal(CAPTURE_POLICIES.auto.requireStableDetection, true);
+  assert.equal(CAPTURE_POLICIES.manual.requireStableDetection, false);
+  assert.equal(CAPTURE_POLICIES.manual.minimumStableDurationMs, 0);
+  assert.equal(CAPTURE_POLICIES.manual.allowUserOverride, true);
+  assert.ok(CAPTURE_POLICIES.manual.minimumDetectionConfidence < CAPTURE_POLICIES.auto.minimumDetectionConfidence);
+});
+
+test("auto readiness tolerates one weak frame without full reset", () => {
+  const strong = readinessFrame(0, 0.78, 6);
+  const readiness = computeAutoReadiness({
+    frames: [
+      strong,
+      readinessFrame(120, 0.76, 7),
+      readinessFrame(240, 0.42, 12),
+      readinessFrame(360, 0.77, 8),
+      readinessFrame(480, 0.79, 7)
+    ],
+    previousProgress: 0.58,
+    prepared: true,
+    activeScan: false,
+    armed: true
+  });
+
+  assert.ok(readiness.progress > 0.35);
+  assert.equal(readiness.blockers.length, 0);
+});
+
+test("auto readiness hard-resets on active scan or missing set pack", () => {
+  const readiness = computeAutoReadiness({
+    frames: [readinessFrame(0, 0.8, 5), readinessFrame(120, 0.82, 5), readinessFrame(240, 0.81, 4)],
+    previousProgress: 0.8,
+    prepared: false,
+    activeScan: true,
+    armed: true
+  });
+
+  assert.equal(readiness.progress, 0);
+  assert.deepEqual(readiness.blockers, ["set-not-ready", "active-scan"]);
+});
+
 function candidate(id: string, name: string, number: string): CanonicalCardCandidate {
   return {
     id,
@@ -53,5 +95,19 @@ function candidate(id: string, name: string, number: string): CanonicalCardCandi
     imageUrl: null,
     tcgplayerProductId: null,
     marketPrice: null
+  };
+}
+
+function readinessFrame(timestamp: number, confidence: number, motionScore: number) {
+  return {
+    confidence,
+    cardLikeness: confidence,
+    blurScore: 130,
+    motionScore,
+    glareRatio: 0.04,
+    allCornersVisible: true,
+    cropped: false,
+    multipleCards: false,
+    timestamp
   };
 }

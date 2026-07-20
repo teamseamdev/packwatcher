@@ -4,6 +4,7 @@ import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCircle2, FileDown, Flashlight, FlashlightOff, Loader2, Plus, ScanLine, Search, Trash2, X } from "lucide-react";
 import { SetCombobox } from "@/components/set-combobox";
 import { averageCornerDistance, distance, mapVideoPointToCover, orderQuadPoints, polygonArea, quadCenter, smoothQuad, type Point, type Quad } from "@/lib/scanner/geometry";
+import { CAPTURE_POLICIES, computeAutoReadiness, type ReadinessFrame } from "@/lib/scanner/capture-policy";
 import { ScanCoordinator } from "@/lib/scanner/scan-coordinator";
 import type { PreparedSetScannerIndex } from "@/lib/scanner/set-pack";
 import { createClient } from "@/lib/supabase/browser";
@@ -13,7 +14,7 @@ type CaptureMode = "auto" | "manual";
 type ScannerLanguage = "auto" | "english" | "japanese" | "chinese_simplified" | "chinese_traditional" | "korean";
 type FoilPreference = "auto" | "normal" | "foil" | "reverse_holo";
 type ScanPhase = "idle" | "capturing" | "recognizing" | "pricing";
-type ScannerState = "initializing" | "searching" | "tracking" | "quality-blocked" | "stabilizing" | "capture-ready" | "capturing" | "identifying" | "captured" | "awaiting-removal" | "error" | "paused";
+type ScannerState = "initializing" | "preparing-set" | "searching" | "tracking" | "quality-blocked" | "stabilizing" | "capture-ready" | "capturing" | "identifying" | "confirmation-required" | "manual-crop" | "manual-search" | "saving" | "showing-result" | "captured" | "awaiting-removal" | "error" | "paused";
 type QualityBlocker = "blur" | "motion" | "dark" | "overexposed" | "glare" | "too-small" | "too-large" | "cropped" | "multiple-cards";
 type CardDetection = {
   corners: Quad;
@@ -93,6 +94,7 @@ type ScanJob = {
   automatic?: boolean;
   bypassDuplicate?: boolean;
 };
+type ScanImageResult = ScannerCardPayload | "confirmation" | null;
 
 type TorchTrack = MediaStreamTrack & {
   getCapabilities?: () => MediaTrackCapabilities & { torch?: boolean };
@@ -144,11 +146,15 @@ export function CardScanner() {
   const stableSinceRef = useRef<number | null>(null);
   const lastDetectionRef = useRef<CardDetection | null>(null);
   const trackingCountersRef = useRef({ detected: 0, stable: 0 });
+  const readinessBufferRef = useRef<ReadinessFrame[]>([]);
+  const autoProgressRef = useRef(0);
   const captureLockRef = useRef(false);
   const scanCoordinatorRef = useRef(new ScanCoordinator<ScanJob, ScannerCardPayload | null>());
   const activeScanAbortRef = useRef<AbortController | null>(null);
   const scannerSessionIdRef = useRef("");
   const scannerModeRef = useRef<CaptureMode>("auto");
+  const scannerStateRef = useRef<ScannerState>("searching");
+  const confirmationOpenRef = useRef(false);
   const duplicateGuardRef = useRef<{ hash: string; canonicalCardId: string | null; capturedAt: number; armed: boolean }>({ hash: "", canonicalCardId: null, capturedAt: 0, armed: true });
   const noCardSinceRef = useRef<number | null>(null);
   const [mode, setMode] = useState<ScannerMode>("scanner");
@@ -176,6 +182,9 @@ export function CardScanner() {
   const [setOptions, setSetOptions] = useState<string[]>(FALLBACK_SET_OPTIONS);
   const [cardSetOptions, setCardSetOptions] = useState<CardSetOption[]>([]);
   const [candidateChoices, setCandidateChoices] = useState<ScannerCardPayload[]>([]);
+  const [pendingScanEventId, setPendingScanEventId] = useState<string | null>(null);
+  const [pendingScanImage, setPendingScanImage] = useState<string | null>(null);
+  const [selectedCandidateKey, setSelectedCandidateKey] = useState<string | null>(null);
   const [cardReady, setCardReady] = useState(false);
   const [inventoryCostOpen, setInventoryCostOpen] = useState(false);
   const [scanTotalCost, setScanTotalCost] = useState("");
@@ -203,6 +212,14 @@ export function CardScanner() {
   useEffect(() => {
     scannerModeRef.current = captureMode;
   }, [captureMode]);
+
+  useEffect(() => {
+    scannerStateRef.current = scannerState;
+  }, [scannerState]);
+
+  useEffect(() => {
+    confirmationOpenRef.current = candidateChoices.length > 0;
+  }, [candidateChoices.length]);
 
   useEffect(() => {
     if (videoRef.current && streamRef.current) {
@@ -318,6 +335,7 @@ export function CardScanner() {
     detectionInFlightRef.current = false;
     lastDetectionRef.current = null;
     stableSinceRef.current = null;
+    readinessBufferRef.current = [];
     trackingCountersRef.current = { detected: 0, stable: 0 };
     captureLockRef.current = false;
     noCardSinceRef.current = null;
@@ -325,8 +343,13 @@ export function CardScanner() {
     streamRef.current = null;
     setCardReady(false);
     setTracking(null);
+    autoProgressRef.current = 0;
     setAutoProgress(0);
     setScannerState("searching");
+    setCandidateChoices([]);
+    setPendingScanEventId(null);
+    setPendingScanImage(null);
+    setSelectedCandidateKey(null);
     setHasTorch(false);
     setTorchOn(false);
     setLightingLow(false);
@@ -374,6 +397,7 @@ export function CardScanner() {
   }
 
   function handleDetectionFrame(video: HTMLVideoElement, timestamp: number) {
+    if (confirmationOpenRef.current || scannerStateRef.current === "confirmation-required" || scannerStateRef.current === "manual-crop" || scannerStateRef.current === "manual-search") return;
     const analysis = analyzeVideoFrame(video, lastDetectionRef.current, timestamp);
     if (!analysis.detection) {
       const noCardSince = noCardSinceRef.current ?? timestamp;
@@ -384,6 +408,8 @@ export function CardScanner() {
       }
       setCardReady(false);
       setTracking(null);
+      readinessBufferRef.current = [];
+      autoProgressRef.current = 0;
       setAutoProgress(0);
       stableSinceRef.current = null;
       trackingCountersRef.current = { detected: 0, stable: 0 };
@@ -395,12 +421,14 @@ export function CardScanner() {
     const smoothedCorners = smoothQuad(previous?.corners ?? null, analysis.detection.corners, 0.42);
     const detection: CardDetection = { ...analysis.detection, corners: smoothedCorners };
     const motionScore = previous ? averageCornerDistance(previous.corners, detection.corners) : 0;
-    const quality = { ...analysis.quality, motionScore, acceptable: analysis.quality.acceptable && motionScore <= SCANNER_DETECTION_CONFIG.maxStableMotionPx };
-    if (motionScore > SCANNER_DETECTION_CONFIG.maxStableMotionPx && !quality.blockers.includes("motion")) quality.blockers.push("motion");
+    const autoPolicy = CAPTURE_POLICIES.auto;
+    const quality = { ...analysis.quality, motionScore };
+    if (motionScore > autoPolicy.maximumMotionScore && !quality.blockers.includes("motion")) quality.blockers.push("motion");
+    quality.acceptable = !quality.blockers.some((blocker) => blocker === "dark" || blocker === "overexposed" || blocker === "too-small" || blocker === "too-large" || blocker === "cropped" || blocker === "multiple-cards");
 
     lastDetectionRef.current = detection;
     trackingCountersRef.current.detected += 1;
-    const stable = detection.confidence >= SCANNER_DETECTION_CONFIG.minConfidence && quality.acceptable && !analysis.multipleCards;
+    const stable = detection.confidence >= autoPolicy.minimumDetectionConfidence && quality.acceptable && !analysis.multipleCards;
     if (stable) {
       trackingCountersRef.current.stable += 1;
       stableSinceRef.current ??= timestamp;
@@ -410,7 +438,29 @@ export function CardScanner() {
     }
 
     const stableForMs = stableSinceRef.current ? timestamp - stableSinceRef.current : 0;
-    const progress = stable ? Math.min(1, stableForMs / SCANNER_DETECTION_CONFIG.minAutoCaptureMs) : 0;
+    readinessBufferRef.current = [
+      ...readinessBufferRef.current.slice(-7),
+      {
+        confidence: detection.confidence,
+        cardLikeness: detection.confidence,
+        blurScore: quality.blurScore,
+        motionScore,
+        glareRatio: quality.glareRatio,
+        allCornersVisible: quality.allCornersVisible,
+        cropped: quality.blockers.includes("cropped"),
+        multipleCards: analysis.multipleCards,
+        timestamp
+      }
+    ];
+    const readiness = computeAutoReadiness({
+      frames: readinessBufferRef.current,
+      previousProgress: autoProgressRef.current,
+      prepared: preparedSetPack?.setId === selectedSet?.id,
+      activeScan: scanCoordinatorRef.current.active || captureLockRef.current || isScanning,
+      armed: duplicateGuardRef.current.armed
+    });
+    const progress = scannerModeRef.current === "auto" ? readiness.progress : 0;
+    autoProgressRef.current = progress;
     setTracking({
       detection,
       quality,
@@ -420,13 +470,13 @@ export function CardScanner() {
       multipleCards: analysis.multipleCards
     });
     setLightingLow(quality.blockers.includes("dark"));
-    setCardReady(stable);
+    setCardReady(scannerModeRef.current === "manual" ? detection.confidence >= CAPTURE_POLICIES.manual.minimumDetectionConfidence : readiness.captureAllowed || readiness.score >= 0.68);
     setAutoProgress(progress);
-    setScannerState(scannerStateForAnalysis(stable, progress, quality.blockers, analysis.multipleCards));
+    setScannerState(scannerStateForAnalysis(stable, progress, quality.blockers, analysis.multipleCards, scannerModeRef.current, readiness.score));
 
     if (
       scannerModeRef.current === "auto" &&
-      progress >= 1 &&
+      readiness.captureAllowed &&
       duplicateGuardRef.current.armed &&
       preparedSetPack?.setId === selectedSet?.id &&
       !scanCoordinatorRef.current.active &&
@@ -488,11 +538,13 @@ export function CardScanner() {
 
       const frames = detection ? [sourceImage] : await captureCameraBurst(videoRef.current);
       const scanFailures: string[] = [];
-      let scanned: ScannerCardPayload | null = null;
+      let scanned: ScanImageResult = null;
       const scannedImage = sourceImage;
 
       const focusedFrames = await buildRecognitionFrames(frames);
       const contactSheet = await buildContactSheet(focusedFrames);
+      setPendingScanEventId(scanEventId);
+      setPendingScanImage(scannedImage);
       setScanPhase("recognizing");
       setScannerState("identifying");
       setNotice("Identifying...");
@@ -505,10 +557,17 @@ export function CardScanner() {
         }
       });
 
+      if (scanned === "confirmation") {
+        setScannerState("confirmation-required");
+        setScanPhase("idle");
+        return null;
+      }
+
       if (!scanned) {
         setError(scanFailures[0] ?? "No readable Pokemon card was detected. Hold the card flat in the frame, tap to focus if needed, then scan again.");
         setNotice(null);
         setScannerState("error");
+        if (!options.automatic) duplicateGuardRef.current.armed = true;
         return null;
       }
       if (!sessionId || scannerSessionIdRef.current !== sessionId || preparedSetPack?.setId !== selectedSet.id) return null;
@@ -556,7 +615,7 @@ export function CardScanner() {
   async function scanImageDataUrl(
     imageDataUrl: string,
     options: { scanEventId?: string; scannerSessionId?: string; silentMiss?: boolean; onMiss?: (message: string) => void } = {}
-  ) {
+  ): Promise<ScanImageResult> {
     if (!selectedSet) {
       setError("Choose a set from the list before scanning.");
       return null;
@@ -594,7 +653,7 @@ export function CardScanner() {
     }
   }
 
-  async function scanManualCard(cardName: string, setName: string, cardNumber?: string | null) {
+  async function scanManualCard(cardName: string, setName: string, cardNumber?: string | null): Promise<ScannerCardPayload | null> {
     const manualSelectedSet = setName.trim()
       ? cardSetOptions.find((option) => normalizeSetLabel(option.name) === normalizeSetLabel(setName))
       : selectedSet;
@@ -615,19 +674,22 @@ export function CardScanner() {
         selectedSetId: manualSelectedSet.id
       })
     });
-    return handleScanResponse(response);
+    const result = await handleScanResponse(response);
+    return result === "confirmation" ? null : result;
   }
 
   async function handleScanResponse(
     response: Response,
     options: { silentMiss?: boolean; onMiss?: (message: string) => void } = {}
-  ) {
+  ): Promise<ScanImageResult> {
     const body = await response.json().catch(() => null) as ScanResponse | null;
     if (!response.ok || !body?.card) {
       const message = body?.error ?? `Scan failed with status ${response.status}.`;
       if (body?.candidates?.length) {
         setCandidateChoices(body.candidates);
         setNotice("Choose the matching card from the selected set.");
+        setScannerState("confirmation-required");
+        return "confirmation";
       }
       options.onMiss?.(message);
       if (!options.silentMiss) {
@@ -673,11 +735,16 @@ export function CardScanner() {
   }
 
   function confirmCandidate(card: ScannerCardPayload) {
-    const added = addCard(card, null);
+    const added = addCard(card, pendingScanImage, pendingScanEventId ?? crypto.randomUUID());
     showScannedCard(added);
     setCandidateChoices([]);
+    setPendingScanEventId(null);
+    setPendingScanImage(null);
+    setSelectedCandidateKey(null);
     setError(null);
-    setNotice("Confirmed selected-set match.");
+    setNotice(null);
+    setScannerState("showing-result");
+    window.setTimeout(() => setScannerState("awaiting-removal"), 650);
   }
 
   async function addScansToInventory(purchasePricePerCard: number) {
@@ -846,7 +913,7 @@ export function CardScanner() {
 
           {notice ? <p className="mt-4 rounded-lg border border-amber-300/30 bg-amber-300/10 p-3 text-sm text-amber-100">{notice}</p> : null}
           {error ? <p className="mt-4 rounded-lg border border-rose-300/30 bg-rose-500/10 p-3 text-sm text-rose-100">{error}</p> : null}
-          {candidateChoices.length ? (
+          {!isCameraReady && candidateChoices.length ? (
             <div className="mt-4 rounded-lg border border-amber-300/30 bg-amber-300/10 p-3">
               <p className="text-sm font-bold text-amber-100">Confirm card from {selectedSet?.name ?? "selected set"}</p>
               <div className="mt-3 grid gap-2">
@@ -1065,6 +1132,9 @@ export function CardScanner() {
           lightingLow={lightingLow}
           lastCard={lastCard}
           activeSetName={preparedSetPack?.setName ?? selectedSet?.name ?? null}
+          activeSetPack={preparedSetPack}
+          candidateChoices={candidateChoices}
+          selectedCandidateKey={selectedCandidateKey}
           totalCards={cards.length}
           uniqueCards={uniqueSessionCards}
           totalValue={totalValue}
@@ -1074,6 +1144,22 @@ export function CardScanner() {
           onModeChange={setCaptureMode}
           onToggleTorch={() => void toggleTorch()}
           onRemove={removeCardFromScanner}
+          onConfirmCandidate={(candidate) => {
+            const key = candidateKey(candidate);
+            setSelectedCandidateKey(key);
+            setScannerState("saving");
+            window.setTimeout(() => confirmCandidate(candidate), 80);
+          }}
+          onRetake={() => {
+            setCandidateChoices([]);
+            setPendingScanEventId(null);
+            setPendingScanImage(null);
+            setSelectedCandidateKey(null);
+            setError(null);
+            setNotice("Retake when ready.");
+            setScannerState("searching");
+            duplicateGuardRef.current.armed = true;
+          }}
           onClose={() => {
             setIsComplete(true);
             stopCamera();
@@ -1105,6 +1191,9 @@ function FullScreenScanner({
   lightingLow,
   lastCard,
   activeSetName,
+  activeSetPack,
+  candidateChoices,
+  selectedCandidateKey,
   totalCards,
   uniqueCards,
   totalValue,
@@ -1114,6 +1203,8 @@ function FullScreenScanner({
   onModeChange,
   onToggleTorch,
   onRemove,
+  onConfirmCandidate,
+  onRetake,
   onClose,
   onEnd
 }: {
@@ -1131,6 +1222,9 @@ function FullScreenScanner({
   lightingLow: boolean;
   lastCard: ScannerCard | null;
   activeSetName: string | null;
+  activeSetPack: PreparedSetScannerIndex | null;
+  candidateChoices: ScannerCardPayload[];
+  selectedCandidateKey: string | null;
   totalCards: number;
   uniqueCards: number;
   totalValue: number;
@@ -1140,6 +1234,8 @@ function FullScreenScanner({
   onModeChange: (mode: CaptureMode) => void;
   onToggleTorch: () => void;
   onRemove: (id: string) => void;
+  onConfirmCandidate: (candidate: ScannerCardPayload) => void;
+  onRetake: () => void;
   onClose: () => void;
   onEnd: () => void;
 }) {
@@ -1160,8 +1256,19 @@ function FullScreenScanner({
   const overlayPoints = tracking?.detection
     ? tracking.detection.corners.map((point) => mapVideoPointToCover(point, tracking.detection.videoWidth, tracking.detection.videoHeight, viewport.width, viewport.height))
     : null;
-  const statusText = scannerStatusText(scannerState, tracking);
-  const manualCaptureEnabled = Boolean(tracking?.detection) && !isScanning;
+  const statusText = scannerStatusText(scannerState, tracking, captureMode);
+  const confirmationOpen = candidateChoices.length > 0;
+  const manualCaptureEnabled = !isScanning && !confirmationOpen;
+  const [showManualSearch, setShowManualSearch] = useState(false);
+  const [manualSearch, setManualSearch] = useState("");
+  const manualSearchCandidates = useMemo(() => {
+    const query = manualSearch.trim().toLowerCase();
+    if (!showManualSearch || !activeSetPack || query.length < 1) return [];
+    return activeSetPack.cards
+      .filter((card) => `${card.name} ${card.collectorNumberRaw ?? ""} ${card.collectorNumberNormalized ?? ""}`.toLowerCase().includes(query))
+      .slice(0, 8)
+      .map((card) => preparedCandidateToScannerPayload(card, activeSetPack.setName));
+  }, [activeSetPack, manualSearch, showManualSearch]);
 
   return (
     <div className="fixed inset-0 z-[100] overflow-hidden bg-black text-white">
@@ -1174,6 +1281,7 @@ function FullScreenScanner({
       `}</style>
       <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/45 via-transparent to-black/95" />
+      {confirmationOpen ? <div className="pointer-events-none absolute inset-0 bg-black/45 backdrop-blur-[2px]" /> : null}
       {successFlash ? <div className="pointer-events-none absolute inset-0 bg-emerald-400/35" /> : null}
 
       <div className="absolute left-0 right-0 top-0 flex items-center justify-between px-5 pt-[calc(env(safe-area-inset-top)+14px)]">
@@ -1251,7 +1359,9 @@ function FullScreenScanner({
 
       <div className="pointer-events-none absolute left-5 right-5 top-[calc(env(safe-area-inset-top)+132px)] flex justify-center">
         <div className={`max-w-[290px] rounded-full px-5 py-3 text-center text-sm font-black shadow-lg backdrop-blur ${cardReady ? "bg-emerald-400/75 text-white" : "bg-slate-950/70 text-slate-100"}`}>
-          {isScanning
+          {confirmationOpen
+            ? <span>Confirm card</span>
+            : isScanning
             ? <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Scanning...</span>
             : cardReady
               ? <span className="inline-flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> {captureMode === "auto" ? "Hold steady" : "Ready"}</span>
@@ -1270,7 +1380,102 @@ function FullScreenScanner({
             {lastCard.cardName} - {currency(lastCard.estimatedValue)}
           </div>
         ) : null}
-        {error ? <p className="mb-3 rounded-xl border border-rose-300/30 bg-rose-500/20 p-3 text-sm text-rose-100">{error}</p> : null}
+        {confirmationOpen ? (
+          <div className="mb-4 max-h-[46vh] overflow-y-auto rounded-3xl border border-amber-300/25 bg-slate-950/92 p-4 shadow-2xl backdrop-blur">
+            <div className="mb-3">
+              <p className="text-lg font-black">Which card is this?</p>
+              <p className="text-xs text-white/60">Select one without leaving the camera.</p>
+            </div>
+            <div className="space-y-2">
+              {candidateChoices.map((candidate) => {
+                const key = candidateKey(candidate);
+                const selected = selectedCandidateKey === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    disabled={Boolean(selectedCandidateKey)}
+                    onClick={() => {
+                      setShowManualSearch(false);
+                      setManualSearch("");
+                      onConfirmCandidate(candidate);
+                    }}
+                    className="grid w-full grid-cols-[52px_1fr_auto] items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] p-2 text-left disabled:opacity-70"
+                  >
+                    {candidate.referenceImageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={candidate.referenceImageUrl} alt="" className="h-16 w-11 rounded object-cover" />
+                    ) : <div className="grid h-16 w-11 place-items-center rounded bg-white/10 text-[9px] text-white/45">No image</div>}
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-black">{candidate.cardName}</span>
+                      <span className="block truncate text-xs text-white/60">{[candidate.cardNumber, candidate.setName, candidate.variant].filter(Boolean).join(" - ")}</span>
+                      <span className="mt-1 block text-xs text-white/50">Confidence {Math.round((candidate.confidence || 0) * 100)}%</span>
+                    </span>
+                    <span className="text-right">
+                      <span className="block text-sm font-black text-emerald-300">{currency(candidate.estimatedValue)}</span>
+                      {selected ? <Loader2 className="ml-auto mt-1 h-4 w-4 animate-spin" /> : null}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {showManualSearch ? (
+              <div className="mt-3 rounded-2xl border border-white/10 bg-black/35 p-3">
+                <input
+                  value={manualSearch}
+                  onChange={(event) => setManualSearch(event.target.value)}
+                  placeholder="Search selected set or number"
+                  className="h-11 w-full rounded-xl border border-white/10 bg-slate-950/80 px-3 text-sm font-semibold text-white outline-none focus:border-amber-300"
+                />
+                <div className="mt-2 max-h-48 space-y-2 overflow-y-auto">
+                  {manualSearchCandidates.map((candidate) => {
+                    const key = candidateKey(candidate);
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        disabled={Boolean(selectedCandidateKey)}
+                        onClick={() => {
+                          setShowManualSearch(false);
+                          setManualSearch("");
+                          onConfirmCandidate(candidate);
+                        }}
+                        className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.06] p-2 text-left disabled:opacity-70"
+                      >
+                        {candidate.referenceImageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={candidate.referenceImageUrl} alt="" className="h-14 w-10 rounded object-cover" />
+                        ) : <div className="grid h-14 w-10 place-items-center rounded bg-white/10 text-[9px] text-white/45">No image</div>}
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-black">{candidate.cardName}</span>
+                          <span className="block truncate text-xs text-white/60">{[candidate.cardNumber, candidate.setName].filter(Boolean).join(" - ")}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowManualSearch(false);
+                  setManualSearch("");
+                  onRetake();
+                }}
+                disabled={Boolean(selectedCandidateKey)}
+                className="h-11 rounded-xl border border-white/10 bg-white/[0.04] text-sm font-bold text-white"
+              >
+                Retake
+              </button>
+              <button type="button" onClick={() => setShowManualSearch((current) => !current)} disabled={Boolean(selectedCandidateKey)} className="h-11 rounded-xl border border-white/10 bg-white/[0.04] text-sm font-bold text-white">
+                None of these
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {error && !confirmationOpen ? <p className="mb-3 rounded-xl border border-rose-300/30 bg-rose-500/20 p-3 text-sm text-rose-100">{error}</p> : null}
         {!error && notice ? <p className="mb-3 rounded-xl border border-white/10 bg-black/35 p-3 text-center text-sm text-white/85 backdrop-blur">{notice}</p> : null}
 
         <div className="mb-3 flex items-center justify-between text-base font-bold">
@@ -1309,7 +1514,7 @@ function FullScreenScanner({
           </div>
           <button
             onClick={onScan}
-            disabled={isScanning || (captureMode === "manual" && !manualCaptureEnabled)}
+            disabled={isScanning || confirmationOpen || (captureMode === "manual" && !manualCaptureEnabled)}
             className={`grid h-24 w-24 place-items-center rounded-full border-[5px] text-slate-950 disabled:opacity-60 ${cardReady ? "border-emerald-400 bg-emerald-400 shadow-[0_0_24px_rgba(74,222,128,0.7)]" : "border-slate-300 bg-white"}`}
             aria-label={captureMode === "manual" ? "Capture card" : "Manual capture now"}
           >
@@ -1329,8 +1534,17 @@ function reorderCards(cards: ScannerCard[]) {
   return cards.map((card, index) => ({ ...card, order: index + 1 }));
 }
 
-function scannerStatusText(state: ScannerState, tracking: TrackingSnapshot | null) {
+function scannerStatusText(state: ScannerState, tracking: TrackingSnapshot | null, captureMode: CaptureMode = "auto") {
+  if (captureMode === "manual") {
+    if (state === "confirmation-required") return "Confirm card";
+    if (state === "awaiting-removal") return "Remove card";
+    if (state === "identifying") return "Identifying";
+    if (state === "manual-crop") return "Adjust crop";
+    if (tracking?.multipleCards) return "Use one card at a time";
+    return "Tap to scan";
+  }
   if (state === "awaiting-removal") return "Remove card";
+  if (state === "confirmation-required") return "Confirm card";
   if (state === "searching" || !tracking) return "Place one card in view";
   if (tracking.multipleCards) return "Use one card at a time";
   const blocker = tracking.quality.blockers[0];
@@ -1349,6 +1563,29 @@ function scannerStatusText(state: ScannerState, tracking: TrackingSnapshot | nul
 
 function compactSetName(name: string) {
   return name.length > 24 ? `${name.slice(0, 21)}...` : name;
+}
+
+function candidateKey(candidate: ScannerCardPayload) {
+  return [candidate.canonicalCardId, candidate.cardName, candidate.cardNumber, candidate.setName, candidate.variant].filter(Boolean).join(":");
+}
+
+function preparedCandidateToScannerPayload(candidate: PreparedSetScannerIndex["cards"][number], setName: string): ScannerCardPayload {
+  return {
+    canonicalCardId: candidate.id,
+    canonicalSetId: candidate.setId,
+    cardName: candidate.name,
+    originalName: null,
+    language: null,
+    setName,
+    cardNumber: candidate.collectorNumberNormalized ?? candidate.collectorNumberRaw,
+    variant: null,
+    foil: false,
+    estimatedValue: 0,
+    confidence: 1,
+    recognitionSource: "manual-search",
+    pricingSource: candidate.tcgplayerProductId ? `tcgcsv:${candidate.tcgplayerProductId}` : "tcgcsv",
+    referenceImageUrl: candidate.imageUrl
+  };
 }
 
 function ScanMetric({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "neutral" | "positive" | "negative" }) {
@@ -1514,9 +1751,32 @@ function analyzeVideoFrame(video: HTMLVideoElement, previous: CardDetection | nu
   const best = candidates[0] ?? null;
   if (!best) return { detection: null, quality: emptyQuality([]), multipleCards: false };
 
-  const multipleCards = candidates.filter((candidate) => candidate.confidence > 0.46).length > 1;
+  const genuineCandidates = deduplicateCardCandidates(candidates.filter((candidate) =>
+    candidate.confidence >= 0.7 &&
+    candidate.areaRatio >= SCANNER_DETECTION_CONFIG.minAreaRatio &&
+    candidate.areaRatio <= SCANNER_DETECTION_CONFIG.maxAreaRatio &&
+    candidate.aspectRatio >= SCANNER_DETECTION_CONFIG.minAspectRatio &&
+    candidate.aspectRatio <= SCANNER_DETECTION_CONFIG.maxAspectRatio
+  ));
+  const multipleCards = genuineCandidates.length > 1;
   const quality = analyzeFrameQuality(video, best, previous, multipleCards);
   return { detection: best, quality, multipleCards };
+}
+
+function deduplicateCardCandidates(candidates: CardDetection[]) {
+  const kept: CardDetection[] = [];
+  for (const candidate of candidates) {
+    const center = quadCenter(candidate.corners);
+    const duplicate = kept.some((existing) => {
+      const existingCenter = quadCenter(existing.corners);
+      const centerDistance = Math.hypot((center.x - existingCenter.x) / candidate.videoWidth, (center.y - existingCenter.y) / candidate.videoHeight);
+      const areaDelta = Math.abs(candidate.areaRatio - existing.areaRatio);
+      const aspectDelta = Math.abs(candidate.aspectRatio - existing.aspectRatio);
+      return centerDistance < 0.08 && areaDelta < 0.08 && aspectDelta < 0.1;
+    });
+    if (!duplicate) kept.push(candidate);
+  }
+  return kept;
 }
 
 function detectCardCandidates(source: CanvasImageSource, sourceWidth: number, sourceHeight: number, timestamp = performance.now()): CardDetection[] {
@@ -1817,10 +2077,14 @@ function analyzeFrameQuality(video: HTMLVideoElement, detection: CardDetection, 
   };
 }
 
-function scannerStateForAnalysis(stable: boolean, progress: number, blockers: QualityBlocker[], multipleCards: boolean): ScannerState {
+function scannerStateForAnalysis(stable: boolean, progress: number, blockers: QualityBlocker[], multipleCards: boolean, captureMode: CaptureMode = "auto", readinessScore = 0): ScannerState {
+  if (captureMode === "manual") {
+    if (multipleCards) return "quality-blocked";
+    return stable || readinessScore > 0.35 ? "tracking" : "searching";
+  }
   if (multipleCards) return "quality-blocked";
   if (blockers.length) return "quality-blocked";
-  if (stable && progress >= 1) return "capture-ready";
+  if (stable && progress >= 0.78) return "capture-ready";
   if (stable) return "stabilizing";
   return "tracking";
 }
