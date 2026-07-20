@@ -1,3 +1,6 @@
+import { compareCollectorNumbers, normalizeCollectorNumber } from "@/lib/cards/collector-number";
+import { normalizeCardNameForMatch } from "@/lib/cards/set-matching";
+
 export type PricingCandidate = {
   value: number;
   currency: "USD";
@@ -9,11 +12,35 @@ export type PricingCandidate = {
 
 export type SetChecklistCard = {
   key: string;
+  id?: string | null;
+  productId?: number | null;
+  setId?: string | null;
   name: string;
   setName: string;
   cardNumber: string | null;
   variant: string | null;
+  rarity?: string | null;
   imageUrl: string | null;
+  marketPrice?: number | null;
+};
+
+export type TcgCsvSetSummary = {
+  groupId: number;
+  name: string;
+};
+
+export type TcgCsvCard = SetChecklistCard & {
+  productId: number;
+  groupId: number;
+  normalizedName: string;
+  normalizedCollectorNumber: string | null;
+  collectorNumberPrefix: string;
+  collectorNumberNumeric: number | null;
+  collectorNumberSuffix: string;
+  denominator: string | null;
+  denominatorNumeric: number | null;
+  sortKey: string | null;
+  sourceMetadata: Record<string, unknown>;
 };
 
 export type PricingProvider = {
@@ -41,11 +68,34 @@ export class TCGCSVProvider implements PricingProvider {
   }
 
   async listSets(): Promise<string[]> {
+    const groups = await this.listSetGroups();
+    return groups.map((group) => group.name);
+  }
+
+  async listSetGroups(): Promise<TcgCsvSetSummary[]> {
     const groups = await getGroups();
     return groups
-      .map((group) => group.name)
-      .filter((name) => !isLikelySealedProduct(name))
-      .sort((left, right) => left.localeCompare(right));
+      .filter((group) => !isLikelySealedProduct(group.name))
+      .map((group) => ({ groupId: group.groupId, name: group.name }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  async getSetCatalogByGroupId(groupId: number): Promise<{ group: TcgCsvSetSummary; cards: TcgCsvCard[] }> {
+    const groups = await getGroups();
+    const group = groups.find((item) => item.groupId === groupId);
+    if (!group) throw new Error(`TCGCSV Pokemon group ${groupId} was not found.`);
+    const data = await getGroupData(group);
+    const cards = data.products
+      .filter((product) => !isLikelySealedProduct(product.name))
+      .map((product) => parseTcgCsvCard(product, group, data.prices))
+      .filter((card) => Boolean(card.name));
+    return { group: { groupId: group.groupId, name: group.name }, cards: cards.sort(compareChecklistCards) };
+  }
+
+  async getSetCatalog(setName: string): Promise<{ group: TcgCsvSetSummary; cards: TcgCsvCard[] } | null> {
+    const groups = await getGroups();
+    const group = selectChecklistGroups(groups, setName)[0] ?? null;
+    return group ? this.getSetCatalogByGroupId(group.groupId) : null;
   }
 }
 
@@ -82,6 +132,7 @@ type TcgCsvProduct = {
   name: string;
   cleanName?: string | null;
   groupName?: string | null;
+  extendedData?: unknown;
   imageUrl?: string | null;
   image_url?: string | null;
   image?: string | null;
@@ -296,20 +347,54 @@ function productImageUrl(product: TcgCsvProduct) {
   return product.imageUrl ?? product.image_url ?? product.image ?? `https://tcgplayer-cdn.tcgplayer.com/product/${product.productId}_in_1000x1000.jpg`;
 }
 
-function parseProductCard(product: TcgCsvProduct, setName: string): SetChecklistCard {
+function parseTcgCsvCard(product: TcgCsvProduct, group: TcgCsvGroup, prices: TcgCsvPrice[] = []): TcgCsvCard {
   const rawName = product.cleanName ?? product.name;
-  const parts = rawName.split(" - ").map((part) => part.trim()).filter(Boolean);
-  const cardNumber = rawName.match(/\b\d{1,4}\s*\/\s*\d{1,4}\b/)?.[0]?.replace(/\s+/g, "") ?? null;
+  const extended = parseExtendedData(product.extendedData);
+  const cardNumberRaw = firstText(
+    extended["number"],
+    extended["card number"],
+    extended["collector number"],
+    rawName.match(/\b[A-Z]{0,5}\s*-?\s*\d{1,4}[A-Z]?\s*\/\s*[A-Z]{0,5}\s*\d{1,4}\b/i)?.[0],
+    rawName.match(/\b(?:TG|GG|RC|SV|XY|SM|SWSH|SVP|SH|H)\s*-?\s*\d{1,4}[A-Z]?\b/i)?.[0]
+  );
+  const normalizedNumber = normalizeCollectorNumber(cardNumberRaw);
   const variant = extractVariant(rawName);
-  const name = cleanCardName(parts[0] ?? rawName);
+  const name = cleanCardName(stripKnownCardMetadata(rawName, cardNumberRaw, group.name));
+  const price = prices.find((item) => item.productId === product.productId);
+
   return {
-    key: checklistKey(name, cardNumber),
+    key: checklistKey(name, normalizedNumber?.normalized ?? cardNumberRaw),
+    productId: product.productId,
+    groupId: group.groupId,
     name,
-    setName,
-    cardNumber,
+    normalizedName: normalizeCardNameForMatch(name),
+    setName: group.name,
+    cardNumber: normalizedNumber?.normalized ?? cardNumberRaw ?? null,
+    normalizedCollectorNumber: normalizedNumber?.normalized ?? null,
+    collectorNumberPrefix: normalizedNumber?.prefix ?? "",
+    collectorNumberNumeric: normalizedNumber?.numeric ?? null,
+    collectorNumberSuffix: normalizedNumber?.suffix ?? "",
+    denominator: normalizedNumber?.denominator ?? null,
+    denominatorNumeric: normalizedNumber?.denominatorNumeric ?? null,
+    sortKey: normalizedNumber?.sortKey ?? null,
     variant,
-    imageUrl: productImageUrl(product)
+    rarity: firstText(extended["rarity"]),
+    imageUrl: productImageUrl(product),
+    marketPrice: firstPositive(price?.marketPrice, price?.midPrice, price?.lowPrice),
+    sourceMetadata: {
+      source: "tcgcsv",
+      groupId: group.groupId,
+      productId: product.productId,
+      rawName: product.name,
+      cleanName: product.cleanName ?? null,
+      extendedData: product.extendedData ?? null,
+      parsedExtendedData: extended
+    }
   };
+}
+
+function parseProductCard(product: TcgCsvProduct, setName: string): SetChecklistCard {
+  return parseTcgCsvCard(product, { groupId: 0, name: setName });
 }
 
 function cleanCardName(value: string) {
@@ -339,6 +424,49 @@ function checklistKey(name: string, cardNumber?: string | null) {
   return `${normalize(cardNumber ?? "") || "no-number"}:${normalize(name)}`;
 }
 
+function parseExtendedData(value: unknown) {
+  const data: Record<string, string> = {};
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      if (!entry || typeof entry !== "object") continue;
+      const record = entry as Record<string, unknown>;
+      const name = firstText(record.name, record.displayName, record.key, record.label);
+      const itemValue = firstText(record.value, record.displayValue, record.text);
+      if (name && itemValue) data[name.toLowerCase()] = itemValue;
+    }
+  } else if (value && typeof value === "object") {
+    for (const [key, itemValue] of Object.entries(value as Record<string, unknown>)) {
+      const text = firstText(itemValue);
+      if (text) data[key.toLowerCase()] = text;
+    }
+  }
+  return data;
+}
+
+function firstText(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.replace(/\s+/g, " ").trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
+function stripKnownCardMetadata(rawName: string, cardNumber?: string | null, setName?: string | null) {
+  let text = rawName;
+  if (cardNumber) text = text.replace(cardNumber, " ");
+  if (setName) text = text.replace(new RegExp(escapeRegExp(setName), "ig"), " ");
+  return text
+    .split(" - ")[0]
+    .replace(/\b[A-Z]{0,5}\s*-?\s*\d{1,4}[A-Z]?\s*\/\s*[A-Z]{0,5}\s*\d{1,4}\b/gi, " ")
+    .replace(/\b(?:TG|GG|RC|SV|XY|SM|SWSH|SVP|SH|H)\s*-?\s*\d{1,4}[A-Z]?\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function preferChecklistProduct(next: SetChecklistCard, existing: SetChecklistCard) {
   if (next.cardNumber && !existing.cardNumber) return true;
   if (next.imageUrl && !existing.imageUrl) return true;
@@ -347,15 +475,9 @@ function preferChecklistProduct(next: SetChecklistCard, existing: SetChecklistCa
 }
 
 function compareChecklistCards(left: SetChecklistCard, right: SetChecklistCard) {
-  const leftNumber = collectorNumberValue(left.cardNumber);
-  const rightNumber = collectorNumberValue(right.cardNumber);
-  if (leftNumber !== rightNumber) return leftNumber - rightNumber;
+  const numberSort = compareCollectorNumbers(left.cardNumber, right.cardNumber);
+  if (numberSort !== 0) return numberSort;
   return left.name.localeCompare(right.name);
-}
-
-function collectorNumberValue(value?: string | null) {
-  const match = value?.match(/\d{1,4}/);
-  return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
 }
 
 function isLikelySealedProduct(name: string) {

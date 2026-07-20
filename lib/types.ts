@@ -113,12 +113,15 @@ export type InventoryItem = {
   shipping: number;
   notes: string | null;
   image_url?: string | null;
+  canonical_set_id?: string | null;
+  canonical_card_id?: string | null;
   card_name?: string | null;
   set_name?: string | null;
   card_number?: string | null;
   variant?: string | null;
   foil?: boolean | null;
   language?: string | null;
+  condition?: string | null;
   created_at: string;
 };
 

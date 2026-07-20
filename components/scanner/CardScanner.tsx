@@ -12,6 +12,8 @@ type ScanPhase = "idle" | "capturing" | "recognizing" | "pricing";
 type ScannerCard = {
   id: string;
   order: number;
+  canonicalCardId: string | null;
+  canonicalSetId: string | null;
   cardName: string;
   originalName: string | null;
   language: string | null;
@@ -31,8 +33,16 @@ type ScanResponse = {
   ok: boolean;
   card?: Omit<ScannerCard, "id" | "order" | "imageDataUrl">;
   cards?: Array<Omit<ScannerCard, "id" | "order" | "imageDataUrl">>;
+  candidates?: Array<Omit<ScannerCard, "id" | "order" | "imageDataUrl">>;
+  requiredAction?: "confirm_candidate" | "no_safe_match";
+  code?: string;
   error?: string;
   messages?: string[];
+};
+
+type CardSetOption = {
+  id: string;
+  name: string;
 };
 
 type TorchTrack = MediaStreamTrack & {
@@ -74,12 +84,15 @@ export function CardScanner() {
   const [error, setError] = useState<string | null>(null);
   const [manualName, setManualName] = useState("");
   const [manualSet, setManualSet] = useState("");
+  const [manualNumber, setManualNumber] = useState("");
   const [packHint, setPackHint] = useState("");
   const [language, setLanguage] = useState<ScannerLanguage>("auto");
   const [foilPreference, setFoilPreference] = useState<FoilPreference>("auto");
   const [scanPhase, setScanPhase] = useState<ScanPhase>("idle");
   const [successFlash, setSuccessFlash] = useState(false);
   const [setOptions, setSetOptions] = useState<string[]>(FALLBACK_SET_OPTIONS);
+  const [cardSetOptions, setCardSetOptions] = useState<CardSetOption[]>([]);
+  const [candidateChoices, setCandidateChoices] = useState<Array<Omit<ScannerCard, "id" | "order" | "imageDataUrl">>>([]);
   const [cardReady, setCardReady] = useState(false);
   const [inventoryCostOpen, setInventoryCostOpen] = useState(false);
   const [scanTotalCost, setScanTotalCost] = useState("");
@@ -92,6 +105,10 @@ export function CardScanner() {
   const costPerCard = cards.length && Number.isFinite(totalScanCost) ? totalScanCost / cards.length : 0;
   const scanProfit = totalValue - (Number.isFinite(totalScanCost) ? totalScanCost : 0);
   const scanRoi = totalScanCost > 0 ? (scanProfit / totalScanCost) * 100 : 0;
+  const selectedSet = useMemo(() => {
+    const normalized = normalizeSetLabel(packHint);
+    return cardSetOptions.find((option) => normalizeSetLabel(option.name) === normalized) ?? null;
+  }, [cardSetOptions, packHint]);
   useEffect(() => {
     return () => {
       stopCamera();
@@ -134,9 +151,10 @@ export function CardScanner() {
 
     async function loadSetOptions() {
       const response = await fetch("/api/card-sets");
-      const body = await response.json().catch(() => null) as { ok?: boolean; sets?: string[] } | null;
+      const body = await response.json().catch(() => null) as { ok?: boolean; sets?: string[]; cardSets?: CardSetOption[] } | null;
       if (ignore || !response.ok || !body?.sets?.length) return;
       setSetOptions(Array.from(new Set([...body.sets, ...FALLBACK_SET_OPTIONS])).sort((left, right) => left.localeCompare(right)));
+      setCardSetOptions(body.cardSets ?? []);
     }
 
     void loadSetOptions();
@@ -146,13 +164,14 @@ export function CardScanner() {
   }, []);
 
   async function startCamera(nextMode = mode) {
-    if (!packHint.trim()) {
-      const shouldContinue = window.confirm("No Pokemon set is selected. You can proceed, but scanning and pricing may be less accurate. Continue without a set?");
-      if (!shouldContinue) return;
+    if (!selectedSet) {
+      setError("Choose a set from the list before scanning. Scanner matches are locked to the selected set.");
+      return;
     }
 
     setError(null);
     setNotice(null);
+    setCandidateChoices([]);
     setMode(nextMode);
     setIsComplete(false);
 
@@ -275,7 +294,7 @@ export function CardScanner() {
         return;
       }
 
-      const card = addCard({ ...scanned, setName: packHint.trim() || scanned.setName }, scannedImage);
+      const card = addCard({ ...scanned, setName: selectedSet?.name ?? scanned.setName }, scannedImage);
       showScannedCard(card);
       setNotice(null);
     } finally {
@@ -293,7 +312,7 @@ export function CardScanner() {
     setIsScanning(true);
     setScanPhase("pricing");
     setError(null);
-    const scanned = await scanManualCard(manualName, manualSet || packHint);
+    const scanned = await scanManualCard(manualName, manualSet || packHint, manualNumber);
     setIsScanning(false);
     setScanPhase("idle");
     if (!scanned) return;
@@ -302,19 +321,30 @@ export function CardScanner() {
     setLastCard(card);
     setManualName("");
     setManualSet("");
+    setManualNumber("");
   }
 
   async function scanImageDataUrl(
     imageDataUrl: string,
     options: { silentMiss?: boolean; tryCrops?: boolean; onMiss?: (message: string) => void } = {}
   ) {
+    if (!selectedSet) {
+      setError("Choose a set from the list before scanning.");
+      return null;
+    }
     const variants = options.tryCrops ? await imageScanVariants(imageDataUrl) : [imageDataUrl];
 
     for (const variant of variants) {
       const response = await fetch("/api/scanner/scan", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...dataUrlToPayload(variant), language, foilPreference, packHint: packHint.trim() || undefined })
+        body: JSON.stringify({
+          ...dataUrlToPayload(variant),
+          language,
+          foilPreference,
+          packHint: selectedSet.name,
+          selectedSetId: selectedSet.id
+        })
       });
       const scanned = await handleScanResponse(response, options);
       if (scanned) return scanned;
@@ -324,10 +354,25 @@ export function CardScanner() {
   }
 
   async function scanManualCard(cardName: string, setName: string, cardNumber?: string | null) {
+    const manualSelectedSet = setName.trim()
+      ? cardSetOptions.find((option) => normalizeSetLabel(option.name) === normalizeSetLabel(setName))
+      : selectedSet;
+    if (!manualSelectedSet) {
+      setError("Choose a set from the list before adding or looking up a card.");
+      return null;
+    }
     const response = await fetch("/api/scanner/scan", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cardName, setName: setName || undefined, cardNumber: cardNumber || undefined, language, foilPreference, packHint: packHint.trim() || undefined })
+      body: JSON.stringify({
+        cardName,
+        setName: manualSelectedSet.name,
+        cardNumber: cardNumber || undefined,
+        language,
+        foilPreference,
+        packHint: manualSelectedSet.name,
+        selectedSetId: manualSelectedSet.id
+      })
     });
     return handleScanResponse(response);
   }
@@ -339,6 +384,10 @@ export function CardScanner() {
     const body = await response.json().catch(() => null) as ScanResponse | null;
     if (!response.ok || !body?.card) {
       const message = body?.error ?? `Scan failed with status ${response.status}.`;
+      if (body?.candidates?.length) {
+        setCandidateChoices(body.candidates);
+        if (body.messages?.length) setNotice(body.messages.join(" "));
+      }
       options.onMiss?.(message);
       if (!options.silentMiss) {
         setError(message);
@@ -346,6 +395,7 @@ export function CardScanner() {
       return null;
     }
 
+    setCandidateChoices([]);
     if (body?.messages?.length) setNotice(body.messages.join(" "));
     return body.card;
   }
@@ -381,6 +431,14 @@ export function CardScanner() {
     removeCard(id);
   }
 
+  function confirmCandidate(card: Omit<ScannerCard, "id" | "order" | "imageDataUrl">) {
+    const added = addCard(card, null);
+    showScannedCard(added);
+    setCandidateChoices([]);
+    setError(null);
+    setNotice("Confirmed selected-set match.");
+  }
+
   async function addScansToInventory(purchasePricePerCard: number) {
     if (!cards.length) return;
 
@@ -400,6 +458,8 @@ export function CardScanner() {
     const rows = cards.map((card) => ({
       user_id: userId,
       name: [card.cardName, card.cardNumber, card.setName].filter(Boolean).join(" - "),
+      canonical_card_id: card.canonicalCardId,
+      canonical_set_id: card.canonicalSetId,
       card_name: card.cardName,
       set_name: card.setName,
       card_number: card.cardNumber,
@@ -422,8 +482,18 @@ export function CardScanner() {
     }));
 
     let { error: insertError } = await supabase.from("inventory_items").insert(rows);
-    if (insertError && /card_name|set_name|card_number|variant|foil|language|column/i.test(insertError.message)) {
-      const legacyRows = rows.map(({ card_name: _cardName, set_name: _setName, card_number: _cardNumber, variant: _variant, foil: _foil, language: _language, ...row }) => row);
+    if (insertError && /canonical_card_id|canonical_set_id|card_name|set_name|card_number|variant|foil|language|column/i.test(insertError.message)) {
+      const legacyRows = rows.map(({
+        canonical_card_id: _canonicalCardId,
+        canonical_set_id: _canonicalSetId,
+        card_name: _cardName,
+        set_name: _setName,
+        card_number: _cardNumber,
+        variant: _variant,
+        foil: _foil,
+        language: _language,
+        ...row
+      }) => row);
       const retry = await supabase.from("inventory_items").insert(legacyRows);
       insertError = retry.error;
     }
@@ -459,6 +529,8 @@ export function CardScanner() {
 
     updateCard(card.id, {
       cardName: scanned.cardName,
+      canonicalCardId: scanned.canonicalCardId,
+      canonicalSetId: scanned.canonicalSetId,
       originalName: scanned.originalName,
       language: scanned.language,
       setName: scanned.setName,
@@ -503,7 +575,7 @@ export function CardScanner() {
         </div>
         <div className="mt-3">
           <p className="rounded-lg border border-white/10 bg-slate-950/40 px-3 py-2 text-xs text-slate-400">
-            Choose the set before scanning. Every scanned card will be saved to this set unless you edit it afterward.
+            {selectedSet ? `Scanning only: ${selectedSet.name}. Every match is restricted to this set.` : "Choose a set from the list before scanning. Typed custom set names cannot be scanned until they match a catalog set."}
           </p>
         </div>
       </section>
@@ -531,6 +603,33 @@ export function CardScanner() {
 
           {notice ? <p className="mt-4 rounded-lg border border-amber-300/30 bg-amber-300/10 p-3 text-sm text-amber-100">{notice}</p> : null}
           {error ? <p className="mt-4 rounded-lg border border-rose-300/30 bg-rose-500/10 p-3 text-sm text-rose-100">{error}</p> : null}
+          {candidateChoices.length ? (
+            <div className="mt-4 rounded-lg border border-amber-300/30 bg-amber-300/10 p-3">
+              <p className="text-sm font-bold text-amber-100">Confirm card from {selectedSet?.name ?? "selected set"}</p>
+              <div className="mt-3 grid gap-2">
+                {candidateChoices.map((candidate) => (
+                  <button
+                    key={`${candidate.canonicalCardId ?? candidate.cardName}-${candidate.cardNumber}`}
+                    type="button"
+                    onClick={() => confirmCandidate(candidate)}
+                    className="flex items-center gap-3 rounded-lg border border-white/10 bg-slate-950/60 p-2 text-left"
+                  >
+                    {candidate.referenceImageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={candidate.referenceImageUrl} alt="" className="h-14 w-10 rounded object-cover" />
+                    ) : (
+                      <div className="h-14 w-10 rounded bg-slate-900" />
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-bold text-white">{candidate.cardName}</span>
+                      <span className="block truncate text-xs text-slate-400">{candidate.cardNumber ?? "No number"} - {candidate.setName}</span>
+                    </span>
+                    <span className="text-sm font-black text-emerald-300">{currency(candidate.estimatedValue)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <aside className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-4">
@@ -539,6 +638,7 @@ export function CardScanner() {
           <div className="mt-4 grid gap-2">
             <input value={manualName} onChange={(event) => setManualName(event.target.value)} placeholder="Card name" className="h-11 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300" />
             <SetCombobox value={manualSet} onChange={setManualSet} options={setOptions} placeholder={packHint ? `Default: ${packHint}` : "Search set"} />
+            <input value={manualNumber} onChange={(event) => setManualNumber(event.target.value)} placeholder="Collector number, e.g. 025/198" className="h-11 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300" />
             <button onClick={() => void addManualCard()} disabled={isScanning} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-white/10 px-4 text-sm font-semibold text-slate-200">
               <Plus className="h-4 w-4" />
               Add card
@@ -916,13 +1016,14 @@ function captureVideoFrame(video: HTMLVideoElement) {
 function analyzeCardReadiness(video: HTMLVideoElement) {
   if (!video.videoWidth || !video.videoHeight) return { ready: false, lowLight: false };
 
+  const detectedCrop = detectCardBounds(video, video.videoWidth, video.videoHeight);
   const canvas = document.createElement("canvas");
   canvas.width = 96;
   canvas.height = 128;
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) return { ready: false, lowLight: false };
 
-  const crop = centerCrop(video.videoWidth, video.videoHeight, 0.72, 0.78, -0.02);
+  const crop = detectedCrop ?? centerCrop(video.videoWidth, video.videoHeight, 0.72, 0.78, -0.02);
   context.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
   const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
 
@@ -970,7 +1071,7 @@ function analyzeCardReadiness(video: HTMLVideoElement) {
   const darkRatio = veryDark / pixels;
 
   const lowLight = mean < 58 || brightRatio < 0.06 || darkRatio > 0.48;
-  const ready = mean > 55 && contrast > 34 && edgeScore > 15 && saturationRatio > 0.1 && brightRatio > 0.08 && darkRatio < 0.42;
+  const ready = Boolean(detectedCrop) && mean > 55 && contrast > 28 && edgeScore > 12 && brightRatio > 0.06 && darkRatio < 0.48;
   return { ready, lowLight };
 }
 
@@ -996,6 +1097,12 @@ function dataUrlToPayload(dataUrl: string) {
 async function imageScanVariants(dataUrl: string) {
   const image = await loadImage(dataUrl);
   const variants = [dataUrl];
+  const detectedCardCrop = detectCardBounds(image, image.width, image.height);
+  if (detectedCardCrop) {
+    const isolated = cropImage(image, detectedCardCrop.x, detectedCardCrop.y, detectedCardCrop.width, detectedCardCrop.height);
+    variants.push(isolated);
+    variants.push(await enhanceTextImage(isolated));
+  }
   const crops = [
     centerCrop(image.width, image.height, 0.72, 0.88),
     centerCrop(image.width, image.height, 0.48, 0.92),
@@ -1014,19 +1121,100 @@ async function buildRecognitionFrames(frames: string[]) {
   for (const frame of frames) {
     variants.push(frame);
     const image = await loadImage(frame);
-    const guidedCardCrop = centerCrop(image.width, image.height, 0.76, 0.82, -0.02);
+    const guidedCardCrop = detectCardBounds(image, image.width, image.height) ?? centerCrop(image.width, image.height, 0.76, 0.82, -0.02);
     const guidedCard = cropImage(image, guidedCardCrop.x, guidedCardCrop.y, guidedCardCrop.width, guidedCardCrop.height);
     variants.push(guidedCard);
+    variants.push(await enhanceTextImage(guidedCard));
 
     const cardImage = await loadImage(guidedCard);
     const titleCrop = regionCrop(cardImage.width, cardImage.height, 0.08, 0.03, 0.84, 0.2);
     const numberCrop = regionCrop(cardImage.width, cardImage.height, 0.02, 0.74, 0.62, 0.22);
+    const lowerRightNumberCrop = regionCrop(cardImage.width, cardImage.height, 0.38, 0.74, 0.6, 0.22);
     const artTextCrop = regionCrop(cardImage.width, cardImage.height, 0.08, 0.12, 0.84, 0.62);
     variants.push(cropImage(cardImage, titleCrop.x, titleCrop.y, titleCrop.width, titleCrop.height));
     variants.push(cropImage(cardImage, numberCrop.x, numberCrop.y, numberCrop.width, numberCrop.height));
+    variants.push(cropImage(cardImage, lowerRightNumberCrop.x, lowerRightNumberCrop.y, lowerRightNumberCrop.width, lowerRightNumberCrop.height));
     variants.push(cropImage(cardImage, artTextCrop.x, artTextCrop.y, artTextCrop.width, artTextCrop.height));
   }
   return variants;
+}
+
+function detectCardBounds(source: CanvasImageSource, sourceWidth: number, sourceHeight: number) {
+  if (!sourceWidth || !sourceHeight) return null;
+
+  const sampleWidth = 120;
+  const sampleHeight = Math.max(160, Math.round((sourceHeight / sourceWidth) * sampleWidth));
+  const canvas = document.createElement("canvas");
+  canvas.width = sampleWidth;
+  canvas.height = sampleHeight;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return null;
+  context.drawImage(source, 0, 0, sourceWidth, sourceHeight, 0, 0, sampleWidth, sampleHeight);
+  const { data } = context.getImageData(0, 0, sampleWidth, sampleHeight);
+  const luminance = new Float32Array(sampleWidth * sampleHeight);
+
+  for (let index = 0; index < data.length; index += 4) {
+    const r = data[index];
+    const g = data[index + 1];
+    const b = data[index + 2];
+    luminance[index / 4] = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  const xScores = new Float32Array(sampleWidth);
+  const yScores = new Float32Array(sampleHeight);
+  for (let y = 2; y < sampleHeight - 2; y += 1) {
+    for (let x = 2; x < sampleWidth - 2; x += 1) {
+      const i = y * sampleWidth + x;
+      const gradient = Math.abs(luminance[i] - luminance[i - 1]) + Math.abs(luminance[i] - luminance[i - sampleWidth]);
+      if (gradient < 22) continue;
+      const centerBias = 1 - Math.min(0.55, Math.abs(x / sampleWidth - 0.5) + Math.abs(y / sampleHeight - 0.5) * 0.45);
+      const score = gradient * centerBias;
+      xScores[x] += score;
+      yScores[y] += score;
+    }
+  }
+
+  const xBounds = scoreBounds(xScores, sampleWidth * 0.12);
+  const yBounds = scoreBounds(yScores, sampleHeight * 0.1);
+  if (!xBounds || !yBounds) return null;
+
+  const width = xBounds.end - xBounds.start;
+  const height = yBounds.end - yBounds.start;
+  const areaRatio = (width * height) / (sampleWidth * sampleHeight);
+  const aspect = width / Math.max(1, height);
+  if (areaRatio < 0.12 || areaRatio > 0.9 || aspect < 0.46 || aspect > 0.9) return null;
+
+  const padX = Math.round(width * 0.08);
+  const padY = Math.round(height * 0.08);
+  const sx = sourceWidth / sampleWidth;
+  const sy = sourceHeight / sampleHeight;
+  const startX = Math.max(0, xBounds.start - padX);
+  const startY = Math.max(0, yBounds.start - padY);
+  const endX = Math.min(sampleWidth, xBounds.end + padX);
+  const endY = Math.min(sampleHeight, yBounds.end + padY);
+
+  return {
+    x: Math.round(startX * sx),
+    y: Math.round(startY * sy),
+    width: Math.max(1, Math.round((endX - startX) * sx)),
+    height: Math.max(1, Math.round((endY - startY) * sy))
+  };
+}
+
+function scoreBounds(scores: Float32Array, minimumSpan: number) {
+  const maxScore = Math.max(...Array.from(scores));
+  if (maxScore <= 0) return null;
+  const threshold = maxScore * 0.32;
+  let start = -1;
+  let end = -1;
+  for (let index = 0; index < scores.length; index += 1) {
+    if (scores[index] >= threshold) {
+      if (start === -1) start = index;
+      end = index;
+    }
+  }
+  if (start === -1 || end - start < minimumSpan) return null;
+  return { start, end };
 }
 
 function centerCrop(width: number, height: number, widthRatio: number, heightRatio: number, yOffsetRatio = 0) {
@@ -1059,6 +1247,27 @@ function cropImage(image: HTMLImageElement, x: number, y: number, width: number,
   if (!context) return image.src;
   context.drawImage(image, x, y, width, height, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/jpeg", 0.84);
+}
+
+async function enhanceTextImage(dataUrl: string) {
+  const image = await loadImage(dataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return dataUrl;
+  context.drawImage(image, 0, 0);
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const { data } = imageData;
+  for (let index = 0; index < data.length; index += 4) {
+    const luma = 0.2126 * data[index] + 0.7152 * data[index + 1] + 0.0722 * data[index + 2];
+    const adjusted = Math.max(0, Math.min(255, (luma - 128) * 1.45 + 128));
+    data[index] = adjusted;
+    data[index + 1] = adjusted;
+    data[index + 2] = adjusted;
+  }
+  context.putImageData(imageData, 0, 0);
+  return canvas.toDataURL("image/jpeg", 0.88);
 }
 
 function loadImage(dataUrl: string) {
@@ -1120,6 +1329,18 @@ function languageLabel(language: string | null) {
 
 function isFoilVariant(variant?: string | null) {
   return /foil|holo/i.test(variant ?? "");
+}
+
+function normalizeSetLabel(value?: string | null) {
+  return (value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/pokémon/gi, "pokemon")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9\s-]/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function getTorchTrack(stream: MediaStream) {

@@ -4,7 +4,7 @@ import { StatCard } from "@/components/stat-card";
 import { isAdmin, requireProfile } from "@/lib/auth";
 import { formatPromoDiscount } from "@/lib/promo-codes";
 import type { FeedbackItem, FeedbackStatus } from "@/lib/types";
-import { addCatalogOffer, adminCheckProduct, approveProductMatch, createPromoCode, disableCatalogOffer, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, rejectProductMatch, sendAdminTestNotification, setPromoCodeActive, updateFeedbackStatus, updateUserPlan } from "./actions";
+import { addCatalogOffer, adminCheckProduct, approveProductMatch, createPromoCode, disableCatalogOffer, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, reconcilePokemonInventory, rejectProductMatch, sendAdminTestNotification, setPromoCodeActive, updateFeedbackStatus, updateUserPlan } from "./actions";
 
 const panelClass = "rounded-lg border border-white/10 bg-white/[0.04] p-5";
 const scrollPanelClass = `${panelClass} scroll-panel max-h-[680px] pr-4`;
@@ -109,6 +109,12 @@ export default async function AdminPage() {
               <input name="set_name" placeholder="Optional set name" className="mt-3 h-10 w-full rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm" />
               <textarea name="urls" placeholder="One product URL per line" className="mt-2 min-h-32 w-full rounded-lg border border-white/10 bg-slate-950/70 p-3 text-sm outline-none focus:border-amber-300" />
               <button className="mt-3 h-10 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Import URLs</button>
+            </form>
+            <form action={reconcilePokemonInventory} className="rounded-lg bg-white/5 p-3">
+              <p className="text-sm font-semibold text-white">Inventory card reconciliation</p>
+              <p className="mt-1 text-xs leading-5 text-slate-400">Links older scanner inventory rows to canonical Pokemon cards when the selected set and collector number produce one safe match. Ambiguous rows are skipped.</p>
+              <input name="limit" placeholder="Rows to scan" defaultValue="500" className="mt-3 h-10 w-full rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm" />
+              <button className="mt-3 h-10 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Reconcile inventory</button>
             </form>
           </div>
         </div>

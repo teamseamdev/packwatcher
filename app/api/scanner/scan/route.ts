@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
+import { normalizeCollectorNumber } from "@/lib/cards/collector-number";
+import { getCanonicalSet, getCardsForSelectedSet } from "@/lib/cards/catalog";
+import { matchCardWithinSelectedSet, type ScoredCardCandidate } from "@/lib/cards/set-matching";
 import { OpenAICardRecognitionProvider } from "@/lib/clips/providers/card-recognition";
-import { TCGCSVProvider } from "@/lib/clips/providers/pricing";
 import { errorMetadata, logAppEvent } from "@/lib/monitoring/log";
 import { reserveUsage } from "@/lib/usage-limits";
 
@@ -15,6 +17,7 @@ const ScanSchema = z.object({
   cardName: z.string().trim().optional(),
   setName: z.string().trim().optional(),
   cardNumber: z.string().trim().optional(),
+  selectedSetId: z.string().uuid().optional(),
   variant: z.string().trim().optional(),
   foilPreference: z.enum(["auto", "normal", "foil", "reverse_holo"]).default("auto"),
   packHint: z.string().trim().optional(),
@@ -34,6 +37,8 @@ type DetectedScannerCard = {
 };
 
 type PricedScannerCard = {
+  canonicalCardId: string | null;
+  canonicalSetId: string | null;
   cardName: string;
   setName: string | null;
   cardNumber: string | null;
@@ -48,6 +53,7 @@ type PricedScannerCard = {
   pricingSource: string;
   pricingConfidence: number;
   referenceImageUrl: string | null;
+  matchExplanation?: ScoredCardCandidate["explanation"] | null;
 };
 
 export async function POST(request: Request) {
@@ -55,14 +61,32 @@ export async function POST(request: Request) {
   const parsed = ScanSchema.parse(await request.json());
 
   const recognitionProvider = new OpenAICardRecognitionProvider();
-  const pricingProvider = new TCGCSVProvider();
   const messages: string[] = [];
+  if (!parsed.selectedSetId) {
+    return NextResponse.json({
+      ok: false,
+      error: "Choose a Pokemon set before scanning. PackWatcher will only match cards inside that selected set.",
+      code: "SET_NOT_SELECTED",
+      messages
+    }, { status: 422 });
+  }
+
+  const selectedSet = await getCanonicalSet(parsed.selectedSetId);
+  if (!selectedSet) {
+    return NextResponse.json({
+      ok: false,
+      error: "The selected Pokemon set could not be found. Choose a set again and retry.",
+      code: "SET_NOT_FOUND",
+      messages
+    }, { status: 404 });
+  }
+  messages.push(`Scanning only: ${selectedSet.name}`);
 
   let detectedCards: DetectedScannerCard[] = parsed.cardName
       ? [{
         cardName: parsed.cardName,
-        setName: parsed.setName || parsed.packHint || null,
-        cardNumber: normalizeCardNumber(parsed.cardNumber, parsed.packHint, parsed.setName || parsed.packHint),
+        setName: selectedSet.name,
+        cardNumber: normalizeCardNumber(parsed.cardNumber),
         variant: parsed.variant || variantFromFoilPreference(parsed.foilPreference),
         foil: isFoilVariant(parsed.variant || variantFromFoilPreference(parsed.foilPreference)),
         language: parsed.language,
@@ -108,12 +132,12 @@ export async function POST(request: Request) {
       const candidates = await recognitionProvider.recognize({
         imageBase64: parsed.imageBase64,
         mimeType: parsed.mimeType ?? "image/jpeg",
-        notes: scannerScanNotes(parsed.language, parsed.packHint, parsed.foilPreference)
+        notes: scannerScanNotes(parsed.language, selectedSet.name, parsed.foilPreference)
       });
       detectedCards = candidates.map((candidate) => ({
             cardName: candidate.cardName,
-            setName: parsed.packHint || candidate.setName || null,
-            cardNumber: normalizeCardNumber(candidate.cardNumber, parsed.packHint, parsed.packHint || candidate.setName),
+            setName: selectedSet.name,
+            cardNumber: normalizeCardNumber(candidate.cardNumber),
             variant: candidate.variant ?? variantFromFoilPreference(parsed.foilPreference),
             foil: isFoilVariant(candidate.variant ?? variantFromFoilPreference(parsed.foilPreference)),
             language: normalizeDetectedLanguage(candidate.language ?? parsed.language, candidate.cardName, candidate.originalName, parsed.language),
@@ -170,8 +194,49 @@ export async function POST(request: Request) {
   }
 
   const pricedCards: PricedScannerCard[] = [];
+  const selectedSetCandidates = await getCardsForSelectedSet(selectedSet.id);
   for (const detectedCard of detectedCards.slice(0, 12)) {
-    pricedCards.push(await priceCard(detectedCard, pricingProvider, messages));
+    const match = matchCardWithinSelectedSet({
+      selectedSetId: selectedSet.id,
+      ocrName: detectedCard.cardName,
+      ocrCollectorNumber: detectedCard.cardNumber,
+      candidates: selectedSetCandidates
+    });
+
+    await logAppEvent({
+      category: "scanner",
+      severity: match.action === "auto_confirmed" ? "info" : "warn",
+      message: "Scanner selected-set match evaluated",
+      userId: user.id,
+      metadata: {
+        selectedSetId: selectedSet.id,
+        selectedSetName: selectedSet.name,
+        ocrName: detectedCard.cardName,
+        ocrCollectorNumber: detectedCard.cardNumber,
+        eligibleCandidateCount: selectedSetCandidates.length,
+        action: match.action,
+        reason: "reason" in match ? match.reason : null,
+        topCandidateIds: match.alternatives.slice(0, 5).map((candidate) => candidate.id),
+        confidence: "best" in match && match.best ? match.best.confidence : null
+      }
+    });
+
+    if (match.action === "auto_confirmed") {
+      pricedCards.push(cardFromSetCandidate(detectedCard, match.best, parsed.foilPreference));
+      continue;
+    }
+
+    const alternatives = match.alternatives.map((candidate) => cardFromSetCandidate(detectedCard, candidate, parsed.foilPreference));
+    return NextResponse.json({
+      ok: false,
+      error: match.action === "confirm_candidate"
+        ? "Confirm which card this is. PackWatcher found multiple possible cards inside the selected set."
+        : "No safe match was found inside the selected set. Retake the scan, improve lighting, enter the collector number, or change the selected set.",
+      code: match.reason,
+      requiredAction: match.action,
+      candidates: alternatives,
+      messages
+    }, { status: match.action === "confirm_candidate" ? 409 : 422 });
   }
   const primaryCard = pricedCards[0];
 
@@ -183,34 +248,25 @@ export async function POST(request: Request) {
   });
 }
 
-async function priceCard(card: DetectedScannerCard, pricingProvider: TCGCSVProvider, messages: string[]): Promise<PricedScannerCard> {
-  const prices = await pricingProvider.price(card).catch((error) => {
-    messages.push(`Pricing lookup failed for ${card.cardName}: ${error instanceof Error ? error.message : "unknown error"}`);
-    void logAppEvent({
-      category: "scanner",
-      severity: "warn",
-      message: "Scanner pricing lookup failed",
-      metadata: { ...errorMetadata(error), cardName: card.cardName, setName: card.setName, cardNumber: card.cardNumber }
-    });
-    return [];
-  });
-  const price = prices[0] ?? null;
-
+function cardFromSetCandidate(card: DetectedScannerCard, candidate: ScoredCardCandidate, foilPreference: z.infer<typeof ScanSchema>["foilPreference"]): PricedScannerCard {
   return {
-    cardName: card.cardName,
-    setName: card.setName ?? null,
-    cardNumber: card.cardNumber ?? null,
-    variant: card.variant ?? null,
+    canonicalCardId: candidate.id,
+    canonicalSetId: candidate.setId,
+    cardName: candidate.name,
+    setName: candidate.setName,
+    cardNumber: candidate.collectorNumberNormalized ?? candidate.collectorNumberRaw,
+    variant: card.variant ?? variantFromFoilPreference(foilPreference),
     foil: card.foil,
     language: card.language ?? null,
     originalName: card.originalName ?? null,
-    confidence: card.confidence,
+    confidence: Math.min(candidate.confidence, card.confidence || candidate.confidence),
     recognitionSource: card.source,
-    estimatedValue: price?.value ?? 0,
-    priceLabel: price?.label ?? null,
-    pricingSource: price?.source ?? "manual",
-    pricingConfidence: price?.confidence ?? 0,
-    referenceImageUrl: price?.imageUrl ?? null
+    estimatedValue: candidate.marketPrice ?? 0,
+    priceLabel: candidate.name,
+    pricingSource: candidate.tcgplayerProductId ? `tcgcsv:${candidate.tcgplayerProductId}` : "tcgcsv",
+    pricingConfidence: candidate.marketPrice ? 0.95 : 0,
+    referenceImageUrl: candidate.imageUrl ?? null,
+    matchExplanation: candidate.explanation
   };
 }
 
@@ -286,25 +342,6 @@ function isPlaceholderCard(card: DetectedScannerCard) {
   return /^unknown pokemon card$/i.test(card.cardName.trim());
 }
 
-function normalizeCardNumber(cardNumber: string | null | undefined, packHint?: string, setName?: string | null) {
-  const text = typeof cardNumber === "string" ? cardNumber.trim() : "";
-  if (!text) return null;
-
-  const match = text.match(/\b([A-Z]{0,4}\s*#?\s*)?(\d{1,4})\s*\/\s*(\d{1,4})\b/i);
-  if (!match) return null;
-
-  const prefix = (match[1] ?? "").replace(/[#\s]/g, "").toUpperCase();
-  const numerator = match[2].padStart(match[2].length < 3 ? 3 : match[2].length, "0");
-  const denominator = match[3].padStart(match[3].length < 3 ? 3 : match[3].length, "0");
-  const expectedDenominator = expectedSetSize(packHint, setName);
-
-  if (expectedDenominator && denominator !== expectedDenominator) return null;
-
-  return `${prefix ? `${prefix} ` : ""}${numerator}/${denominator}`;
-}
-
-function expectedSetSize(packHint?: string, setName?: string | null) {
-  const text = `${packHint ?? ""} ${setName ?? ""}`.toLowerCase();
-  if (/\bchaos rising\b/.test(text)) return "086";
-  return null;
+function normalizeCardNumber(cardNumber: string | null | undefined) {
+  return normalizeCollectorNumber(cardNumber)?.normalized ?? null;
 }

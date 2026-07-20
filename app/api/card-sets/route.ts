@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
+import { listCanonicalSets } from "@/lib/cards/catalog";
 import { TCGCSVProvider } from "@/lib/clips/providers/pricing";
 import { errorMetadata, logAppEvent } from "@/lib/monitoring/log";
 
@@ -10,8 +11,7 @@ export async function GET() {
   const { supabase, user } = await requireUser();
 
   try {
-    const provider = new TCGCSVProvider();
-    const tcgcsvSets = await provider.listSets();
+    const canonicalSets = await listCanonicalSets();
     const { data } = await supabase
       .from("catalog_products")
       .select("set_name")
@@ -20,12 +20,19 @@ export async function GET() {
       .limit(1000);
 
     const sets = Array.from(new Set([
-      ...tcgcsvSets,
+      ...canonicalSets.map((set) => set.name),
       ...(data ?? []).map((item) => cleanSetName(item.set_name)).filter(Boolean)
     ] as string[])).sort((left, right) => left.localeCompare(right));
 
-    return NextResponse.json({ ok: true, sets });
+    return NextResponse.json({ ok: true, sets, cardSets: canonicalSets });
   } catch (error) {
+    try {
+      const provider = new TCGCSVProvider();
+      const sets = await provider.listSets();
+      return NextResponse.json({ ok: true, sets, cardSets: [] });
+    } catch {
+      // Fall through to the logged error below.
+    }
     await logAppEvent({
       category: "scanner",
       severity: "warn",

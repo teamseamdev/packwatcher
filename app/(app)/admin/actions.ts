@@ -4,6 +4,7 @@ import { createHash } from "crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { isAdmin, requireProfile } from "@/lib/auth";
+import { reconcileInventoryCanonicalCards } from "@/lib/cards/reconcile-inventory";
 import type { ImportedCatalogOffer } from "@/lib/catalog-importers/types";
 import { importPokemonFromBestBuy } from "@/lib/catalog-importers/bestbuy";
 import { importPokemonFromRetailerSearch } from "@/lib/catalog-importers/retailer-search";
@@ -62,6 +63,10 @@ const FeedbackStatusSchema = z.object({
   feedback_id: z.string().uuid(),
   status: z.enum(["new", "reviewed", "in_progress", "handled", "closed"]),
   status_note: z.string().trim().max(1000).optional()
+});
+
+const ReconcileInventorySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(2000).default(500)
 });
 
 export async function adminCheckProduct(productId: string) {
@@ -256,6 +261,26 @@ export async function updateFeedbackStatus(formData: FormData) {
 
   revalidatePath("/admin");
   revalidatePath("/account");
+}
+
+export async function reconcilePokemonInventory(formData: FormData) {
+  const { profile, user } = await requireProfile();
+  if (!isAdmin(profile)) throw new Error("Admin access required.");
+  const parsed = ReconcileInventorySchema.parse(Object.fromEntries(formData));
+  const admin = createAdminClient();
+  const result = await reconcileInventoryCanonicalCards(parsed.limit);
+
+  await admin.from("app_events").insert({
+    user_id: user.id,
+    category: "scanner",
+    severity: "info",
+    message: "Inventory canonical card reconciliation completed",
+    metadata: result
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/inventory");
+  revalidatePath("/dashboard");
 }
 
 export async function addCatalogOffer(formData: FormData) {

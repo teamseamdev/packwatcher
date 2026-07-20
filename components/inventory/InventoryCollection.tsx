@@ -6,10 +6,11 @@ import Link from "next/link";
 import { ArrowDownAZ, CheckCircle2, Clock3, DollarSign, ExternalLink, Grid2X2, Layers3, Save, Search, Trash2 } from "lucide-react";
 import { deleteInventoryItem, updateInventoryItem } from "@/app/(app)/inventory/actions";
 import { SetCombobox } from "@/components/set-combobox";
+import { compareCollectorNumbers, normalizeCollectorNumber } from "@/lib/cards/collector-number";
 import { calculateProfit, currency } from "@/lib/profit";
 import type { InventoryItem } from "@/lib/types";
 
-type SortMode = "recent" | "alpha" | "set_alpha" | "price_desc" | "price_asc" | "profit_desc";
+type SortMode = "recent" | "oldest" | "alpha" | "alpha_desc" | "set_alpha" | "collector_asc" | "collector_desc" | "price_desc" | "price_asc" | "quantity_desc" | "quantity_asc" | "profit_desc";
 type ViewMode = "list" | "set";
 type SetChecklistCard = {
   key: string;
@@ -22,10 +23,16 @@ type SetChecklistCard = {
 
 const sortLabels: Record<SortMode, string> = {
   recent: "Recently added",
+  oldest: "Oldest added",
   alpha: "Alphabetical",
+  alpha_desc: "Name Z-A",
   set_alpha: "Set A-Z",
+  collector_asc: "Collector # ascending",
+  collector_desc: "Collector # descending",
   price_desc: "Price high to low",
   price_asc: "Price low to high",
+  quantity_desc: "Quantity high to low",
+  quantity_asc: "Quantity low to high",
   profit_desc: "Profit high to low"
 };
 
@@ -36,6 +43,7 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [checklist, setChecklist] = useState<SetChecklistCard[]>([]);
   const [allSetOptions, setAllSetOptions] = useState<string[]>([]);
+  const [allSetObjects, setAllSetObjects] = useState<Array<{ id: string; name: string }>>([]);
   const [checklistStatus, setChecklistStatus] = useState<"idle" | "loading" | "ready" | "failed">("idle");
 
   const setOptions = useMemo(() => {
@@ -48,6 +56,10 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
   }, [items]);
 
   const selectedSet = setFilter !== "all" ? setFilter : setOptions[0] ?? "";
+  const selectedSetId = useMemo(() => {
+    const normalized = normalizeSetLabel(selectedSet);
+    return allSetObjects.find((set) => normalizeSetLabel(set.name) === normalized)?.id ?? null;
+  }, [allSetObjects, selectedSet]);
   const searchableSetOptions = useMemo(
     () => Array.from(new Set([...allSetOptions, ...setOptions])).sort((left, right) => left.localeCompare(right)),
     [allSetOptions, setOptions]
@@ -57,8 +69,9 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
     let ignore = false;
     async function loadSets() {
       const response = await fetch("/api/card-sets");
-      const body = await response.json().catch(() => null) as { ok?: boolean; sets?: string[] } | null;
+      const body = await response.json().catch(() => null) as { ok?: boolean; sets?: string[]; cardSets?: Array<{ id: string; name: string }> } | null;
       if (!ignore && response.ok && body?.sets?.length) setAllSetOptions(body.sets);
+      if (!ignore && response.ok && body?.cardSets?.length) setAllSetObjects(body.cardSets);
     }
     void loadSets();
     return () => {
@@ -72,7 +85,8 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
     let ignore = false;
     async function loadChecklist() {
       setChecklistStatus("loading");
-      const response = await fetch(`/api/inventory/set-checklist?set=${encodeURIComponent(selectedSet)}`);
+      const query = selectedSetId ? `setId=${encodeURIComponent(selectedSetId)}` : `set=${encodeURIComponent(selectedSet)}`;
+      const response = await fetch(`/api/inventory/set-checklist?${query}`);
       const body = await response.json().catch(() => null) as { ok?: boolean; cards?: SetChecklistCard[] } | null;
       if (ignore) return;
       if (response.ok && body?.ok) {
@@ -88,7 +102,7 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
     return () => {
       ignore = true;
     };
-  }, [selectedSet, viewMode]);
+  }, [selectedSet, selectedSetId, viewMode]);
 
   const filteredItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -111,14 +125,26 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
       switch (sortMode) {
         case "alpha":
           return left.name.localeCompare(right.name);
+        case "alpha_desc":
+          return right.name.localeCompare(left.name);
         case "set_alpha":
-          return leftSet.localeCompare(rightSet) || left.name.localeCompare(right.name);
+          return leftSet.localeCompare(rightSet) || compareInventoryCollectorNumbers(left, right) || left.name.localeCompare(right.name);
+        case "collector_asc":
+          return compareInventoryCollectorNumbers(left, right) || left.name.localeCompare(right.name);
+        case "collector_desc":
+          return compareInventoryCollectorNumbers(right, left) || left.name.localeCompare(right.name);
         case "price_desc":
           return rightValue - leftValue;
         case "price_asc":
           return leftValue - rightValue;
+        case "quantity_desc":
+          return Number(right.quantity ?? 0) - Number(left.quantity ?? 0);
+        case "quantity_asc":
+          return Number(left.quantity ?? 0) - Number(right.quantity ?? 0);
         case "profit_desc":
           return rightProfit - leftProfit;
+        case "oldest":
+          return new Date(left.created_at).getTime() - new Date(right.created_at).getTime();
         case "recent":
         default:
           return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
@@ -452,20 +478,26 @@ function inventoryProfit(item: InventoryItem) {
   });
 }
 
+function compareInventoryCollectorNumbers(left: InventoryItem, right: InventoryItem) {
+  const leftLookup = parseInventoryLookup(left.name);
+  const rightLookup = parseInventoryLookup(right.name);
+  return compareCollectorNumbers(left.card_number ?? leftLookup.cardNumber, right.card_number ?? rightLookup.cardNumber);
+}
+
 function buildOwnedSetChecklist(checklist: SetChecklistCard[], ownedItems: InventoryItem[]) {
   const ownedByNumber = new Map<string, InventoryItem>();
   const ownedByName = new Map<string, InventoryItem>();
 
   for (const item of ownedItems) {
     const lookup = parseInventoryLookup(item.name);
-    const cardNumber = normalizeCollectorNumber(item.card_number ?? lookup.cardNumber);
+    const cardNumber = normalizeCollectorNumber(item.card_number ?? lookup.cardNumber)?.normalized ?? "";
     const cardName = normalizeLookup(item.card_name ?? lookup.cardName ?? item.name);
     if (cardNumber) ownedByNumber.set(cardNumber, item);
     if (cardName) ownedByName.set(cardName, item);
   }
 
   return checklist.map((card) => {
-    const numberMatch = normalizeCollectorNumber(card.cardNumber);
+    const numberMatch = normalizeCollectorNumber(card.cardNumber)?.normalized ?? "";
     const nameMatch = normalizeLookup(card.name);
     const ownedItem = (numberMatch ? ownedByNumber.get(numberMatch) : null) ?? ownedByName.get(nameMatch) ?? null;
     return {
@@ -504,10 +536,6 @@ function cleanInventoryText(value?: string | null) {
   return text || null;
 }
 
-function normalizeCollectorNumber(value?: string | null) {
-  return cleanInventoryText(value)?.replace(/\s+/g, "").toLowerCase() ?? "";
-}
-
 function normalizeLookup(value?: string | null) {
   return cleanInventoryText(value)
     ?.toLowerCase()
@@ -515,4 +543,16 @@ function normalizeLookup(value?: string | null) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim() ?? "";
+}
+
+function normalizeSetLabel(value?: string | null) {
+  return (value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/pokémon/gi, "pokemon")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9\s-]/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
