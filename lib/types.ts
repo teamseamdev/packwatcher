@@ -115,6 +115,7 @@ export type InventoryItem = {
   image_url?: string | null;
   canonical_set_id?: string | null;
   canonical_card_id?: string | null;
+  scan_event_id?: string | null;
   card_name?: string | null;
   set_name?: string | null;
   card_number?: string | null;

@@ -3,15 +3,49 @@
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCircle2, FileDown, Flashlight, FlashlightOff, Loader2, Plus, ScanLine, Search, Trash2, X } from "lucide-react";
 import { SetCombobox } from "@/components/set-combobox";
+import { averageCornerDistance, distance, mapVideoPointToCover, orderQuadPoints, polygonArea, quadCenter, smoothQuad, type Point, type Quad } from "@/lib/scanner/geometry";
 import { createClient } from "@/lib/supabase/browser";
 
 type ScannerMode = "scanner";
+type CaptureMode = "auto" | "manual";
 type ScannerLanguage = "auto" | "english" | "japanese" | "chinese_simplified" | "chinese_traditional" | "korean";
 type FoilPreference = "auto" | "normal" | "foil" | "reverse_holo";
 type ScanPhase = "idle" | "capturing" | "recognizing" | "pricing";
+type ScannerState = "initializing" | "searching" | "tracking" | "quality-blocked" | "stabilizing" | "capture-ready" | "capturing" | "identifying" | "captured" | "awaiting-removal" | "error" | "paused";
+type QualityBlocker = "blur" | "motion" | "dark" | "overexposed" | "glare" | "too-small" | "too-large" | "cropped" | "multiple-cards";
+type CardDetection = {
+  corners: Quad;
+  confidence: number;
+  areaRatio: number;
+  aspectRatio: number;
+  rotationDegrees: number;
+  rectangularity: number;
+  edgeStrength: number;
+  timestamp: number;
+  videoWidth: number;
+  videoHeight: number;
+};
+type FrameQuality = {
+  blurScore: number;
+  brightnessScore: number;
+  glareRatio: number;
+  motionScore: number;
+  allCornersVisible: boolean;
+  acceptable: boolean;
+  blockers: QualityBlocker[];
+};
+type TrackingSnapshot = {
+  detection: CardDetection;
+  quality: FrameQuality;
+  stableForMs: number;
+  consecutiveDetectedFrames: number;
+  consecutiveStableFrames: number;
+  multipleCards: boolean;
+};
 type ScannerCard = {
   id: string;
   order: number;
+  scanEventId: string;
   canonicalCardId: string | null;
   canonicalSetId: string | null;
   cardName: string;
@@ -28,12 +62,13 @@ type ScannerCard = {
   imageDataUrl?: string | null;
   referenceImageUrl?: string | null;
 };
+type ScannerCardPayload = Omit<ScannerCard, "id" | "order" | "imageDataUrl" | "scanEventId">;
 
 type ScanResponse = {
   ok: boolean;
-  card?: Omit<ScannerCard, "id" | "order" | "imageDataUrl">;
-  cards?: Array<Omit<ScannerCard, "id" | "order" | "imageDataUrl">>;
-  candidates?: Array<Omit<ScannerCard, "id" | "order" | "imageDataUrl">>;
+  card?: ScannerCardPayload;
+  cards?: ScannerCardPayload[];
+  candidates?: ScannerCardPayload[];
   requiredAction?: "confirm_candidate" | "no_safe_match";
   code?: string;
   error?: string;
@@ -50,7 +85,20 @@ type TorchTrack = MediaStreamTrack & {
   applyConstraints: (constraints: MediaTrackConstraints & { advanced?: Array<MediaTrackConstraintSet & { torch?: boolean }> }) => Promise<void>;
 };
 
-const CARD_READINESS_INTERVAL_MS = 450;
+const SCANNER_DETECTION_CONFIG = {
+  analysisIntervalMs: 110,
+  sampleWidth: 150,
+  minAreaRatio: 0.08,
+  maxAreaRatio: 0.78,
+  minAspectRatio: 0.46,
+  maxAspectRatio: 1.05,
+  minConfidence: 0.58,
+  minAutoCaptureMs: 720,
+  maxStableMotionPx: 18,
+  duplicateHammingDistance: 8,
+  rearmNoCardMs: 650,
+  sameCardCooldownMs: 2400
+} as const;
 const FALLBACK_SET_OPTIONS = [
   "Pokemon 151",
   "Prismatic Evolutions",
@@ -73,8 +121,21 @@ export function CardScanner() {
   const streamRef = useRef<MediaStream | null>(null);
   const successFlashTimeoutRef = useRef<number | null>(null);
   const cardHideTimeoutRef = useRef<number | null>(null);
-  const cardReadinessIntervalRef = useRef<number | null>(null);
+  const detectionFrameRef = useRef<number | null>(null);
+  const lastAnalysisAtRef = useRef(0);
+  const detectionInFlightRef = useRef(false);
+  const stableSinceRef = useRef<number | null>(null);
+  const lastDetectionRef = useRef<CardDetection | null>(null);
+  const trackingCountersRef = useRef({ detected: 0, stable: 0 });
+  const captureLockRef = useRef(false);
+  const scannerModeRef = useRef<CaptureMode>("auto");
+  const duplicateGuardRef = useRef<{ hash: string; canonicalCardId: string | null; capturedAt: number; armed: boolean }>({ hash: "", canonicalCardId: null, capturedAt: 0, armed: true });
+  const noCardSinceRef = useRef<number | null>(null);
   const [mode, setMode] = useState<ScannerMode>("scanner");
+  const [captureMode, setCaptureMode] = useState<CaptureMode>("auto");
+  const [scannerState, setScannerState] = useState<ScannerState>("searching");
+  const [tracking, setTracking] = useState<TrackingSnapshot | null>(null);
+  const [autoProgress, setAutoProgress] = useState(0);
   const [cards, setCards] = useState<ScannerCard[]>([]);
   const [lastCard, setLastCard] = useState<ScannerCard | null>(null);
   const [isCameraReady, setIsCameraReady] = useState(false);
@@ -92,7 +153,7 @@ export function CardScanner() {
   const [successFlash, setSuccessFlash] = useState(false);
   const [setOptions, setSetOptions] = useState<string[]>(FALLBACK_SET_OPTIONS);
   const [cardSetOptions, setCardSetOptions] = useState<CardSetOption[]>([]);
-  const [candidateChoices, setCandidateChoices] = useState<Array<Omit<ScannerCard, "id" | "order" | "imageDataUrl">>>([]);
+  const [candidateChoices, setCandidateChoices] = useState<ScannerCardPayload[]>([]);
   const [cardReady, setCardReady] = useState(false);
   const [inventoryCostOpen, setInventoryCostOpen] = useState(false);
   const [scanTotalCost, setScanTotalCost] = useState("");
@@ -101,6 +162,7 @@ export function CardScanner() {
   const [lightingLow, setLightingLow] = useState(false);
 
   const totalValue = useMemo(() => cards.reduce((sum, card) => sum + card.estimatedValue, 0), [cards]);
+  const uniqueSessionCards = useMemo(() => new Set(cards.map((card) => card.canonicalCardId ?? `${card.cardName}:${card.setName}:${card.cardNumber}`)).size, [cards]);
   const totalScanCost = Number(scanTotalCost || 0);
   const costPerCard = cards.length && Number.isFinite(totalScanCost) ? totalScanCost / cards.length : 0;
   const scanProfit = totalValue - (Number.isFinite(totalScanCost) ? totalScanCost : 0);
@@ -115,6 +177,10 @@ export function CardScanner() {
       clearScannerTimers();
     };
   }, []);
+
+  useEffect(() => {
+    scannerModeRef.current = captureMode;
+  }, [captureMode]);
 
   useEffect(() => {
     if (videoRef.current && streamRef.current) {
@@ -133,18 +199,27 @@ export function CardScanner() {
 
   useEffect(() => {
     if (!isCameraReady) return;
-
-    cardReadinessIntervalRef.current = window.setInterval(() => {
-      const readiness = videoRef.current ? analyzeCardReadiness(videoRef.current) : { ready: false, lowLight: false };
-      setCardReady(readiness.ready);
-      setLightingLow(readiness.lowLight);
-    }, CARD_READINESS_INTERVAL_MS);
-
-    return () => {
-      if (cardReadinessIntervalRef.current) window.clearInterval(cardReadinessIntervalRef.current);
-      cardReadinessIntervalRef.current = null;
+    const loop = (timestamp: number) => {
+      detectionFrameRef.current = window.requestAnimationFrame(loop);
+      if (document.hidden || captureLockRef.current || isScanning || !videoRef.current) return;
+      if (timestamp - lastAnalysisAtRef.current < SCANNER_DETECTION_CONFIG.analysisIntervalMs || detectionInFlightRef.current) return;
+      lastAnalysisAtRef.current = timestamp;
+      detectionInFlightRef.current = true;
+      try {
+        handleDetectionFrame(videoRef.current, timestamp);
+      } finally {
+        detectionInFlightRef.current = false;
+      }
     };
-  }, [isCameraReady, mode]);
+    detectionFrameRef.current = window.requestAnimationFrame(loop);
+    return () => {
+      if (detectionFrameRef.current) window.cancelAnimationFrame(detectionFrameRef.current);
+      detectionFrameRef.current = null;
+      detectionInFlightRef.current = false;
+    };
+  // The loop intentionally reads current refs/state guards and is restarted only when camera/scanning status changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCameraReady, isScanning]);
 
   useEffect(() => {
     let ignore = false;
@@ -187,6 +262,13 @@ export function CardScanner() {
       });
       streamRef.current = stream;
       const track = getTorchTrack(stream);
+      stream.getVideoTracks().forEach((videoTrack) => {
+        videoTrack.onended = () => {
+          setScannerState("error");
+          setError("Camera stopped. Reopen the scanner to continue.");
+          stopCamera();
+        };
+      });
       const capabilities = track?.getCapabilities?.() as (MediaTrackCapabilities & { torch?: boolean }) | undefined;
       setHasTorch(Boolean(capabilities?.torch));
       setTorchOn(false);
@@ -199,11 +281,20 @@ export function CardScanner() {
   }
 
   function stopCamera() {
-    if (cardReadinessIntervalRef.current) window.clearInterval(cardReadinessIntervalRef.current);
-    cardReadinessIntervalRef.current = null;
+    if (detectionFrameRef.current) window.cancelAnimationFrame(detectionFrameRef.current);
+    detectionFrameRef.current = null;
+    detectionInFlightRef.current = false;
+    lastDetectionRef.current = null;
+    stableSinceRef.current = null;
+    trackingCountersRef.current = { detected: 0, stable: 0 };
+    captureLockRef.current = false;
+    noCardSinceRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     setCardReady(false);
+    setTracking(null);
+    setAutoProgress(0);
+    setScannerState("searching");
     setHasTorch(false);
     setTorchOn(false);
     setLightingLow(false);
@@ -250,18 +341,91 @@ export function CardScanner() {
     }, 5000);
   }
 
-  async function scanCameraFrame() {
+  function handleDetectionFrame(video: HTMLVideoElement, timestamp: number) {
+    const analysis = analyzeVideoFrame(video, lastDetectionRef.current, timestamp);
+    if (!analysis.detection) {
+      const noCardSince = noCardSinceRef.current ?? timestamp;
+      noCardSinceRef.current = noCardSince;
+      if (timestamp - noCardSince > SCANNER_DETECTION_CONFIG.rearmNoCardMs) {
+        duplicateGuardRef.current.armed = true;
+        setScannerState("searching");
+      }
+      setCardReady(false);
+      setTracking(null);
+      setAutoProgress(0);
+      stableSinceRef.current = null;
+      trackingCountersRef.current = { detected: 0, stable: 0 };
+      return;
+    }
+
+    noCardSinceRef.current = null;
+    const previous = lastDetectionRef.current;
+    const smoothedCorners = smoothQuad(previous?.corners ?? null, analysis.detection.corners, 0.42);
+    const detection: CardDetection = { ...analysis.detection, corners: smoothedCorners };
+    const motionScore = previous ? averageCornerDistance(previous.corners, detection.corners) : 0;
+    const quality = { ...analysis.quality, motionScore, acceptable: analysis.quality.acceptable && motionScore <= SCANNER_DETECTION_CONFIG.maxStableMotionPx };
+    if (motionScore > SCANNER_DETECTION_CONFIG.maxStableMotionPx && !quality.blockers.includes("motion")) quality.blockers.push("motion");
+
+    lastDetectionRef.current = detection;
+    trackingCountersRef.current.detected += 1;
+    const stable = detection.confidence >= SCANNER_DETECTION_CONFIG.minConfidence && quality.acceptable && !analysis.multipleCards;
+    if (stable) {
+      trackingCountersRef.current.stable += 1;
+      stableSinceRef.current ??= timestamp;
+    } else {
+      trackingCountersRef.current.stable = 0;
+      stableSinceRef.current = null;
+    }
+
+    const stableForMs = stableSinceRef.current ? timestamp - stableSinceRef.current : 0;
+    const progress = stable ? Math.min(1, stableForMs / SCANNER_DETECTION_CONFIG.minAutoCaptureMs) : 0;
+    setTracking({
+      detection,
+      quality,
+      stableForMs,
+      consecutiveDetectedFrames: trackingCountersRef.current.detected,
+      consecutiveStableFrames: trackingCountersRef.current.stable,
+      multipleCards: analysis.multipleCards
+    });
+    setLightingLow(quality.blockers.includes("dark"));
+    setCardReady(stable);
+    setAutoProgress(progress);
+    setScannerState(scannerStateForAnalysis(stable, progress, quality.blockers, analysis.multipleCards));
+
+    if (
+      scannerModeRef.current === "auto" &&
+      progress >= 1 &&
+      duplicateGuardRef.current.armed &&
+      !captureLockRef.current &&
+      !isScanning
+    ) {
+      void scanCameraFrame({ detection, automatic: true });
+    }
+  }
+
+  async function scanCameraFrame(options: { detection?: CardDetection | null; automatic?: boolean; bypassDuplicate?: boolean } = {}) {
     if (!videoRef.current) return;
+    const detection = options.detection ?? lastDetectionRef.current;
     setIsScanning(true);
+    captureLockRef.current = true;
     setScanPhase("capturing");
+    setScannerState("capturing");
     setError(null);
     setNotice("Checking card...");
 
     try {
-      const frames = await captureCameraBurst(videoRef.current);
+      const sourceImage = detection ? capturePerspectiveCorrectedCard(videoRef.current, detection.corners) : captureVideoFrame(videoRef.current);
+      const fingerprint = await imageFingerprint(sourceImage);
+      if (options.automatic && isDuplicatePhysicalCardHash(fingerprint, duplicateGuardRef.current, noCardSinceRef.current)) {
+        setNotice("Remove card, then present the next copy.");
+        setScannerState("awaiting-removal");
+        return;
+      }
+
+      const frames = detection ? [sourceImage] : await captureCameraBurst(videoRef.current);
       const scanFailures: string[] = [];
-      let scanned: Omit<ScannerCard, "id" | "order" | "imageDataUrl"> | null = null;
-      const scannedImage = frames[Math.floor(frames.length / 2)] ?? frames[0];
+      let scanned: ScannerCardPayload | null = null;
+      const scannedImage = sourceImage;
 
       const focusedFrames = await buildRecognitionFrames(frames);
       const contactSheet = await buildContactSheet(focusedFrames);
@@ -291,15 +455,25 @@ export function CardScanner() {
       if (!scanned) {
         setError(scanFailures[0] ?? "No readable Pokemon card was detected. Hold the card flat in the frame, tap to focus if needed, then scan again.");
         setNotice(null);
+        setScannerState("error");
         return;
       }
 
       const card = addCard({ ...scanned, setName: selectedSet?.name ?? scanned.setName }, scannedImage);
+      duplicateGuardRef.current = {
+        hash: fingerprint,
+        canonicalCardId: card.canonicalCardId,
+        capturedAt: Date.now(),
+        armed: false
+      };
       showScannedCard(card);
       setNotice(null);
+      setScannerState("captured");
+      window.setTimeout(() => setScannerState("awaiting-removal"), 650);
     } finally {
       setScanPhase("idle");
       setIsScanning(false);
+      captureLockRef.current = false;
     }
   }
 
@@ -400,11 +574,12 @@ export function CardScanner() {
     return body.card;
   }
 
-  function addCard(card: Omit<ScannerCard, "id" | "order" | "imageDataUrl">, imageDataUrl?: string | null) {
+  function addCard(card: ScannerCardPayload, imageDataUrl?: string | null) {
     const next: ScannerCard = {
       ...card,
       foil: card.foil ?? isFoilVariant(card.variant),
       id: crypto.randomUUID(),
+      scanEventId: crypto.randomUUID(),
       order: cards.length + 1,
       imageDataUrl
     };
@@ -431,7 +606,7 @@ export function CardScanner() {
     removeCard(id);
   }
 
-  function confirmCandidate(card: Omit<ScannerCard, "id" | "order" | "imageDataUrl">) {
+  function confirmCandidate(card: ScannerCardPayload) {
     const added = addCard(card, null);
     showScannedCard(added);
     setCandidateChoices([]);
@@ -458,6 +633,7 @@ export function CardScanner() {
     const rows = cards.map((card) => ({
       user_id: userId,
       name: [card.cardName, card.cardNumber, card.setName].filter(Boolean).join(" - "),
+      scan_event_id: card.scanEventId,
       canonical_card_id: card.canonicalCardId,
       canonical_set_id: card.canonicalSetId,
       card_name: card.cardName,
@@ -482,10 +658,11 @@ export function CardScanner() {
     }));
 
     let { error: insertError } = await supabase.from("inventory_items").insert(rows);
-    if (insertError && /canonical_card_id|canonical_set_id|card_name|set_name|card_number|variant|foil|language|column/i.test(insertError.message)) {
+    if (insertError && /scan_event_id|canonical_card_id|canonical_set_id|card_name|set_name|card_number|variant|foil|language|column/i.test(insertError.message)) {
       const legacyRows = rows.map(({
         canonical_card_id: _canonicalCardId,
         canonical_set_id: _canonicalSetId,
+        scan_event_id: _scanEventId,
         card_name: _cardName,
         set_name: _setName,
         card_number: _cardNumber,
@@ -813,15 +990,21 @@ export function CardScanner() {
           isScanning={isScanning}
           successFlash={successFlash}
           cardReady={cardReady}
+          captureMode={captureMode}
+          scannerState={scannerState}
+          tracking={tracking}
+          autoProgress={autoProgress}
           hasTorch={hasTorch}
           torchOn={torchOn}
           lightingLow={lightingLow}
           lastCard={lastCard}
           totalCards={cards.length}
+          uniqueCards={uniqueSessionCards}
           totalValue={totalValue}
           error={error}
           notice={notice}
-          onScan={() => void scanCameraFrame()}
+          onScan={() => void scanCameraFrame({ automatic: false, bypassDuplicate: true })}
+          onModeChange={setCaptureMode}
           onToggleTorch={() => void toggleTorch()}
           onRemove={removeCardFromScanner}
           onClose={() => {
@@ -846,15 +1029,21 @@ function FullScreenScanner({
   isScanning,
   successFlash,
   cardReady,
+  captureMode,
+  scannerState,
+  tracking,
+  autoProgress,
   hasTorch,
   torchOn,
   lightingLow,
   lastCard,
   totalCards,
+  uniqueCards,
   totalValue,
   error,
   notice,
   onScan,
+  onModeChange,
   onToggleTorch,
   onRemove,
   onClose,
@@ -865,20 +1054,46 @@ function FullScreenScanner({
   isScanning: boolean;
   successFlash: boolean;
   cardReady: boolean;
+  captureMode: CaptureMode;
+  scannerState: ScannerState;
+  tracking: TrackingSnapshot | null;
+  autoProgress: number;
   hasTorch: boolean;
   torchOn: boolean;
   lightingLow: boolean;
   lastCard: ScannerCard | null;
   totalCards: number;
+  uniqueCards: number;
   totalValue: number;
   error: string | null;
   notice: string | null;
   onScan: () => void;
+  onModeChange: (mode: CaptureMode) => void;
   onToggleTorch: () => void;
   onRemove: (id: string) => void;
   onClose: () => void;
   onEnd: () => void;
 }) {
+  const [viewport, setViewport] = useState({ width: 1, height: 1 });
+  useEffect(() => {
+    function updateViewport() {
+      setViewport({ width: window.innerWidth, height: window.innerHeight });
+    }
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    window.addEventListener("orientationchange", updateViewport);
+    return () => {
+      window.removeEventListener("resize", updateViewport);
+      window.removeEventListener("orientationchange", updateViewport);
+    };
+  }, []);
+
+  const overlayPoints = tracking?.detection
+    ? tracking.detection.corners.map((point) => mapVideoPointToCover(point, tracking.detection.videoWidth, tracking.detection.videoHeight, viewport.width, viewport.height))
+    : null;
+  const statusText = scannerStatusText(scannerState, tracking);
+  const manualCaptureEnabled = Boolean(tracking?.detection) && !isScanning;
+
   return (
     <div className="fixed inset-0 z-[100] overflow-hidden bg-black text-white">
       <style>{`
@@ -896,8 +1111,21 @@ function FullScreenScanner({
         <button onClick={onClose} className="grid h-12 w-12 place-items-center rounded-full bg-white text-slate-950 shadow-lg">
           <X className="h-6 w-6" />
         </button>
-        <div className="rounded-full bg-black/50 px-4 py-2 text-sm font-bold text-white/75 shadow-lg backdrop-blur">
-          Manual scan
+        <div className="grid grid-cols-2 rounded-full bg-black/55 p-1 text-xs font-black shadow-lg backdrop-blur">
+          <button
+            type="button"
+            onClick={() => onModeChange("auto")}
+            className={`rounded-full px-4 py-2 ${captureMode === "auto" ? "bg-emerald-400 text-slate-950" : "text-white/75"}`}
+          >
+            Auto
+          </button>
+          <button
+            type="button"
+            onClick={() => onModeChange("manual")}
+            className={`rounded-full px-4 py-2 ${captureMode === "manual" ? "bg-white text-slate-950" : "text-white/75"}`}
+          >
+            Manual
+          </button>
         </div>
         {hasTorch ? (
           <button
@@ -916,20 +1144,48 @@ function FullScreenScanner({
         </div>
       ) : null}
 
-      <div className="pointer-events-none absolute inset-x-8 top-[20vh] mx-auto max-w-[285px] sm:max-w-[320px]">
-        <div className={`relative aspect-[63/88] rounded-[10px] border-[5px] shadow-[0_0_30px_rgba(148,163,184,0.25)] ${cardReady ? "border-emerald-400 shadow-[0_0_30px_rgba(74,222,128,0.5)]" : "border-slate-400/80"}`}>
-          <div className={`absolute -left-3 -top-3 h-6 w-6 rounded-full ${cardReady ? "bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" : "bg-slate-400"}`} />
-          <div className={`absolute -right-3 -top-3 h-6 w-6 rounded-full ${cardReady ? "bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" : "bg-slate-400"}`} />
-          <div className={`absolute -bottom-3 -left-3 h-6 w-6 rounded-full ${cardReady ? "bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" : "bg-slate-400"}`} />
-          <div className={`absolute -bottom-3 -right-3 h-6 w-6 rounded-full ${cardReady ? "bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" : "bg-slate-400"}`} />
-          <div className={`absolute left-1/2 top-7 -translate-x-1/2 rounded-full px-5 py-3 text-sm font-black shadow-lg backdrop-blur ${cardReady ? "bg-emerald-400/70 text-white" : "bg-slate-900/65 text-slate-100"}`}>
-            {isScanning
-              ? <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Checking</span>
-              : cardReady
-                ? <span className="inline-flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> Ready to capture</span>
-                : <span>Line card up</span>}
-          </div>
-          {isScanning ? <div className="absolute inset-x-3 top-1/2 h-1 rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(74,222,128,0.9)]" style={{ animation: "packwatcherScanLine 1.2s ease-in-out infinite alternate" }} /> : null}
+      <svg className="pointer-events-none absolute inset-0 h-full w-full" width={viewport.width} height={viewport.height} aria-hidden="true">
+        {overlayPoints ? (
+          <>
+            <polygon
+              points={overlayPoints.map((point) => `${point.x},${point.y}`).join(" ")}
+              fill={cardReady ? "rgba(16,185,129,0.16)" : "rgba(148,163,184,0.12)"}
+              stroke={cardReady ? "rgb(52,211,153)" : "rgb(203,213,225)"}
+              strokeWidth="5"
+              strokeLinejoin="round"
+              filter={cardReady ? "drop-shadow(0 0 12px rgba(52,211,153,0.8))" : undefined}
+            />
+            {overlayPoints.map((point, index) => (
+              <circle key={index} cx={point.x} cy={point.y} r="10" fill={cardReady ? "rgb(52,211,153)" : "rgb(203,213,225)"} />
+            ))}
+          </>
+        ) : (
+          <rect
+            x={viewport.width / 2 - 132}
+            y={viewport.height * 0.2}
+            width="264"
+            height="368"
+            rx="12"
+            fill="rgba(15,23,42,0.08)"
+            stroke="rgba(203,213,225,0.45)"
+            strokeWidth="3"
+            strokeDasharray="12 12"
+          />
+        )}
+      </svg>
+
+      <div className="pointer-events-none absolute left-5 right-5 top-[calc(env(safe-area-inset-top)+132px)] flex justify-center">
+        <div className={`max-w-[290px] rounded-full px-5 py-3 text-center text-sm font-black shadow-lg backdrop-blur ${cardReady ? "bg-emerald-400/75 text-white" : "bg-slate-950/70 text-slate-100"}`}>
+          {isScanning
+            ? <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Scanning...</span>
+            : cardReady
+              ? <span className="inline-flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> {captureMode === "auto" ? "Hold steady" : "Ready"}</span>
+              : <span>{statusText}</span>}
+          {captureMode === "auto" && autoProgress > 0 && !isScanning ? (
+            <span className="mt-2 block h-1.5 overflow-hidden rounded-full bg-white/25">
+              <span className="block h-full rounded-full bg-white" style={{ width: `${Math.round(autoProgress * 100)}%` }} />
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -943,7 +1199,7 @@ function FullScreenScanner({
         {!error && notice ? <p className="mb-3 rounded-xl border border-white/10 bg-black/35 p-3 text-center text-sm text-white/85 backdrop-blur">{notice}</p> : null}
 
         <div className="mb-3 flex items-center justify-between text-base font-bold">
-          <div>{totalCards} card{totalCards === 1 ? "" : "s"} scanned</div>
+          <div>{totalCards} total / {uniqueCards} unique</div>
           <div className="text-white/80">Total <span className="text-emerald-300">{currency(totalValue)}</span></div>
         </div>
 
@@ -976,8 +1232,13 @@ function FullScreenScanner({
             <span className="grid h-14 w-14 place-items-center rounded-2xl bg-black/40 backdrop-blur"><ScanLine className="h-7 w-7" /></span>
             Scanner
           </div>
-          <button onClick={onScan} disabled={isScanning} className={`grid h-24 w-24 place-items-center rounded-full border-[5px] text-slate-950 disabled:opacity-70 ${cardReady ? "border-emerald-400 bg-emerald-400 shadow-[0_0_24px_rgba(74,222,128,0.7)]" : "border-slate-300 bg-white"}`}>
-            {isScanning ? <Loader2 className="h-10 w-10 animate-spin" /> : <Check className="h-12 w-12 stroke-[3]" />}
+          <button
+            onClick={onScan}
+            disabled={isScanning || (captureMode === "manual" && !manualCaptureEnabled)}
+            className={`grid h-24 w-24 place-items-center rounded-full border-[5px] text-slate-950 disabled:opacity-60 ${cardReady ? "border-emerald-400 bg-emerald-400 shadow-[0_0_24px_rgba(74,222,128,0.7)]" : "border-slate-300 bg-white"}`}
+            aria-label={captureMode === "manual" ? "Capture card" : "Manual capture now"}
+          >
+            {isScanning ? <Loader2 className="h-10 w-10 animate-spin" /> : captureMode === "manual" ? <ScanLine className="h-11 w-11" /> : <Check className="h-12 w-12 stroke-[3]" />}
           </button>
           <button onClick={onEnd} className="grid justify-items-center gap-1 text-xs font-semibold text-white/85">
             <span className="grid h-14 w-14 place-items-center rounded-full bg-white text-slate-950"><Check className="h-8 w-8 stroke-[3]" /></span>
@@ -991,6 +1252,24 @@ function FullScreenScanner({
 
 function reorderCards(cards: ScannerCard[]) {
   return cards.map((card, index) => ({ ...card, order: index + 1 }));
+}
+
+function scannerStatusText(state: ScannerState, tracking: TrackingSnapshot | null) {
+  if (state === "awaiting-removal") return "Remove card";
+  if (state === "searching" || !tracking) return "Place one card in view";
+  if (tracking.multipleCards) return "Use one card at a time";
+  const blocker = tracking.quality.blockers[0];
+  if (blocker === "blur") return "Camera is still focusing";
+  if (blocker === "motion") return "Hold still";
+  if (blocker === "dark") return "More light needed";
+  if (blocker === "overexposed") return "Reduce bright light";
+  if (blocker === "glare") return "Reduce glare";
+  if (blocker === "too-small") return "Move card closer";
+  if (blocker === "too-large") return "Move card farther away";
+  if (blocker === "cropped") return "Keep entire card visible";
+  if (state === "stabilizing") return "Hold steady";
+  if (state === "tracking") return "Card detected";
+  return "Place one card in view";
 }
 
 function ScanMetric({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "neutral" | "positive" | "negative" }) {
@@ -1011,6 +1290,455 @@ function captureVideoFrame(video: HTMLVideoElement) {
   if (!context) throw new Error("Could not capture camera frame.");
   context.drawImage(video, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/jpeg", 0.82);
+}
+
+function capturePerspectiveCorrectedCard(video: HTMLVideoElement, corners: Quad) {
+  const sourceCanvas = document.createElement("canvas");
+  sourceCanvas.width = video.videoWidth || 960;
+  sourceCanvas.height = video.videoHeight || 1280;
+  const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
+  if (!sourceContext) return captureVideoFrame(video);
+  sourceContext.drawImage(video, 0, 0, sourceCanvas.width, sourceCanvas.height);
+
+  const portraitCorners = normalizeQuadForPortrait(corners);
+  const top = distance(portraitCorners[0], portraitCorners[1]);
+  const right = distance(portraitCorners[1], portraitCorners[2]);
+  const bottom = distance(portraitCorners[2], portraitCorners[3]);
+  const left = distance(portraitCorners[3], portraitCorners[0]);
+  const sourceShort = Math.max(1, Math.min((top + bottom) / 2, (left + right) / 2));
+  const targetWidth = Math.round(clamp(sourceShort * 1.25, 640, 920));
+  const targetHeight = Math.round(targetWidth / 0.716);
+  const target = document.createElement("canvas");
+  target.width = targetWidth;
+  target.height = targetHeight;
+  const targetContext = target.getContext("2d");
+  if (!targetContext) return captureVideoFrame(video);
+
+  const sourceData = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+  const output = targetContext.createImageData(targetWidth, targetHeight);
+  const homography = computeHomography(
+    [{ x: 0, y: 0 }, { x: targetWidth - 1, y: 0 }, { x: targetWidth - 1, y: targetHeight - 1 }, { x: 0, y: targetHeight - 1 }],
+    portraitCorners
+  );
+  if (!homography) return captureVideoFrame(video);
+
+  for (let y = 0; y < targetHeight; y += 1) {
+    for (let x = 0; x < targetWidth; x += 1) {
+      const sourcePoint = applyHomography(homography, x, y);
+      const sx = Math.max(0, Math.min(sourceCanvas.width - 1, Math.round(sourcePoint.x)));
+      const sy = Math.max(0, Math.min(sourceCanvas.height - 1, Math.round(sourcePoint.y)));
+      const sourceIndex = (sy * sourceCanvas.width + sx) * 4;
+      const targetIndex = (y * targetWidth + x) * 4;
+      output.data[targetIndex] = sourceData.data[sourceIndex];
+      output.data[targetIndex + 1] = sourceData.data[sourceIndex + 1];
+      output.data[targetIndex + 2] = sourceData.data[sourceIndex + 2];
+      output.data[targetIndex + 3] = 255;
+    }
+  }
+  targetContext.putImageData(output, 0, 0);
+  return target.toDataURL("image/jpeg", 0.9);
+}
+
+function normalizeQuadForPortrait(corners: Quad): Quad {
+  const width = (distance(corners[0], corners[1]) + distance(corners[2], corners[3])) / 2;
+  const height = (distance(corners[1], corners[2]) + distance(corners[3], corners[0])) / 2;
+  return width > height ? [corners[3], corners[0], corners[1], corners[2]] : corners;
+}
+
+function computeHomography(from: Quad, to: Quad) {
+  const matrix: number[][] = [];
+  for (let index = 0; index < 4; index += 1) {
+    const { x, y } = from[index];
+    const u = to[index].x;
+    const v = to[index].y;
+    matrix.push([x, y, 1, 0, 0, 0, -u * x, -u * y, u]);
+    matrix.push([0, 0, 0, x, y, 1, -v * x, -v * y, v]);
+  }
+  const solution = solveLinearSystem(matrix);
+  return solution ? [...solution.slice(0, 8), 1] : null;
+}
+
+function solveLinearSystem(matrix: number[][]) {
+  const size = 8;
+  for (let column = 0; column < size; column += 1) {
+    let pivot = column;
+    for (let row = column + 1; row < size; row += 1) {
+      if (Math.abs(matrix[row][column]) > Math.abs(matrix[pivot][column])) pivot = row;
+    }
+    if (Math.abs(matrix[pivot][column]) < 1e-8) return null;
+    [matrix[column], matrix[pivot]] = [matrix[pivot], matrix[column]];
+    const divisor = matrix[column][column];
+    for (let item = column; item <= size; item += 1) matrix[column][item] /= divisor;
+    for (let row = 0; row < size; row += 1) {
+      if (row === column) continue;
+      const factor = matrix[row][column];
+      for (let item = column; item <= size; item += 1) matrix[row][item] -= factor * matrix[column][item];
+    }
+  }
+  return matrix.map((row) => row[size]);
+}
+
+function applyHomography(h: number[], x: number, y: number) {
+  const denominator = h[6] * x + h[7] * y + h[8];
+  return {
+    x: (h[0] * x + h[1] * y + h[2]) / denominator,
+    y: (h[3] * x + h[4] * y + h[5]) / denominator
+  };
+}
+
+async function imageFingerprint(dataUrl: string) {
+  const image = await loadImage(dataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = 8;
+  canvas.height = 8;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return "";
+  context.drawImage(image, 0, 0, 8, 8);
+  const { data } = context.getImageData(0, 0, 8, 8);
+  const values: number[] = [];
+  let sum = 0;
+  for (let index = 0; index < data.length; index += 4) {
+    const value = 0.2126 * data[index] + 0.7152 * data[index + 1] + 0.0722 * data[index + 2];
+    values.push(value);
+    sum += value;
+  }
+  const average = sum / values.length;
+  return values.map((value) => value >= average ? "1" : "0").join("");
+}
+
+function isDuplicatePhysicalCardHash(
+  hash: string,
+  guard: { hash: string; canonicalCardId: string | null; capturedAt: number; armed: boolean },
+  noCardSince: number | null
+) {
+  if (!hash || guard.armed || !guard.hash) return false;
+  if (Date.now() - guard.capturedAt > SCANNER_DETECTION_CONFIG.sameCardCooldownMs && noCardSince) return false;
+  return hammingDistance(hash, guard.hash) <= SCANNER_DETECTION_CONFIG.duplicateHammingDistance;
+}
+
+function hammingDistance(left: string, right: string) {
+  const length = Math.min(left.length, right.length);
+  let distance = Math.abs(left.length - right.length);
+  for (let index = 0; index < length; index += 1) {
+    if (left[index] !== right[index]) distance += 1;
+  }
+  return distance;
+}
+
+function analyzeVideoFrame(video: HTMLVideoElement, previous: CardDetection | null, timestamp: number): { detection: CardDetection | null; quality: FrameQuality; multipleCards: boolean } {
+  if (!video.videoWidth || !video.videoHeight) {
+    return { detection: null, quality: emptyQuality(["cropped"]), multipleCards: false };
+  }
+
+  const candidates = detectCardCandidates(video, video.videoWidth, video.videoHeight, timestamp)
+    .sort((left, right) => right.confidence - left.confidence);
+  const best = candidates[0] ?? null;
+  if (!best) return { detection: null, quality: emptyQuality([]), multipleCards: false };
+
+  const multipleCards = candidates.filter((candidate) => candidate.confidence > 0.46).length > 1;
+  const quality = analyzeFrameQuality(video, best, previous, multipleCards);
+  return { detection: best, quality, multipleCards };
+}
+
+function detectCardCandidates(source: CanvasImageSource, sourceWidth: number, sourceHeight: number, timestamp = performance.now()): CardDetection[] {
+  const sampleWidth = SCANNER_DETECTION_CONFIG.sampleWidth;
+  const sampleHeight = Math.max(180, Math.round((sourceHeight / sourceWidth) * sampleWidth));
+  const canvas = document.createElement("canvas");
+  canvas.width = sampleWidth;
+  canvas.height = sampleHeight;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return [];
+  context.drawImage(source, 0, 0, sourceWidth, sourceHeight, 0, 0, sampleWidth, sampleHeight);
+  const { data } = context.getImageData(0, 0, sampleWidth, sampleHeight);
+  const luminance = new Float32Array(sampleWidth * sampleHeight);
+  let mean = 0;
+
+  for (let index = 0; index < data.length; index += 4) {
+    const luma = 0.2126 * data[index] + 0.7152 * data[index + 1] + 0.0722 * data[index + 2];
+    luminance[index / 4] = luma;
+    mean += luma;
+  }
+  mean /= luminance.length;
+
+  const edges = new Uint8Array(sampleWidth * sampleHeight);
+  const strengths = new Float32Array(sampleWidth * sampleHeight);
+  let gradientMean = 0;
+  let gradientCount = 0;
+  for (let y = 1; y < sampleHeight - 1; y += 1) {
+    for (let x = 1; x < sampleWidth - 1; x += 1) {
+      const i = y * sampleWidth + x;
+      const gx = Math.abs(luminance[i + 1] - luminance[i - 1]);
+      const gy = Math.abs(luminance[i + sampleWidth] - luminance[i - sampleWidth]);
+      const gradient = gx + gy;
+      strengths[i] = gradient;
+      gradientMean += gradient;
+      gradientCount += 1;
+    }
+  }
+  gradientMean = gradientCount ? gradientMean / gradientCount : 0;
+  const threshold = Math.max(28, gradientMean * 2.15, mean < 75 ? 20 : 0);
+  for (let index = 0; index < strengths.length; index += 1) {
+    if (strengths[index] >= threshold) edges[index] = 1;
+  }
+
+  const components = connectedEdgeComponents(edges, strengths, sampleWidth, sampleHeight);
+  const sx = sourceWidth / sampleWidth;
+  const sy = sourceHeight / sampleHeight;
+  return components
+    .map((component) => componentToDetection(component, sampleWidth, sampleHeight, sx, sy, timestamp))
+    .filter((candidate): candidate is CardDetection => Boolean(candidate));
+}
+
+function connectedEdgeComponents(edges: Uint8Array, strengths: Float32Array, width: number, height: number) {
+  const visited = new Uint8Array(edges.length);
+  const components: Array<Array<{ x: number; y: number; strength: number }>> = [];
+  const queue: number[] = [];
+
+  for (let start = 0; start < edges.length; start += 1) {
+    if (!edges[start] || visited[start]) continue;
+    queue.length = 0;
+    queue.push(start);
+    visited[start] = 1;
+    const points: Array<{ x: number; y: number; strength: number }> = [];
+
+    while (queue.length) {
+      const current = queue.pop() as number;
+      const x = current % width;
+      const y = Math.floor(current / width);
+      points.push({ x, y, strength: strengths[current] });
+
+      for (let oy = -1; oy <= 1; oy += 1) {
+        for (let ox = -1; ox <= 1; ox += 1) {
+          if (!ox && !oy) continue;
+          const nx = x + ox;
+          const ny = y + oy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+          const next = ny * width + nx;
+          if (edges[next] && !visited[next]) {
+            visited[next] = 1;
+            queue.push(next);
+          }
+        }
+      }
+    }
+
+    if (points.length >= 60) components.push(points);
+  }
+
+  return components.sort((left, right) => right.length - left.length).slice(0, 8);
+}
+
+function componentToDetection(
+  points: Array<{ x: number; y: number; strength: number }>,
+  sampleWidth: number,
+  sampleHeight: number,
+  scaleX: number,
+  scaleY: number,
+  timestamp: number
+): CardDetection | null {
+  let weight = 0;
+  let cx = 0;
+  let cy = 0;
+  for (const point of points) {
+    const w = Math.max(1, point.strength);
+    weight += w;
+    cx += point.x * w;
+    cy += point.y * w;
+  }
+  cx /= weight;
+  cy /= weight;
+
+  let xx = 0;
+  let xy = 0;
+  let yy = 0;
+  let edgeStrength = 0;
+  for (const point of points) {
+    const w = Math.max(1, point.strength);
+    const dx = point.x - cx;
+    const dy = point.y - cy;
+    xx += dx * dx * w;
+    xy += dx * dy * w;
+    yy += dy * dy * w;
+    edgeStrength += point.strength;
+  }
+  xx /= weight;
+  xy /= weight;
+  yy /= weight;
+  edgeStrength /= points.length;
+
+  const angle = 0.5 * Math.atan2(2 * xy, xx - yy);
+  const axisA = { x: Math.cos(angle), y: Math.sin(angle) };
+  const axisB = { x: -Math.sin(angle), y: Math.cos(angle) };
+  let minA = Number.POSITIVE_INFINITY;
+  let maxA = Number.NEGATIVE_INFINITY;
+  let minB = Number.POSITIVE_INFINITY;
+  let maxB = Number.NEGATIVE_INFINITY;
+  for (const point of points) {
+    const dx = point.x - cx;
+    const dy = point.y - cy;
+    const a = dx * axisA.x + dy * axisA.y;
+    const b = dx * axisB.x + dy * axisB.y;
+    minA = Math.min(minA, a);
+    maxA = Math.max(maxA, a);
+    minB = Math.min(minB, b);
+    maxB = Math.max(maxB, b);
+  }
+
+  const sampleCorners = orderQuadPoints([
+    { x: cx + axisA.x * minA + axisB.x * minB, y: cy + axisA.y * minA + axisB.y * minB },
+    { x: cx + axisA.x * maxA + axisB.x * minB, y: cy + axisA.y * maxA + axisB.y * minB },
+    { x: cx + axisA.x * maxA + axisB.x * maxB, y: cy + axisA.y * maxA + axisB.y * maxB },
+    { x: cx + axisA.x * minA + axisB.x * maxB, y: cy + axisA.y * minA + axisB.y * maxB }
+  ]);
+  const corners = sampleCorners.map((point) => ({ x: point.x * scaleX, y: point.y * scaleY })) as Quad;
+  const sourceWidth = sampleWidth * scaleX;
+  const sourceHeight = sampleHeight * scaleY;
+  const areaRatio = Math.abs(polygonArea(corners)) / (sourceWidth * sourceHeight);
+  const top = distance(corners[0], corners[1]);
+  const right = distance(corners[1], corners[2]);
+  const bottom = distance(corners[2], corners[3]);
+  const left = distance(corners[3], corners[0]);
+  const longEdge = Math.max(top, right, bottom, left);
+  const shortEdge = Math.min(top, right, bottom, left);
+  const aspectRatio = shortEdge / Math.max(1, longEdge);
+  const center = quadCenter(corners);
+  const centerDistance = Math.hypot(center.x / sourceWidth - 0.5, center.y / sourceHeight - 0.5);
+  const rectangularity = Math.min(top, bottom) / Math.max(top, bottom) * (Math.min(left, right) / Math.max(left, right));
+  const confidence = scoreCardDetection({
+    areaRatio,
+    aspectRatio,
+    rectangularity,
+    edgeStrength,
+    centerDistance,
+    corners,
+    sourceWidth,
+    sourceHeight
+  });
+
+  if (confidence < 0.28) return null;
+  return {
+    corners,
+    confidence,
+    areaRatio,
+    aspectRatio,
+    rotationDegrees: angle * 180 / Math.PI,
+    rectangularity,
+    edgeStrength,
+    timestamp,
+    videoWidth: sourceWidth,
+    videoHeight: sourceHeight
+  };
+}
+
+function scoreCardDetection(input: {
+  areaRatio: number;
+  aspectRatio: number;
+  rectangularity: number;
+  edgeStrength: number;
+  centerDistance: number;
+  corners: Quad;
+  sourceWidth: number;
+  sourceHeight: number;
+}) {
+  const areaScore = clamp01(1 - Math.abs(input.areaRatio - 0.28) / 0.32);
+  const aspectScore = clamp01(1 - Math.abs(input.aspectRatio - 0.716) / 0.32);
+  const rectangularityScore = clamp01(input.rectangularity);
+  const edgeScore = clamp01((input.edgeStrength - 20) / 70);
+  const centerScore = clamp01(1 - input.centerDistance / 0.7);
+  const visibleScore = input.corners.every((point) => point.x > 2 && point.y > 2 && point.x < input.sourceWidth - 2 && point.y < input.sourceHeight - 2) ? 1 : 0.45;
+
+  if (input.areaRatio < SCANNER_DETECTION_CONFIG.minAreaRatio || input.areaRatio > SCANNER_DETECTION_CONFIG.maxAreaRatio) return 0;
+  if (input.aspectRatio < SCANNER_DETECTION_CONFIG.minAspectRatio || input.aspectRatio > SCANNER_DETECTION_CONFIG.maxAspectRatio) return 0;
+
+  return Number((
+    areaScore * 0.22 +
+    aspectScore * 0.24 +
+    rectangularityScore * 0.18 +
+    edgeScore * 0.14 +
+    centerScore * 0.1 +
+    visibleScore * 0.12
+  ).toFixed(3));
+}
+
+function analyzeFrameQuality(video: HTMLVideoElement, detection: CardDetection, previous: CardDetection | null, multipleCards: boolean): FrameQuality {
+  const crop = boundsForQuad(detection.corners, video.videoWidth, video.videoHeight);
+  const canvas = document.createElement("canvas");
+  canvas.width = 96;
+  canvas.height = 132;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return emptyQuality(["blur"]);
+  context.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
+  const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+  const luma = new Float32Array(canvas.width * canvas.height);
+  let sum = 0;
+  let glare = 0;
+  let veryDark = 0;
+  let overexposed = 0;
+  for (let index = 0; index < data.length; index += 4) {
+    const value = 0.2126 * data[index] + 0.7152 * data[index + 1] + 0.0722 * data[index + 2];
+    luma[index / 4] = value;
+    sum += value;
+    if (value < 36) veryDark += 1;
+    if (value > 245) overexposed += 1;
+    if (value > 232 && Math.max(data[index], data[index + 1], data[index + 2]) - Math.min(data[index], data[index + 1], data[index + 2]) < 20) glare += 1;
+  }
+  const pixels = canvas.width * canvas.height;
+  const brightnessScore = sum / pixels;
+  let laplacianVariance = 0;
+  let laplacianSum = 0;
+  let laplacianCount = 0;
+  for (let y = 1; y < canvas.height - 1; y += 1) {
+    for (let x = 1; x < canvas.width - 1; x += 1) {
+      const i = y * canvas.width + x;
+      const laplacian = luma[i - 1] + luma[i + 1] + luma[i - canvas.width] + luma[i + canvas.width] - 4 * luma[i];
+      laplacianSum += laplacian;
+      laplacianVariance += laplacian * laplacian;
+      laplacianCount += 1;
+    }
+  }
+  const blurScore = laplacianCount ? laplacianVariance / laplacianCount - (laplacianSum / laplacianCount) ** 2 : 0;
+  const motionScore = previous ? averageCornerDistance(previous.corners, detection.corners) : 0;
+  const glareRatio = glare / pixels;
+  const blockers: QualityBlocker[] = [];
+  if (blurScore < 95) blockers.push("blur");
+  if (motionScore > SCANNER_DETECTION_CONFIG.maxStableMotionPx) blockers.push("motion");
+  if (brightnessScore < 48 || veryDark / pixels > 0.45) blockers.push("dark");
+  if (brightnessScore > 224 || overexposed / pixels > 0.32) blockers.push("overexposed");
+  if (glareRatio > 0.18) blockers.push("glare");
+  if (detection.areaRatio < SCANNER_DETECTION_CONFIG.minAreaRatio) blockers.push("too-small");
+  if (detection.areaRatio > SCANNER_DETECTION_CONFIG.maxAreaRatio) blockers.push("too-large");
+  if (!detection.corners.every((point) => point.x > 3 && point.y > 3 && point.x < video.videoWidth - 3 && point.y < video.videoHeight - 3)) blockers.push("cropped");
+  if (multipleCards) blockers.push("multiple-cards");
+
+  return {
+    blurScore,
+    brightnessScore,
+    glareRatio,
+    motionScore,
+    allCornersVisible: !blockers.includes("cropped"),
+    acceptable: blockers.length === 0,
+    blockers
+  };
+}
+
+function scannerStateForAnalysis(stable: boolean, progress: number, blockers: QualityBlocker[], multipleCards: boolean): ScannerState {
+  if (multipleCards) return "quality-blocked";
+  if (blockers.length) return "quality-blocked";
+  if (stable && progress >= 1) return "capture-ready";
+  if (stable) return "stabilizing";
+  return "tracking";
+}
+
+function emptyQuality(blockers: QualityBlocker[]): FrameQuality {
+  return {
+    blurScore: 0,
+    brightnessScore: 0,
+    glareRatio: 0,
+    motionScore: 0,
+    allCornersVisible: false,
+    acceptable: blockers.length === 0,
+    blockers
+  };
 }
 
 function analyzeCardReadiness(video: HTMLVideoElement) {
@@ -1140,81 +1868,29 @@ async function buildRecognitionFrames(frames: string[]) {
 }
 
 function detectCardBounds(source: CanvasImageSource, sourceWidth: number, sourceHeight: number) {
-  if (!sourceWidth || !sourceHeight) return null;
+  const detection = detectCardCandidates(source, sourceWidth, sourceHeight)[0] ?? null;
+  return detection ? boundsForQuad(detection.corners, sourceWidth, sourceHeight) : null;
+}
 
-  const sampleWidth = 120;
-  const sampleHeight = Math.max(160, Math.round((sourceHeight / sourceWidth) * sampleWidth));
-  const canvas = document.createElement("canvas");
-  canvas.width = sampleWidth;
-  canvas.height = sampleHeight;
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) return null;
-  context.drawImage(source, 0, 0, sourceWidth, sourceHeight, 0, 0, sampleWidth, sampleHeight);
-  const { data } = context.getImageData(0, 0, sampleWidth, sampleHeight);
-  const luminance = new Float32Array(sampleWidth * sampleHeight);
-
-  for (let index = 0; index < data.length; index += 4) {
-    const r = data[index];
-    const g = data[index + 1];
-    const b = data[index + 2];
-    luminance[index / 4] = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  }
-
-  const xScores = new Float32Array(sampleWidth);
-  const yScores = new Float32Array(sampleHeight);
-  for (let y = 2; y < sampleHeight - 2; y += 1) {
-    for (let x = 2; x < sampleWidth - 2; x += 1) {
-      const i = y * sampleWidth + x;
-      const gradient = Math.abs(luminance[i] - luminance[i - 1]) + Math.abs(luminance[i] - luminance[i - sampleWidth]);
-      if (gradient < 22) continue;
-      const centerBias = 1 - Math.min(0.55, Math.abs(x / sampleWidth - 0.5) + Math.abs(y / sampleHeight - 0.5) * 0.45);
-      const score = gradient * centerBias;
-      xScores[x] += score;
-      yScores[y] += score;
-    }
-  }
-
-  const xBounds = scoreBounds(xScores, sampleWidth * 0.12);
-  const yBounds = scoreBounds(yScores, sampleHeight * 0.1);
-  if (!xBounds || !yBounds) return null;
-
-  const width = xBounds.end - xBounds.start;
-  const height = yBounds.end - yBounds.start;
-  const areaRatio = (width * height) / (sampleWidth * sampleHeight);
-  const aspect = width / Math.max(1, height);
-  if (areaRatio < 0.12 || areaRatio > 0.9 || aspect < 0.46 || aspect > 0.9) return null;
-
-  const padX = Math.round(width * 0.08);
-  const padY = Math.round(height * 0.08);
-  const sx = sourceWidth / sampleWidth;
-  const sy = sourceHeight / sampleHeight;
-  const startX = Math.max(0, xBounds.start - padX);
-  const startY = Math.max(0, yBounds.start - padY);
-  const endX = Math.min(sampleWidth, xBounds.end + padX);
-  const endY = Math.min(sampleHeight, yBounds.end + padY);
-
+function boundsForQuad(corners: Quad, maxWidth: number, maxHeight: number) {
+  const minX = Math.max(0, Math.min(...corners.map((point) => point.x)));
+  const minY = Math.max(0, Math.min(...corners.map((point) => point.y)));
+  const maxX = Math.min(maxWidth, Math.max(...corners.map((point) => point.x)));
+  const maxY = Math.min(maxHeight, Math.max(...corners.map((point) => point.y)));
   return {
-    x: Math.round(startX * sx),
-    y: Math.round(startY * sy),
-    width: Math.max(1, Math.round((endX - startX) * sx)),
-    height: Math.max(1, Math.round((endY - startY) * sy))
+    x: Math.round(minX),
+    y: Math.round(minY),
+    width: Math.max(1, Math.round(maxX - minX)),
+    height: Math.max(1, Math.round(maxY - minY))
   };
 }
 
-function scoreBounds(scores: Float32Array, minimumSpan: number) {
-  const maxScore = Math.max(...Array.from(scores));
-  if (maxScore <= 0) return null;
-  const threshold = maxScore * 0.32;
-  let start = -1;
-  let end = -1;
-  for (let index = 0; index < scores.length; index += 1) {
-    if (scores[index] >= threshold) {
-      if (start === -1) start = index;
-      end = index;
-    }
-  }
-  if (start === -1 || end - start < minimumSpan) return null;
-  return { start, end };
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function clamp01(value: number) {
+  return clamp(value, 0, 1);
 }
 
 function centerCrop(width: number, height: number, widthRatio: number, heightRatio: number, yOffsetRatio = 0) {
