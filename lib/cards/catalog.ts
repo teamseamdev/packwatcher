@@ -40,6 +40,9 @@ type DbCard = {
   pokemon_card_sets?: { name: string } | null;
 };
 
+const selectedSetCardCache = new Map<string, { cards: CanonicalCardCandidate[]; cachedAt: number }>();
+const SELECTED_SET_CARD_CACHE_MS = 10 * 60 * 1000;
+
 export async function listCanonicalSets() {
   const admin = createAdminClient();
   const provider = new TCGCSVProvider();
@@ -89,6 +92,9 @@ export async function ensureSetCardsImported(setId: string) {
 }
 
 export async function getCardsForSelectedSet(setId: string): Promise<CanonicalCardCandidate[]> {
+  const cached = selectedSetCardCache.get(setId);
+  if (cached && Date.now() - cached.cachedAt < SELECTED_SET_CARD_CACHE_MS) return cached.cards;
+
   const admin = createAdminClient();
   const selectedSet = await ensureSetCardsImported(setId);
   if (!selectedSet) return [];
@@ -100,7 +106,9 @@ export async function getCardsForSelectedSet(setId: string): Promise<CanonicalCa
     .order("set_sort_key", { ascending: true });
   if (error) throw error;
 
-  return (data ?? []).map((card) => dbCardToCandidate(card as DbCard, selectedSet.name));
+  const cards = (data ?? []).map((card) => dbCardToCandidate(card as DbCard, selectedSet.name));
+  selectedSetCardCache.set(setId, { cards, cachedAt: Date.now() });
+  return cards;
 }
 
 export async function getSetChecklist(setId: string) {

@@ -4,6 +4,8 @@ import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCircle2, FileDown, Flashlight, FlashlightOff, Loader2, Plus, ScanLine, Search, Trash2, X } from "lucide-react";
 import { SetCombobox } from "@/components/set-combobox";
 import { averageCornerDistance, distance, mapVideoPointToCover, orderQuadPoints, polygonArea, quadCenter, smoothQuad, type Point, type Quad } from "@/lib/scanner/geometry";
+import { ScanCoordinator } from "@/lib/scanner/scan-coordinator";
+import type { PreparedSetScannerIndex } from "@/lib/scanner/set-pack";
 import { createClient } from "@/lib/supabase/browser";
 
 type ScannerMode = "scanner";
@@ -73,11 +75,23 @@ type ScanResponse = {
   code?: string;
   error?: string;
   messages?: string[];
+  usage?: {
+    limit: number | null;
+    used: number;
+    remaining: number | null;
+    replayed?: boolean;
+    skipped?: boolean;
+  };
 };
 
 type CardSetOption = {
   id: string;
   name: string;
+};
+type ScanJob = {
+  detection?: CardDetection | null;
+  automatic?: boolean;
+  bypassDuplicate?: boolean;
 };
 
 type TorchTrack = MediaStreamTrack & {
@@ -88,16 +102,17 @@ type TorchTrack = MediaStreamTrack & {
 const SCANNER_DETECTION_CONFIG = {
   analysisIntervalMs: 110,
   sampleWidth: 150,
-  minAreaRatio: 0.08,
-  maxAreaRatio: 0.78,
-  minAspectRatio: 0.46,
-  maxAspectRatio: 1.05,
-  minConfidence: 0.58,
+  minAreaRatio: 0.09,
+  maxAreaRatio: 0.54,
+  minAspectRatio: 0.52,
+  maxAspectRatio: 0.92,
+  minConfidence: 0.68,
   minAutoCaptureMs: 720,
   maxStableMotionPx: 18,
   duplicateHammingDistance: 8,
   rearmNoCardMs: 650,
-  sameCardCooldownMs: 2400
+  sameCardCooldownMs: 2400,
+  scanRequestTimeoutMs: 18000
 } as const;
 const FALLBACK_SET_OPTIONS = [
   "Pokemon 151",
@@ -115,6 +130,8 @@ const FALLBACK_SET_OPTIONS = [
   "Chinese Pokemon",
   "Korean Pokemon"
 ];
+const setPackCache = new Map<string, PreparedSetScannerIndex>();
+const SET_PACK_CACHE_MS = 10 * 60 * 1000;
 
 export function CardScanner() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -128,11 +145,16 @@ export function CardScanner() {
   const lastDetectionRef = useRef<CardDetection | null>(null);
   const trackingCountersRef = useRef({ detected: 0, stable: 0 });
   const captureLockRef = useRef(false);
+  const scanCoordinatorRef = useRef(new ScanCoordinator<ScanJob, ScannerCardPayload | null>());
+  const activeScanAbortRef = useRef<AbortController | null>(null);
+  const scannerSessionIdRef = useRef("");
   const scannerModeRef = useRef<CaptureMode>("auto");
   const duplicateGuardRef = useRef<{ hash: string; canonicalCardId: string | null; capturedAt: number; armed: boolean }>({ hash: "", canonicalCardId: null, capturedAt: 0, armed: true });
   const noCardSinceRef = useRef<number | null>(null);
   const [mode, setMode] = useState<ScannerMode>("scanner");
   const [captureMode, setCaptureMode] = useState<CaptureMode>("auto");
+  const [preparedSetPack, setPreparedSetPack] = useState<PreparedSetScannerIndex | null>(null);
+  const [isPreparingSet, setIsPreparingSet] = useState(false);
   const [scannerState, setScannerState] = useState<ScannerState>("searching");
   const [tracking, setTracking] = useState<TrackingSnapshot | null>(null);
   const [autoProgress, setAutoProgress] = useState(0);
@@ -245,13 +267,18 @@ export function CardScanner() {
     }
 
     setError(null);
-    setNotice(null);
+    setNotice(`Preparing ${selectedSet.name}...`);
     setCandidateChoices([]);
     setMode(nextMode);
     setIsComplete(false);
+    setIsPreparingSet(true);
 
     try {
+      const preparedPack = await prepareSelectedSetPack(selectedSet);
+      setPreparedSetPack(preparedPack);
+      setNotice(`${preparedPack.cards.length} cards ready`);
       stopCamera();
+      scannerSessionIdRef.current = crypto.randomUUID();
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: "environment" },
@@ -277,10 +304,15 @@ export function CardScanner() {
     } catch (cameraError) {
       setError(cameraError instanceof Error ? cameraError.message : "Could not start camera.");
       setIsCameraReady(false);
+    } finally {
+      setIsPreparingSet(false);
     }
   }
 
   function stopCamera() {
+    scannerSessionIdRef.current = "";
+    activeScanAbortRef.current?.abort();
+    activeScanAbortRef.current = null;
     if (detectionFrameRef.current) window.cancelAnimationFrame(detectionFrameRef.current);
     detectionFrameRef.current = null;
     detectionInFlightRef.current = false;
@@ -396,6 +428,8 @@ export function CardScanner() {
       scannerModeRef.current === "auto" &&
       progress >= 1 &&
       duplicateGuardRef.current.armed &&
+      preparedSetPack?.setId === selectedSet?.id &&
+      !scanCoordinatorRef.current.active &&
       !captureLockRef.current &&
       !isScanning
     ) {
@@ -403,9 +437,39 @@ export function CardScanner() {
     }
   }
 
-  async function scanCameraFrame(options: { detection?: CardDetection | null; automatic?: boolean; bypassDuplicate?: boolean } = {}) {
-    if (!videoRef.current) return;
+  async function prepareSelectedSetPack(set: CardSetOption) {
+    const cached = setPackCache.get(set.id);
+    if (cached && Date.now() - cached.preparedAt < SET_PACK_CACHE_MS) return cached;
+
+    const response = await fetch(`/api/scanner/set-pack?setId=${encodeURIComponent(set.id)}`, {
+      headers: { accept: "application/json" }
+    });
+    const body = await response.json().catch(() => null) as { ok?: boolean; pack?: PreparedSetScannerIndex; error?: string } | null;
+    if (!response.ok || !body?.ok || !body.pack) {
+      throw new Error(body?.error ?? `Could not prepare scanner set. Status ${response.status}.`);
+    }
+    setPackCache.set(set.id, body.pack);
+    return body.pack;
+  }
+
+  async function scanCameraFrame(options: ScanJob = {}) {
+    return scanCoordinatorRef.current.run(options, executeScanCameraFrame);
+  }
+
+  async function executeScanCameraFrame(options: ScanJob = {}, scanEventId: string) {
+    const sessionId = scannerSessionIdRef.current;
+    if (!videoRef.current) return null;
+    if (!selectedSet || preparedSetPack?.setId !== selectedSet.id) {
+      setError("Prepare the selected set before scanning.");
+      return null;
+    }
     const detection = options.detection ?? lastDetectionRef.current;
+    if (options.automatic && !duplicateGuardRef.current.armed) {
+      setNotice("Remove card, then present the next copy.");
+      setScannerState("awaiting-removal");
+      return null;
+    }
+    duplicateGuardRef.current.armed = false;
     setIsScanning(true);
     captureLockRef.current = true;
     setScanPhase("capturing");
@@ -419,7 +483,7 @@ export function CardScanner() {
       if (options.automatic && isDuplicatePhysicalCardHash(fingerprint, duplicateGuardRef.current, noCardSinceRef.current)) {
         setNotice("Remove card, then present the next copy.");
         setScannerState("awaiting-removal");
-        return;
+        return null;
       }
 
       const frames = detection ? [sourceImage] : await captureCameraBurst(videoRef.current);
@@ -429,37 +493,27 @@ export function CardScanner() {
 
       const focusedFrames = await buildRecognitionFrames(frames);
       const contactSheet = await buildContactSheet(focusedFrames);
-      if (contactSheet) {
-        setScanPhase("recognizing");
-        setNotice("Checking card...");
-        scanned = await scanImageDataUrl(contactSheet, {
-          silentMiss: true,
-          onMiss: (message) => {
-            if (message && !scanFailures.includes(message)) scanFailures.push(message);
-          }
-        });
-      }
-
-      for (let index = 0; !scanned && index < focusedFrames.length; index += 1) {
-        setScanPhase(index < frames.length ? "recognizing" : "pricing");
-        setNotice("Checking card...");
-        scanned = await scanImageDataUrl(focusedFrames[index], {
-          silentMiss: true,
-          tryCrops: true,
-          onMiss: (message) => {
-            if (message && !scanFailures.includes(message)) scanFailures.push(message);
-          }
-        });
-      }
+      setScanPhase("recognizing");
+      setScannerState("identifying");
+      setNotice("Identifying...");
+      scanned = await scanImageDataUrl(contactSheet ?? focusedFrames[0] ?? sourceImage, {
+        scanEventId,
+        scannerSessionId: sessionId,
+        silentMiss: true,
+        onMiss: (message) => {
+          if (message && !scanFailures.includes(message)) scanFailures.push(message);
+        }
+      });
 
       if (!scanned) {
         setError(scanFailures[0] ?? "No readable Pokemon card was detected. Hold the card flat in the frame, tap to focus if needed, then scan again.");
         setNotice(null);
         setScannerState("error");
-        return;
+        return null;
       }
+      if (!sessionId || scannerSessionIdRef.current !== sessionId || preparedSetPack?.setId !== selectedSet.id) return null;
 
-      const card = addCard({ ...scanned, setName: selectedSet?.name ?? scanned.setName }, scannedImage);
+      const card = addCard({ ...scanned, setName: selectedSet?.name ?? scanned.setName }, scannedImage, scanEventId);
       duplicateGuardRef.current = {
         hash: fingerprint,
         canonicalCardId: card.canonicalCardId,
@@ -470,6 +524,7 @@ export function CardScanner() {
       setNotice(null);
       setScannerState("captured");
       window.setTimeout(() => setScannerState("awaiting-removal"), 650);
+      return scanned;
     } finally {
       setScanPhase("idle");
       setIsScanning(false);
@@ -491,7 +546,7 @@ export function CardScanner() {
     setScanPhase("idle");
     if (!scanned) return;
 
-    const card = addCard(scanned, null);
+    const card = addCard(scanned, null, crypto.randomUUID());
     setLastCard(card);
     setManualName("");
     setManualSet("");
@@ -500,31 +555,43 @@ export function CardScanner() {
 
   async function scanImageDataUrl(
     imageDataUrl: string,
-    options: { silentMiss?: boolean; tryCrops?: boolean; onMiss?: (message: string) => void } = {}
+    options: { scanEventId?: string; scannerSessionId?: string; silentMiss?: boolean; onMiss?: (message: string) => void } = {}
   ) {
     if (!selectedSet) {
       setError("Choose a set from the list before scanning.");
       return null;
     }
-    const variants = options.tryCrops ? await imageScanVariants(imageDataUrl) : [imageDataUrl];
-
-    for (const variant of variants) {
+    activeScanAbortRef.current?.abort();
+    const controller = new AbortController();
+    activeScanAbortRef.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), SCANNER_DETECTION_CONFIG.scanRequestTimeoutMs);
+    try {
       const response = await fetch("/api/scanner/scan", {
         method: "POST",
         headers: { "content-type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
-          ...dataUrlToPayload(variant),
+          ...dataUrlToPayload(imageDataUrl),
+          scanEventId: options.scanEventId,
+          scannerSessionId: options.scannerSessionId,
           language,
           foilPreference,
           packHint: selectedSet.name,
           selectedSetId: selectedSet.id
         })
       });
-      const scanned = await handleScanResponse(response, options);
-      if (scanned) return scanned;
+      return handleScanResponse(response, options);
+    } catch (scanError) {
+      const message = scanError instanceof DOMException && scanError.name === "AbortError"
+        ? "Scanner request timed out. Retake the card once; PackWatcher will not keep retrying automatically."
+        : scanError instanceof Error ? scanError.message : "Scanner request failed.";
+      options.onMiss?.(message);
+      if (!options.silentMiss) setError(message);
+      return null;
+    } finally {
+      window.clearTimeout(timeout);
+      if (activeScanAbortRef.current === controller) activeScanAbortRef.current = null;
     }
-
-    return null;
   }
 
   async function scanManualCard(cardName: string, setName: string, cardNumber?: string | null) {
@@ -560,7 +627,7 @@ export function CardScanner() {
       const message = body?.error ?? `Scan failed with status ${response.status}.`;
       if (body?.candidates?.length) {
         setCandidateChoices(body.candidates);
-        if (body.messages?.length) setNotice(body.messages.join(" "));
+        setNotice("Choose the matching card from the selected set.");
       }
       options.onMiss?.(message);
       if (!options.silentMiss) {
@@ -570,16 +637,15 @@ export function CardScanner() {
     }
 
     setCandidateChoices([]);
-    if (body?.messages?.length) setNotice(body.messages.join(" "));
     return body.card;
   }
 
-  function addCard(card: ScannerCardPayload, imageDataUrl?: string | null) {
+  function addCard(card: ScannerCardPayload, imageDataUrl?: string | null, scanEventId = crypto.randomUUID()) {
     const next: ScannerCard = {
       ...card,
       foil: card.foil ?? isFoilVariant(card.variant),
       id: crypto.randomUUID(),
-      scanEventId: crypto.randomUUID(),
+      scanEventId,
       order: cards.length + 1,
       imageDataUrl
     };
@@ -770,11 +836,11 @@ export function CardScanner() {
                   void startCamera("scanner");
                 }
               }}
-              disabled={isScanning}
+              disabled={isScanning || isPreparingSet}
               className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-black text-slate-950 disabled:opacity-50 sm:flex-none"
             >
               <ScanLine className="h-4 w-4" />
-              {isCameraReady ? "Stop scanning" : "Start scanner"}
+              {isPreparingSet ? "Preparing set..." : isCameraReady ? "Stop scanning" : "Start scanner"}
             </button>
           </div>
 
@@ -998,6 +1064,7 @@ export function CardScanner() {
           torchOn={torchOn}
           lightingLow={lightingLow}
           lastCard={lastCard}
+          activeSetName={preparedSetPack?.setName ?? selectedSet?.name ?? null}
           totalCards={cards.length}
           uniqueCards={uniqueSessionCards}
           totalValue={totalValue}
@@ -1037,6 +1104,7 @@ function FullScreenScanner({
   torchOn,
   lightingLow,
   lastCard,
+  activeSetName,
   totalCards,
   uniqueCards,
   totalValue,
@@ -1062,6 +1130,7 @@ function FullScreenScanner({
   torchOn: boolean;
   lightingLow: boolean;
   lastCard: ScannerCard | null;
+  activeSetName: string | null;
   totalCards: number;
   uniqueCards: number;
   totalValue: number;
@@ -1138,8 +1207,14 @@ function FullScreenScanner({
         ) : <div className="w-12" />}
       </div>
 
+      {activeSetName ? (
+        <div className="pointer-events-none absolute left-1/2 top-[calc(env(safe-area-inset-top)+75px)] -translate-x-1/2 rounded-full border border-amber-300/25 bg-black/55 px-3 py-1.5 text-center text-xs font-black text-amber-100 shadow-lg backdrop-blur">
+          {compactSetName(activeSetName)}
+        </div>
+      ) : null}
+
       {lightingLow ? (
-        <div className="pointer-events-none absolute left-5 right-5 top-[calc(env(safe-area-inset-top)+76px)] rounded-2xl border border-amber-300/30 bg-black/65 px-4 py-3 text-center text-sm font-bold text-amber-100 shadow-lg backdrop-blur">
+        <div className="pointer-events-none absolute left-5 right-5 top-[calc(env(safe-area-inset-top)+106px)] rounded-2xl border border-amber-300/30 bg-black/65 px-4 py-3 text-center text-sm font-bold text-amber-100 shadow-lg backdrop-blur">
           {hasTorch && !torchOn ? "Lighting looks low. Try the flashlight." : "Need better lighting for a cleaner scan."}
         </div>
       ) : null}
@@ -1270,6 +1345,10 @@ function scannerStatusText(state: ScannerState, tracking: TrackingSnapshot | nul
   if (state === "stabilizing") return "Hold steady";
   if (state === "tracking") return "Card detected";
   return "Place one card in view";
+}
+
+function compactSetName(name: string) {
+  return name.length > 24 ? `${name.slice(0, 21)}...` : name;
 }
 
 function ScanMetric({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "neutral" | "positive" | "negative" }) {
@@ -1600,16 +1679,23 @@ function componentToDetection(
   const left = distance(corners[3], corners[0]);
   const longEdge = Math.max(top, right, bottom, left);
   const shortEdge = Math.min(top, right, bottom, left);
+  const horizontalCoverage = Math.max(top, bottom) / sourceWidth;
+  const verticalCoverage = Math.max(left, right) / sourceHeight;
   const aspectRatio = shortEdge / Math.max(1, longEdge);
   const center = quadCenter(corners);
   const centerDistance = Math.hypot(center.x / sourceWidth - 0.5, center.y / sourceHeight - 0.5);
   const rectangularity = Math.min(top, bottom) / Math.max(top, bottom) * (Math.min(left, right) / Math.max(left, right));
+  const sampleArea = Math.max(1, (maxA - minA) * (maxB - minB));
+  const edgeDensity = points.length / sampleArea;
   const confidence = scoreCardDetection({
     areaRatio,
     aspectRatio,
     rectangularity,
     edgeStrength,
+    edgeDensity,
     centerDistance,
+    horizontalCoverage,
+    verticalCoverage,
     corners,
     sourceWidth,
     sourceHeight
@@ -1635,28 +1721,38 @@ function scoreCardDetection(input: {
   aspectRatio: number;
   rectangularity: number;
   edgeStrength: number;
+  edgeDensity: number;
   centerDistance: number;
+  horizontalCoverage: number;
+  verticalCoverage: number;
   corners: Quad;
   sourceWidth: number;
   sourceHeight: number;
 }) {
-  const areaScore = clamp01(1 - Math.abs(input.areaRatio - 0.28) / 0.32);
-  const aspectScore = clamp01(1 - Math.abs(input.aspectRatio - 0.716) / 0.32);
+  const areaScore = clamp01(1 - Math.abs(input.areaRatio - 0.24) / 0.24);
+  const aspectScore = clamp01(1 - Math.abs(input.aspectRatio - 0.716) / 0.22);
   const rectangularityScore = clamp01(input.rectangularity);
   const edgeScore = clamp01((input.edgeStrength - 20) / 70);
-  const centerScore = clamp01(1 - input.centerDistance / 0.7);
+  const edgeDensityScore = input.edgeDensity < 0.012 || input.edgeDensity > 0.48 ? 0 : clamp01(1 - Math.abs(input.edgeDensity - 0.09) / 0.2);
+  const centerScore = clamp01(1 - input.centerDistance / 0.52);
   const visibleScore = input.corners.every((point) => point.x > 2 && point.y > 2 && point.x < input.sourceWidth - 2 && point.y < input.sourceHeight - 2) ? 1 : 0.45;
+  const center = quadCenter(input.corners);
+  const centerY = center.y / input.sourceHeight;
 
   if (input.areaRatio < SCANNER_DETECTION_CONFIG.minAreaRatio || input.areaRatio > SCANNER_DETECTION_CONFIG.maxAreaRatio) return 0;
   if (input.aspectRatio < SCANNER_DETECTION_CONFIG.minAspectRatio || input.aspectRatio > SCANNER_DETECTION_CONFIG.maxAspectRatio) return 0;
+  if (input.horizontalCoverage > 0.82 || input.verticalCoverage > 0.82) return 0;
+  if (centerY < 0.12 || centerY > 0.86) return 0;
+  if (input.rectangularity < 0.52) return 0;
 
   return Number((
-    areaScore * 0.22 +
-    aspectScore * 0.24 +
+    areaScore * 0.2 +
+    aspectScore * 0.26 +
     rectangularityScore * 0.18 +
-    edgeScore * 0.14 +
-    centerScore * 0.1 +
-    visibleScore * 0.12
+    edgeScore * 0.12 +
+    edgeDensityScore * 0.1 +
+    centerScore * 0.08 +
+    visibleScore * 0.06
   ).toFixed(3));
 }
 

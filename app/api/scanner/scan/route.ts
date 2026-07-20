@@ -14,6 +14,7 @@ export const dynamic = "force-dynamic";
 const ScanSchema = z.object({
   imageBase64: z.string().optional(),
   mimeType: z.string().optional(),
+  scanEventId: z.string().uuid().optional(),
   cardName: z.string().trim().optional(),
   setName: z.string().trim().optional(),
   cardNumber: z.string().trim().optional(),
@@ -57,11 +58,13 @@ type PricedScannerCard = {
 };
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
   const { user } = await requireUser();
   const parsed = ScanSchema.parse(await request.json());
 
   const recognitionProvider = new OpenAICardRecognitionProvider();
   const messages: string[] = [];
+  let usage: Awaited<ReturnType<typeof reserveUsage>> | null = null;
   if (!parsed.selectedSetId) {
     return NextResponse.json({
       ok: false,
@@ -80,7 +83,6 @@ export async function POST(request: Request) {
       messages
     }, { status: 404 });
   }
-  messages.push(`Scanning only: ${selectedSet.name}`);
 
   let detectedCards: DetectedScannerCard[] = parsed.cardName
       ? [{
@@ -113,10 +115,12 @@ export async function POST(request: Request) {
       }, { status: 422 });
     }
 
-    const usage = await reserveUsage(user.id, "card_scan", {
+    usage = await reserveUsage(user.id, "card_scan", {
       language: parsed.language,
-      packHint: parsed.packHint ?? null
-    });
+      packHint: parsed.packHint ?? null,
+      selectedSetId: selectedSet.id,
+      scanEventId: parsed.scanEventId ?? null
+    }, parsed.scanEventId ?? null);
     if (!usage.allowed) {
       return NextResponse.json({
         ok: false,
@@ -124,9 +128,7 @@ export async function POST(request: Request) {
         usage
       }, { status: 402 });
     }
-    if (usage.limit !== null && !usage.skipped) {
-      messages.push(`Scanner usage: ${usage.used} of ${usage.limit} scans used in the current 30-day window.`);
-    }
+    if (usage.replayed) messages.push("IDEMPOTENT_REPLAY");
 
     try {
       const candidates = await recognitionProvider.recognize({
@@ -195,6 +197,7 @@ export async function POST(request: Request) {
 
   const pricedCards: PricedScannerCard[] = [];
   const selectedSetCandidates = await getCardsForSelectedSet(selectedSet.id);
+  const lookupStartedAt = Date.now();
   for (const detectedCard of detectedCards.slice(0, 12)) {
     const match = matchCardWithinSelectedSet({
       selectedSetId: selectedSet.id,
@@ -214,6 +217,11 @@ export async function POST(request: Request) {
         ocrName: detectedCard.cardName,
         ocrCollectorNumber: detectedCard.cardNumber,
         eligibleCandidateCount: selectedSetCandidates.length,
+        lookupDurationMs: Date.now() - lookupStartedAt,
+        totalDurationMs: Date.now() - startedAt,
+        scanEventId: parsed.scanEventId ?? null,
+        usageCharged: Boolean(usage && usage.allowed && !usage.skipped),
+        usageReplayed: usage?.replayed ?? false,
         action: match.action,
         reason: "reason" in match ? match.reason : null,
         topCandidateIds: match.alternatives.slice(0, 5).map((candidate) => candidate.id),
@@ -235,7 +243,8 @@ export async function POST(request: Request) {
       code: match.reason,
       requiredAction: match.action,
       candidates: alternatives,
-      messages
+      messages,
+      usage: usageSummary(usage)
     }, { status: match.action === "confirm_candidate" ? 409 : 422 });
   }
   const primaryCard = pricedCards[0];
@@ -244,8 +253,20 @@ export async function POST(request: Request) {
     ok: true,
     card: primaryCard,
     cards: pricedCards,
-    messages
+    messages,
+    usage: usageSummary(usage)
   });
+}
+
+function usageSummary(usage: Awaited<ReturnType<typeof reserveUsage>> | null) {
+  if (!usage) return null;
+  return {
+    limit: usage.limit,
+    used: usage.used,
+    remaining: usage.remaining,
+    skipped: usage.skipped,
+    replayed: usage.replayed
+  };
 }
 
 function cardFromSetCandidate(card: DetectedScannerCard, candidate: ScoredCardCandidate, foilPreference: z.infer<typeof ScanSchema>["foilPreference"]): PricedScannerCard {

@@ -11,9 +11,10 @@ export type UsageReservation = {
   remaining: number | null;
   resetAt: string;
   skipped?: boolean;
+  replayed?: boolean;
 };
 
-export async function reserveUsage(userId: string, kind: UsageKind, metadata: Record<string, unknown> = {}): Promise<UsageReservation> {
+export async function reserveUsage(userId: string, kind: UsageKind, metadata: Record<string, unknown> = {}, scanEventId?: string | null): Promise<UsageReservation> {
   const admin = createAdminClient();
   const now = new Date();
   const since = new Date(now.getTime() - USAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
@@ -28,8 +29,37 @@ export async function reserveUsage(userId: string, kind: UsageKind, metadata: Re
 
     const plan = normalizePlan(profile?.plan);
     const limit = usageLimitForPlan(plan, kind);
+    if (scanEventId) {
+      const { data: existing, error: existingError } = await admin
+        .from("app_usage_events")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("usage_kind", kind)
+        .eq("scan_event_id", scanEventId)
+        .maybeSingle();
+      if (existingError) throw existingError;
+      if (existing) {
+        const { count } = await admin
+          .from("app_usage_events")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", userId)
+          .eq("usage_kind", kind)
+          .gte("created_at", since.toISOString());
+        const used = count ?? 0;
+        return {
+          allowed: true,
+          plan,
+          limit,
+          used,
+          remaining: limit === null ? null : Math.max(0, limit - used),
+          resetAt,
+          replayed: true
+        };
+      }
+    }
+
     if (limit === null) {
-      await admin.from("app_usage_events").insert({ user_id: userId, usage_kind: kind, metadata });
+      await admin.from("app_usage_events").insert({ user_id: userId, usage_kind: kind, scan_event_id: scanEventId ?? null, metadata });
       return { allowed: true, plan, limit, used: 0, remaining: null, resetAt };
     }
 
@@ -44,14 +74,27 @@ export async function reserveUsage(userId: string, kind: UsageKind, metadata: Re
 
     const used = count ?? 0;
     if (used >= limit) {
-      return { allowed: false, plan, limit, used, remaining: 0, resetAt: since.toISOString() };
+      return { allowed: false, plan, limit, used, remaining: 0, resetAt };
     }
 
     const { error: insertError } = await admin
       .from("app_usage_events")
-      .insert({ user_id: userId, usage_kind: kind, metadata });
+      .insert({ user_id: userId, usage_kind: kind, scan_event_id: scanEventId ?? null, metadata });
 
-    if (insertError) throw insertError;
+    if (insertError) {
+      if (scanEventId && /duplicate|unique/i.test(insertError.message)) {
+        return {
+          allowed: true,
+          plan,
+          limit,
+          used: used + 1,
+          remaining: Math.max(0, limit - used - 1),
+          resetAt,
+          replayed: true
+        };
+      }
+      throw insertError;
+    }
 
     return {
       allowed: true,
