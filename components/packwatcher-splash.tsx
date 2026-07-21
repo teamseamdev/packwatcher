@@ -20,17 +20,17 @@ export function PackWatcherSplash({ variant, fullScreen = true, message }: PackW
       aria-live="polite"
       aria-busy="true"
     >
-      <div className="relative grid justify-items-center gap-5">
-        <div className="pw-splash-frame relative grid h-28 w-28 place-items-center rounded-[1.35rem] border border-amber-300/30 bg-black/60 shadow-[0_0_42px_rgba(255,208,47,0.18)]">
-          <span className="pw-splash-corner left-3 top-3 border-l border-t" aria-hidden="true" />
-          <span className="pw-splash-corner right-3 top-3 border-r border-t" aria-hidden="true" />
-          <span className="pw-splash-corner bottom-3 left-3 border-b border-l" aria-hidden="true" />
-          <span className="pw-splash-corner bottom-3 right-3 border-b border-r" aria-hidden="true" />
+      <div className="relative grid justify-items-center gap-6">
+        <div className="pw-splash-frame relative grid h-44 w-44 place-items-center rounded-[1.75rem] border border-amber-300/30 bg-black/60 shadow-[0_0_54px_rgba(255,208,47,0.22)]">
+          <span className="pw-splash-corner left-4 top-4 border-l border-t" aria-hidden="true" />
+          <span className="pw-splash-corner right-4 top-4 border-r border-t" aria-hidden="true" />
+          <span className="pw-splash-corner bottom-4 left-4 border-b border-l" aria-hidden="true" />
+          <span className="pw-splash-corner bottom-4 right-4 border-b border-r" aria-hidden="true" />
           <span className="pw-splash-scan" aria-hidden="true" />
-          <BrandMark size="lg" />
+          <BrandMark size="xl" />
         </div>
         <div className="text-center">
-          <p className="text-lg font-black tracking-wide">PackWatcher</p>
+          <p className="text-2xl font-black tracking-wide">PackWatcher</p>
           <p className="mt-1 text-sm font-semibold text-slate-300">{status}<span className="pw-loading-dots" aria-hidden="true" /></p>
         </div>
       </div>

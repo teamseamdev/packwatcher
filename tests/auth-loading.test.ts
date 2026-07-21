@@ -22,7 +22,8 @@ test("auth errors are translated to readable messages", () => {
 });
 
 test("splash variants provide context-specific copy", () => {
-  assert.equal(splashMessageForVariant("app-boot"), "Loading PackWatcher");
+  assert.equal(splashMessageForVariant("app-boot"), "Loading");
+  assert.equal(splashMessageForVariant("auth-restore"), "Loading");
   assert.equal(splashMessageForVariant("discord-connect"), "Connecting to Discord");
   assert.equal(splashMessageForVariant("scanner-prepare", "Preparing Chaos Rising"), "Preparing Chaos Rising");
 });

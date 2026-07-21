@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { MessageCircle } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
+import { markOAuthLaunchActive } from "@/components/oauth-return-splash";
 import { PackWatcherSplash } from "@/components/packwatcher-splash";
 import { authErrorMessage, safeAuthRedirect } from "@/lib/auth/redirect";
 import { createClient } from "@/lib/supabase/browser";
@@ -65,6 +66,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
       const supabase = createClient();
       const next = nextPath();
       sessionStorage.setItem("packwatcher.oauth.next", next);
+      markOAuthLaunchActive();
       const redirectTo = `${location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider,
@@ -75,6 +77,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
       });
 
       if (error) {
+        sessionStorage.removeItem("packwatcher.oauth.active");
         oauthLockRef.current = false;
         setActiveOAuth(null);
         setMessage(authErrorMessage(error.message));
@@ -82,6 +85,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
       }
 
       if (!data.url) {
+        sessionStorage.removeItem("packwatcher.oauth.active");
         oauthLockRef.current = false;
         setActiveOAuth(null);
         setMessage("We couldn't start Discord sign-in. Please try again.");
@@ -89,6 +93,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
       }
 
       oauthRestoreTimerRef.current = window.setTimeout(() => {
+        sessionStorage.removeItem("packwatcher.oauth.active");
         oauthLockRef.current = false;
         setActiveOAuth(null);
         setMessage(provider === "discord" ? "We couldn't open Discord. Try again and PackWatcher will continue in your browser." : "We couldn't open the sign-in page. Please try again.");
@@ -101,7 +106,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
 
   return (
     <main className="grid min-h-screen place-items-center px-5 py-10">
-      {activeOAuth === "discord" ? <PackWatcherSplash variant="discord-connect" message="Opening Discord" /> : null}
+      {activeOAuth ? <PackWatcherSplash variant={activeOAuth === "discord" ? "discord-connect" : "app-boot"} message={activeOAuth === "discord" ? "Opening Discord" : "Loading"} /> : null}
       <section className="w-full max-w-md rounded-lg border border-white/10 bg-slate-950/80 p-6">
         <Link href="/" className="inline-flex items-center gap-3 text-sm font-bold text-amber-200">
           <BrandMark />

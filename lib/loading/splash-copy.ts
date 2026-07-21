@@ -6,8 +6,8 @@ export type SplashVariant =
   | "scanner-prepare";
 
 export const splashMessages: Record<SplashVariant, string> = {
-  "app-boot": "Loading PackWatcher",
-  "auth-restore": "Restoring your session",
+  "app-boot": "Loading",
+  "auth-restore": "Loading",
   "discord-connect": "Connecting to Discord",
   "oauth-callback": "Completing sign-in",
   "scanner-prepare": "Preparing scanner"
