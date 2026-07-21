@@ -34,12 +34,12 @@ export type AutoReadiness = {
 export const CAPTURE_POLICIES = {
   auto: {
     requireStableDetection: true,
-    minimumStableDurationMs: 480,
+    minimumStableDurationMs: 400,
     minimumStableFrames: 3,
-    minimumDetectionConfidence: 0.6,
+    minimumDetectionConfidence: 0.58,
     minimumCardLikeness: 0.58,
-    minimumSharpness: 70,
-    maximumMotionScore: 28,
+    minimumSharpness: 60,
+    maximumMotionScore: 34,
     maximumGlareRatio: 0.24,
     requireAllCornersVisible: true,
     allowFallbackCrop: false,
@@ -95,7 +95,7 @@ export function computeAutoReadiness(input: {
     return { score: 0, progress: 0, captureAllowed: false, blockers };
   }
 
-  const recent = input.frames.slice(-8);
+  const recent = input.frames.slice(-6);
   const validFrames = recent.filter((frame) =>
     frame.confidence >= policy.minimumDetectionConfidence &&
     frame.cardLikeness >= policy.minimumCardLikeness &&
@@ -120,12 +120,12 @@ export function computeAutoReadiness(input: {
     consistency * 0.12 +
     duration * 0.08
   );
-  const progress = score >= 0.5 ? Math.min(1, input.previousProgress * 0.75 + score * 0.35) : Math.max(0, input.previousProgress * 0.7);
+  const progress = score >= 0.45 ? Math.min(1, input.previousProgress * 0.7 + score * 0.42) : Math.max(0, input.previousProgress * 0.7);
   const captureAllowed =
-    progress >= 0.78 &&
-    score >= 0.68 &&
+    progress >= 0.72 &&
+    score >= 0.62 &&
     validFrames.length >= policy.minimumStableFrames &&
-    stableDuration >= policy.minimumStableDurationMs * 0.7;
+    stableDuration >= policy.minimumStableDurationMs * 0.55;
 
   return { score, progress, captureAllowed, blockers };
 }

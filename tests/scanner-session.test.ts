@@ -82,6 +82,43 @@ test("auto readiness hard-resets on active scan or missing set pack", () => {
   assert.deepEqual(readiness.blockers, ["set-not-ready", "active-scan"]);
 });
 
+test("auto mode with one valid stable card reaches capture without manual button", () => {
+  const readiness = computeAutoReadiness({
+    frames: [
+      readinessFrame(0, 0.7, 6),
+      readinessFrame(120, 0.71, 7),
+      readinessFrame(240, 0.69, 8),
+      readinessFrame(360, 0.72, 6),
+      readinessFrame(480, 0.7, 6)
+    ],
+    previousProgress: 0.55,
+    prepared: true,
+    activeScan: false,
+    armed: true
+  });
+
+  assert.equal(readiness.captureAllowed, true);
+  assert.ok(readiness.progress >= 0.72);
+});
+
+test("active scan blocks a second auto capture", () => {
+  const readiness = computeAutoReadiness({
+    frames: [
+      readinessFrame(0, 0.8, 5),
+      readinessFrame(120, 0.81, 5),
+      readinessFrame(240, 0.8, 5),
+      readinessFrame(360, 0.82, 5)
+    ],
+    previousProgress: 0.8,
+    prepared: true,
+    activeScan: true,
+    armed: true
+  });
+
+  assert.equal(readiness.captureAllowed, false);
+  assert.ok(readiness.blockers.includes("active-scan"));
+});
+
 function candidate(id: string, name: string, number: string): CanonicalCardCandidate {
   return {
     id,

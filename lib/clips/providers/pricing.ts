@@ -1,4 +1,5 @@
 import { compareCollectorNumbers, normalizeCollectorNumber } from "@/lib/cards/collector-number";
+import { cleanCardName as cleanCanonicalCardName } from "@/lib/cards/card-name";
 import { normalizeCardNameForMatch } from "@/lib/cards/set-matching";
 
 export type PricingCandidate = {
@@ -359,7 +360,13 @@ function parseTcgCsvCard(product: TcgCsvProduct, group: TcgCsvGroup, prices: Tcg
   );
   const normalizedNumber = normalizeCollectorNumber(cardNumberRaw);
   const variant = extractVariant(rawName);
-  const name = cleanCardName(stripKnownCardMetadata(rawName, cardNumberRaw, group.name));
+  const baseName = stripKnownCardMetadata(rawName, cardNumberRaw, group.name);
+  const name = cleanDisplayCardName(cleanCanonicalCardName({
+    rawName: baseName,
+    rawCollectorNumber: cardNumberRaw,
+    normalizedCollectorNumber: normalizedNumber?.normalized,
+    printedSetTotal: normalizedNumber?.denominatorNumeric
+  }).canonicalName);
   const price = prices.find((item) => item.productId === product.productId);
 
   return {
@@ -397,7 +404,7 @@ function parseProductCard(product: TcgCsvProduct, setName: string): SetChecklist
   return parseTcgCsvCard(product, { groupId: 0, name: setName });
 }
 
-function cleanCardName(value: string) {
+function cleanDisplayCardName(value: string) {
   return value
     .replace(/\b(reverse holofoil|holofoil|normal)\b/gi, "")
     .replace(/\s+/g, " ")

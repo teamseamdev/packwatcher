@@ -3,6 +3,7 @@ import {
   generateCollectorNumberAlternates,
   normalizeCollectorNumber
 } from "./collector-number.ts";
+import { cleanCardName } from "./card-name.ts";
 
 export type CanonicalCardCandidate = {
   id: string;
@@ -43,8 +44,12 @@ export type SelectedSetMatchResult =
   | { action: "confirm_candidate"; best: ScoredCardCandidate | null; alternatives: ScoredCardCandidate[]; reason: string }
   | { action: "no_safe_match"; alternatives: ScoredCardCandidate[]; reason: string };
 
+export type SingleCandidateResolution = "accept" | "reject";
+
 export function matchCardWithinSelectedSet(input: SelectedSetMatchInput): SelectedSetMatchResult {
-  const eligible = input.candidates.filter((candidate) => candidate.setId === input.selectedSetId);
+  const eligible = input.candidates
+    .filter((candidate) => candidate.setId === input.selectedSetId)
+    .map(cleanCandidateName);
   if (!eligible.length) return { action: "no_safe_match", alternatives: [], reason: "NO_CANDIDATES_IN_SELECTED_SET" };
 
   const scannedNumber = normalizeCollectorNumber(input.ocrCollectorNumber);
@@ -54,6 +59,19 @@ export function matchCardWithinSelectedSet(input: SelectedSetMatchInput): Select
     .sort((left, right) => right.confidence - left.confidence);
 
   if (!scored.length) return { action: "no_safe_match", alternatives: [], reason: scannedNumber ? "NO_CANDIDATE_IN_SELECTED_SET" : "NUMBER_NOT_READABLE" };
+
+  if (scored.length === 1) {
+    const singleton = scored[0];
+    return resolveSingleCandidate({
+      candidate: singleton,
+      allSelectedSetCandidates: eligible,
+      ocrName: input.ocrName,
+      ocrCollectorNumber: input.ocrCollectorNumber,
+      selectedSetId: input.selectedSetId
+    }) === "accept"
+      ? { action: "auto_confirmed", best: singleton, alternatives: [] }
+      : { action: "no_safe_match", alternatives: [singleton], reason: "SINGLETON_CONFLICTS_WITH_OCR" };
+  }
 
   const exactNumberMatches = scannedNumber
     ? scored.filter((candidate) => candidate.explanation.exactCollectorNumberMatch)
@@ -81,6 +99,35 @@ export function matchCardWithinSelectedSet(input: SelectedSetMatchInput): Select
   }
 
   return { action: "no_safe_match", alternatives: scored.slice(0, 5), reason: "NO_SAFE_MATCH" };
+}
+
+export function resolveSingleCandidate(input: {
+  candidate: CanonicalCardCandidate;
+  allSelectedSetCandidates?: CanonicalCardCandidate[];
+  ocrName?: string | null;
+  ocrCollectorNumber?: string | null;
+  selectedSetId: string;
+}): SingleCandidateResolution {
+  if (input.candidate.setId !== input.selectedSetId) return "reject";
+
+  const scannedNumber = normalizeCollectorNumber(input.ocrCollectorNumber);
+  const candidateNumber = normalizeCollectorNumber(input.candidate.collectorNumberNormalized ?? input.candidate.collectorNumberRaw);
+  if (scannedNumber && candidateNumber && !collectorNumbersPotentiallyEqual(scannedNumber.raw, candidateNumber.raw)) {
+    const selectedSetCards = input.allSelectedSetCandidates ?? [];
+    const numberBelongsToAnotherCard = selectedSetCards.some((candidate) => {
+      if (candidate.id === input.candidate.id || candidate.setId !== input.selectedSetId) return false;
+      const otherNumber = normalizeCollectorNumber(candidate.collectorNumberNormalized ?? candidate.collectorNumberRaw);
+      return Boolean(otherNumber && collectorNumbersPotentiallyEqual(scannedNumber.raw, otherNumber.raw));
+    });
+    if (numberBelongsToAnotherCard || input.candidate.collectorNumberNormalized || input.candidate.collectorNumberRaw) return "reject";
+  }
+
+  if (input.ocrName) {
+    const nameScore = cardNameSimilarity(input.ocrName, input.candidate.name);
+    if (nameScore > 0 && nameScore < 0.2) return "reject";
+  }
+
+  return "accept";
 }
 
 function scoreCandidate(candidate: CanonicalCardCandidate, ocrName: string | null, ocrCollectorNumber: string | null): ScoredCardCandidate {
@@ -111,6 +158,20 @@ function scoreCandidate(candidate: CanonicalCardCandidate, ocrName: string | nul
       controlledCollectorNumberMatch: controlledNumber || numberCandidateExists(scannedNumber?.raw, cardNumber?.normalized),
       nameScore: Number(nameScore.toFixed(3))
     }
+  };
+}
+
+function cleanCandidateName(candidate: CanonicalCardCandidate): CanonicalCardCandidate {
+  const cleaned = cleanCardName({
+    rawName: candidate.name,
+    rawCollectorNumber: candidate.collectorNumberRaw,
+    normalizedCollectorNumber: candidate.collectorNumberNormalized
+  });
+  if (!cleaned.changed) return candidate;
+  return {
+    ...candidate,
+    name: cleaned.canonicalName,
+    normalizedName: normalizeCardNameForMatch(cleaned.canonicalName)
   };
 }
 

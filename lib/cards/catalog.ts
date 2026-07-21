@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { cleanCardName } from "@/lib/cards/card-name";
 import { normalizeCollectorNumber } from "@/lib/cards/collector-number";
 import { type CanonicalCardCandidate, normalizeCardNameForMatch } from "@/lib/cards/set-matching";
 import { TCGCSVProvider, type TcgCsvCard, type TcgCsvSetSummary } from "@/lib/clips/providers/pricing";
@@ -163,24 +164,38 @@ async function upsertTcgCsvSetSummaries(groups: TcgCsvSetSummary[]) {
 async function upsertTcgCsvCards(setId: string, cards: TcgCsvCard[]) {
   if (!cards.length) return;
   const admin = createAdminClient();
-  const rows = cards.map((card) => ({
-    set_id: setId,
-    name: card.name,
-    normalized_name: card.normalizedName || normalizeCardNameForMatch(card.name),
-    collector_number_raw: card.cardNumber,
-    collector_number_normalized: card.normalizedCollectorNumber,
-    collector_number_prefix: card.collectorNumberPrefix,
-    collector_number_numeric: card.collectorNumberNumeric,
-    collector_number_suffix: card.collectorNumberSuffix,
-    denominator_raw: card.denominator,
-    denominator_numeric: card.denominatorNumeric,
-    set_sort_key: card.sortKey ?? normalizeCollectorNumber(card.cardNumber)?.sortKey ?? null,
-    rarity: card.rarity ?? null,
-    image_small: card.imageUrl,
-    image_large: card.imageUrl,
-    tcgplayer_product_id: card.productId,
-    source_metadata: { ...card.sourceMetadata, marketPrice: card.marketPrice ?? null }
-  }));
+  const rows = cards.map((card) => {
+    const cleaned = cleanCardName({
+      rawName: card.name,
+      rawCollectorNumber: card.cardNumber,
+      normalizedCollectorNumber: card.normalizedCollectorNumber,
+      printedSetTotal: card.denominatorNumeric
+    });
+    return {
+      set_id: setId,
+      name: cleaned.canonicalName,
+      normalized_name: normalizeCardNameForMatch(cleaned.canonicalName),
+      collector_number_raw: card.cardNumber,
+      collector_number_normalized: card.normalizedCollectorNumber,
+      collector_number_prefix: card.collectorNumberPrefix,
+      collector_number_numeric: card.collectorNumberNumeric,
+      collector_number_suffix: card.collectorNumberSuffix,
+      denominator_raw: card.denominator,
+      denominator_numeric: card.denominatorNumeric,
+      set_sort_key: card.sortKey ?? normalizeCollectorNumber(card.cardNumber)?.sortKey ?? null,
+      rarity: card.rarity ?? null,
+      image_small: card.imageUrl,
+      image_large: card.imageUrl,
+      tcgplayer_product_id: card.productId,
+      source_metadata: {
+        ...card.sourceMetadata,
+        sourceNameRaw: card.sourceMetadata.rawName ?? card.name,
+        displayNameBeforeCleanup: cleaned.changed ? card.name : null,
+        nameCleanupRemovedSuffix: cleaned.removedSuffix ?? null,
+        marketPrice: card.marketPrice ?? null
+      }
+    };
+  });
   const { error } = await admin
     .from("pokemon_cards")
     .upsert(rows, { onConflict: "tcgplayer_product_id" });
@@ -190,12 +205,17 @@ async function upsertTcgCsvCards(setId: string, cards: TcgCsvCard[]) {
 function dbCardToCandidate(card: DbCard, setName: string): CanonicalCardCandidate {
   const metadata = card.source_metadata ?? {};
   const marketPrice = typeof metadata.marketPrice === "number" ? metadata.marketPrice : null;
+  const cleaned = cleanCardName({
+    rawName: card.name,
+    rawCollectorNumber: card.collector_number_raw,
+    normalizedCollectorNumber: card.collector_number_normalized
+  });
   return {
     id: card.id,
     setId: card.set_id,
     setName,
-    name: card.name,
-    normalizedName: card.normalized_name,
+    name: cleaned.canonicalName,
+    normalizedName: cleaned.changed ? normalizeCardNameForMatch(cleaned.canonicalName) : card.normalized_name,
     collectorNumberRaw: card.collector_number_raw,
     collectorNumberNormalized: card.collector_number_normalized,
     rarity: card.rarity,

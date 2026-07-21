@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ArrowDownAZ, CheckCircle2, Clock3, DollarSign, ExternalLink, Grid2X2, Layers3, Save, Search, Trash2 } from "lucide-react";
 import { deleteInventoryItem, updateInventoryItem } from "@/app/(app)/inventory/actions";
 import { SetCombobox } from "@/components/set-combobox";
+import { cleanCardName } from "@/lib/cards/card-name";
 import { compareCollectorNumbers, normalizeCollectorNumber } from "@/lib/cards/collector-number";
 import { calculateProfit, currency } from "@/lib/profit";
 import type { InventoryItem } from "@/lib/types";
@@ -239,9 +240,14 @@ function InventoryRow({ item, setOptions }: { item: InventoryItem; setOptions: s
   const result = inventoryProfit(item);
   const addedDate = item.created_at ? new Date(item.created_at).toLocaleDateString() : null;
   const profitTone = result.profit >= 0 ? "text-emerald-300" : "text-rose-300";
-  const cardName = item.card_name || parseInventoryLookup(item.name).cardName || item.name;
+  const parsedLookup = parseInventoryLookup(item.name);
+  const cardNumber = item.card_number || parsedLookup.cardNumber;
+  const cardName = cleanCardName({
+    rawName: item.card_name || parsedLookup.cardName || item.name,
+    rawCollectorNumber: cardNumber,
+    normalizedCollectorNumber: normalizeCollectorNumber(cardNumber)?.normalized
+  }).canonicalName;
   const setName = inventorySetName(item);
-  const cardNumber = item.card_number || parseInventoryLookup(item.name).cardNumber;
 
   async function saveAndCollapse(formData: FormData) {
     await updateInventoryItem(formData);
@@ -491,7 +497,11 @@ function buildOwnedSetChecklist(checklist: SetChecklistCard[], ownedItems: Inven
   for (const item of ownedItems) {
     const lookup = parseInventoryLookup(item.name);
     const cardNumber = normalizeCollectorNumber(item.card_number ?? lookup.cardNumber)?.normalized ?? "";
-    const cardName = normalizeLookup(item.card_name ?? lookup.cardName ?? item.name);
+    const cardName = normalizeLookup(cleanCardName({
+      rawName: item.card_name ?? lookup.cardName ?? item.name,
+      rawCollectorNumber: item.card_number ?? lookup.cardNumber,
+      normalizedCollectorNumber: cardNumber
+    }).canonicalName);
     if (cardNumber) ownedByNumber.set(cardNumber, item);
     if (cardName) ownedByName.set(cardName, item);
   }

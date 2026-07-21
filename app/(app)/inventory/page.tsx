@@ -3,6 +3,8 @@ import { ScanLine } from "lucide-react";
 import { InventoryCollection } from "@/components/inventory/InventoryCollection";
 import { StatCard } from "@/components/stat-card";
 import { requireUser } from "@/lib/auth";
+import { cleanCardName } from "@/lib/cards/card-name";
+import { normalizeCollectorNumber } from "@/lib/cards/collector-number";
 import { TCGCSVProvider } from "@/lib/clips/providers/pricing";
 import { calculateProfit, currency } from "@/lib/profit";
 import type { InventoryItem } from "@/lib/types";
@@ -77,7 +79,15 @@ async function hydrateInventoryImages(items: InventoryItem[]) {
       continue;
     }
 
-    const prices = await provider.price(lookup).catch(() => []);
+    const cleanLookup = {
+      ...lookup,
+      cardName: cleanCardName({
+        rawName: lookup.cardName,
+        rawCollectorNumber: lookup.cardNumber,
+        normalizedCollectorNumber: normalizeCollectorNumber(lookup.cardNumber)?.normalized
+      }).canonicalName
+    };
+    const prices = await provider.price(cleanLookup).catch(() => []);
     hydrated.push({
       ...item,
       image_url: prices[0]?.imageUrl ?? null

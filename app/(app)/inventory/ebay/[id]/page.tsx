@@ -2,6 +2,8 @@ import Link from "next/link";
 import { ExternalLink, Store } from "lucide-react";
 import { publishInventoryItemToEbay } from "@/app/(app)/inventory/ebay/actions";
 import { requireUser } from "@/lib/auth";
+import { cleanCardName } from "@/lib/cards/card-name";
+import { normalizeCollectorNumber } from "@/lib/cards/collector-number";
 import { defaultEbayListingDefaults, ebayCardDescription, ebayCardTitle, missingEbayDefaults } from "@/lib/ebay/listing-builder";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { EbayConnection, EbayListing, EbayListingDefaults, InventoryItem } from "@/lib/types";
@@ -30,6 +32,11 @@ export default async function EbayInventoryListingPage({ params }: { params: Pro
   const listingDefaults = defaultEbayListingDefaults(user.id, defaults);
   const missing = missingEbayDefaults(listingDefaults);
   const canPublish = Boolean(connection) && !missing.length && Boolean(item.image_url);
+  const cleanDisplayName = cleanCardName({
+    rawName: item.card_name ?? item.name,
+    rawCollectorNumber: item.card_number,
+    normalizedCollectorNumber: normalizeCollectorNumber(item.card_number)?.normalized
+  }).canonicalName;
 
   return (
     <div className="max-w-4xl space-y-5">
@@ -47,7 +54,7 @@ export default async function EbayInventoryListingPage({ params }: { params: Pro
             <div className="grid aspect-[63/88] place-items-center rounded-lg border border-dashed border-white/15 bg-white/5 text-xs uppercase tracking-wide text-slate-500">No image</div>
           )}
           <div>
-            <h2 className="text-xl font-black text-white">{item.card_name ?? item.name}</h2>
+            <h2 className="text-xl font-black text-white">{cleanDisplayName}</h2>
             <p className="mt-1 text-sm text-slate-400">{[item.card_number, item.set_name, item.variant, item.foil ? "Foil" : null].filter(Boolean).join(" - ") || "No set details"}</p>
             <p className="mt-3 text-sm text-slate-300">Estimated value: <span className="font-bold text-amber-200">${Number(item.estimated_sale_price ?? 0).toFixed(2)}</span></p>
           </div>

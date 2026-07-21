@@ -1,11 +1,19 @@
+import { cleanCardName } from "@/lib/cards/card-name";
+import { normalizeCollectorNumber } from "@/lib/cards/collector-number";
 import type { EbayListingDefaults, InventoryItem } from "@/lib/types";
 
 export function ebayCardTitle(item: InventoryItem) {
-  const cardName = item.card_name || parseInventoryName(item.name).cardName || item.name;
+  const parsed = parseInventoryName(item.name);
+  const cardNumber = item.card_number || parsed.cardNumber;
+  const cardName = cleanCardName({
+    rawName: item.card_name || parsed.cardName || item.name,
+    rawCollectorNumber: cardNumber,
+    normalizedCollectorNumber: normalizeCollectorNumber(cardNumber)?.normalized
+  }).canonicalName;
   const parts = [
     cardName,
-    item.card_number || parseInventoryName(item.name).cardNumber,
-    item.set_name || parseInventoryName(item.name).setName,
+    cardNumber,
+    item.set_name || parsed.setName,
     item.variant,
     item.foil ? "Foil" : null,
     "Pokemon TCG"
@@ -15,10 +23,16 @@ export function ebayCardTitle(item: InventoryItem) {
 
 export function ebayCardDescription(item: InventoryItem) {
   const parsed = parseInventoryName(item.name);
+  const cardNumber = item.card_number || parsed.cardNumber;
+  const cardName = cleanCardName({
+    rawName: item.card_name || parsed.cardName || item.name,
+    rawCollectorNumber: cardNumber,
+    normalizedCollectorNumber: normalizeCollectorNumber(cardNumber)?.normalized
+  }).canonicalName;
   return [
     ebayCardTitle(item),
     "",
-    `Card: ${item.card_name || parsed.cardName || item.name}`,
+    `Card: ${cardName}`,
     item.set_name || parsed.setName ? `Set: ${item.set_name || parsed.setName}` : null,
     item.card_number || parsed.cardNumber ? `Card number: ${item.card_number || parsed.cardNumber}` : null,
     item.variant ? `Finish/variant: ${item.variant}` : null,

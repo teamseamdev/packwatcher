@@ -235,6 +235,21 @@ export async function POST(request: Request) {
     }
 
     const alternatives = match.alternatives.map((candidate) => cardFromSetCandidate(detectedCard, candidate, parsed.foilPreference));
+    if (match.action === "confirm_candidate" && alternatives.length === 1 && match.best) {
+      await logAppEvent({
+        category: "scanner",
+        severity: "warn",
+        message: "Scanner invariant corrected singleton confirmation",
+        userId: user.id,
+        metadata: {
+          selectedSetId: selectedSet.id,
+          scanEventId: parsed.scanEventId ?? null,
+          candidateId: match.best.id
+        }
+      });
+      pricedCards.push(cardFromSetCandidate(detectedCard, match.best, parsed.foilPreference));
+      continue;
+    }
     return NextResponse.json({
       ok: false,
       error: match.action === "confirm_candidate"

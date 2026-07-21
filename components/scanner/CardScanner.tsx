@@ -4,6 +4,7 @@ import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCircle2, FileDown, Flashlight, FlashlightOff, Loader2, Plus, ScanLine, Search, Trash2, X } from "lucide-react";
 import { PackWatcherSplash } from "@/components/packwatcher-splash";
 import { SetCombobox } from "@/components/set-combobox";
+import { cleanCardName } from "@/lib/cards/card-name";
 import { averageCornerDistance, distance, mapVideoPointToCover, orderQuadPoints, polygonArea, quadCenter, smoothQuad, type Point, type Quad } from "@/lib/scanner/geometry";
 import { CAPTURE_POLICIES, computeAutoReadiness, type ReadinessFrame } from "@/lib/scanner/capture-policy";
 import { ScanCoordinator } from "@/lib/scanner/scan-coordinator";
@@ -96,6 +97,21 @@ type ScanJob = {
   bypassDuplicate?: boolean;
 };
 type ScanImageResult = ScannerCardPayload | "confirmation" | null;
+type AutoCaptureDiagnostics = {
+  mode: CaptureMode;
+  state: ScannerState;
+  armed: boolean;
+  activeScan: boolean;
+  duplicateBlocked: boolean;
+  confidence: number;
+  cardLikeness: number;
+  readinessScore: number;
+  stableFrames: number;
+  stableDurationMs: number;
+  blockers: string[];
+  shouldAutoCapture: boolean;
+  coordinatorInvoked: boolean;
+};
 
 type TorchTrack = MediaStreamTrack & {
   getCapabilities?: () => MediaTrackCapabilities & { torch?: boolean };
@@ -155,6 +171,9 @@ export function CardScanner() {
   const scannerSessionIdRef = useRef("");
   const scannerModeRef = useRef<CaptureMode>("auto");
   const scannerStateRef = useRef<ScannerState>("searching");
+  const selectedSetRef = useRef<CardSetOption | null>(null);
+  const preparedSetPackRef = useRef<PreparedSetScannerIndex | null>(null);
+  const isScanningRef = useRef(false);
   const confirmationOpenRef = useRef(false);
   const duplicateGuardRef = useRef<{ hash: string; canonicalCardId: string | null; capturedAt: number; armed: boolean }>({ hash: "", canonicalCardId: null, capturedAt: 0, armed: true });
   const noCardSinceRef = useRef<number | null>(null);
@@ -192,6 +211,7 @@ export function CardScanner() {
   const [hasTorch, setHasTorch] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
   const [lightingLow, setLightingLow] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<AutoCaptureDiagnostics | null>(null);
 
   const totalValue = useMemo(() => cards.reduce((sum, card) => sum + card.estimatedValue, 0), [cards]);
   const uniqueSessionCards = useMemo(() => new Set(cards.map((card) => card.canonicalCardId ?? `${card.cardName}:${card.setName}:${card.cardNumber}`)).size, [cards]);
@@ -213,6 +233,18 @@ export function CardScanner() {
   useEffect(() => {
     scannerModeRef.current = captureMode;
   }, [captureMode]);
+
+  useEffect(() => {
+    selectedSetRef.current = selectedSet;
+  }, [selectedSet]);
+
+  useEffect(() => {
+    preparedSetPackRef.current = preparedSetPack;
+  }, [preparedSetPack]);
+
+  useEffect(() => {
+    isScanningRef.current = isScanning;
+  }, [isScanning]);
 
   useEffect(() => {
     scannerStateRef.current = scannerState;
@@ -241,7 +273,7 @@ export function CardScanner() {
     if (!isCameraReady) return;
     const loop = (timestamp: number) => {
       detectionFrameRef.current = window.requestAnimationFrame(loop);
-      if (document.hidden || captureLockRef.current || isScanning || !videoRef.current) return;
+      if (document.hidden || captureLockRef.current || isScanningRef.current || !videoRef.current) return;
       if (timestamp - lastAnalysisAtRef.current < SCANNER_DETECTION_CONFIG.analysisIntervalMs || detectionInFlightRef.current) return;
       lastAnalysisAtRef.current = timestamp;
       detectionInFlightRef.current = true;
@@ -259,7 +291,7 @@ export function CardScanner() {
     };
   // The loop intentionally reads current refs/state guards and is restarted only when camera/scanning status changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isCameraReady, isScanning]);
+  }, [isCameraReady]);
 
   useEffect(() => {
     let ignore = false;
@@ -293,9 +325,10 @@ export function CardScanner() {
 
     try {
       const preparedPack = await prepareSelectedSetPack(selectedSet);
+      stopCamera();
+      preparedSetPackRef.current = preparedPack;
       setPreparedSetPack(preparedPack);
       setNotice(`${preparedPack.cards.length} cards ready`);
-      stopCamera();
       scannerSessionIdRef.current = crypto.randomUUID();
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -337,6 +370,7 @@ export function CardScanner() {
     lastDetectionRef.current = null;
     stableSinceRef.current = null;
     readinessBufferRef.current = [];
+    preparedSetPackRef.current = null;
     trackingCountersRef.current = { detected: 0, stable: 0 };
     captureLockRef.current = false;
     noCardSinceRef.current = null;
@@ -399,6 +433,8 @@ export function CardScanner() {
 
   function handleDetectionFrame(video: HTMLVideoElement, timestamp: number) {
     if (confirmationOpenRef.current || scannerStateRef.current === "confirmation-required" || scannerStateRef.current === "manual-crop" || scannerStateRef.current === "manual-search") return;
+    const currentSet = selectedSetRef.current;
+    const currentSetPack = preparedSetPackRef.current;
     const analysis = analyzeVideoFrame(video, lastDetectionRef.current, timestamp);
     if (!analysis.detection) {
       const noCardSince = noCardSinceRef.current ?? timestamp;
@@ -456,8 +492,8 @@ export function CardScanner() {
     const readiness = computeAutoReadiness({
       frames: readinessBufferRef.current,
       previousProgress: autoProgressRef.current,
-      prepared: preparedSetPack?.setId === selectedSet?.id,
-      activeScan: scanCoordinatorRef.current.active || captureLockRef.current || isScanning,
+      prepared: currentSetPack?.setId === currentSet?.id,
+      activeScan: scanCoordinatorRef.current.active || captureLockRef.current || isScanningRef.current,
       armed: duplicateGuardRef.current.armed
     });
     const progress = scannerModeRef.current === "auto" ? readiness.progress : 0;
@@ -474,16 +510,36 @@ export function CardScanner() {
     setCardReady(scannerModeRef.current === "manual" ? detection.confidence >= CAPTURE_POLICIES.manual.minimumDetectionConfidence : readiness.captureAllowed || readiness.score >= 0.68);
     setAutoProgress(progress);
     setScannerState(scannerStateForAnalysis(stable, progress, quality.blockers, analysis.multipleCards, scannerModeRef.current, readiness.score));
-
-    if (
+    const shouldAutoCapture =
       scannerModeRef.current === "auto" &&
       readiness.captureAllowed &&
       duplicateGuardRef.current.armed &&
-      preparedSetPack?.setId === selectedSet?.id &&
+      currentSetPack?.setId === currentSet?.id &&
       !scanCoordinatorRef.current.active &&
       !captureLockRef.current &&
-      !isScanning
-    ) {
+      !isScanningRef.current;
+    if (process.env.NODE_ENV !== "production") {
+      setDiagnostics({
+        mode: scannerModeRef.current,
+        state: scannerStateRef.current,
+        armed: duplicateGuardRef.current.armed,
+        activeScan: scanCoordinatorRef.current.active || captureLockRef.current || isScanningRef.current,
+        duplicateBlocked: readiness.blockers.includes("same-card-blocked"),
+        confidence: detection.confidence,
+        cardLikeness: detection.confidence,
+        readinessScore: readiness.score,
+        stableFrames: trackingCountersRef.current.stable,
+        stableDurationMs: stableForMs,
+        blockers: readiness.blockers.length ? readiness.blockers : quality.blockers,
+        shouldAutoCapture,
+        coordinatorInvoked: false
+      });
+    }
+
+    if (shouldAutoCapture) {
+      if (process.env.NODE_ENV !== "production") {
+        setDiagnostics((current) => current ? { ...current, coordinatorInvoked: true } : current);
+      }
       void scanCameraFrame({ detection, automatic: true });
     }
   }
@@ -509,8 +565,10 @@ export function CardScanner() {
 
   async function executeScanCameraFrame(options: ScanJob = {}, scanEventId: string) {
     const sessionId = scannerSessionIdRef.current;
+    const currentSet = selectedSetRef.current;
+    const currentSetPack = preparedSetPackRef.current;
     if (!videoRef.current) return null;
-    if (!selectedSet || preparedSetPack?.setId !== selectedSet.id) {
+    if (!currentSet || currentSetPack?.setId !== currentSet.id) {
       setError("Prepare the selected set before scanning.");
       return null;
     }
@@ -571,9 +629,9 @@ export function CardScanner() {
         if (!options.automatic) duplicateGuardRef.current.armed = true;
         return null;
       }
-      if (!sessionId || scannerSessionIdRef.current !== sessionId || preparedSetPack?.setId !== selectedSet.id) return null;
+      if (!sessionId || scannerSessionIdRef.current !== sessionId || preparedSetPackRef.current?.setId !== currentSet.id) return null;
 
-      const card = addCard({ ...scanned, setName: selectedSet?.name ?? scanned.setName }, scannedImage, scanEventId);
+      const card = addCard({ ...scanned, setName: currentSet.name ?? scanned.setName }, scannedImage, scanEventId);
       duplicateGuardRef.current = {
         hash: fingerprint,
         canonicalCardId: card.canonicalCardId,
@@ -617,7 +675,8 @@ export function CardScanner() {
     imageDataUrl: string,
     options: { scanEventId?: string; scannerSessionId?: string; silentMiss?: boolean; onMiss?: (message: string) => void } = {}
   ): Promise<ScanImageResult> {
-    if (!selectedSet) {
+    const currentSet = selectedSetRef.current;
+    if (!currentSet) {
       setError("Choose a set from the list before scanning.");
       return null;
     }
@@ -636,8 +695,8 @@ export function CardScanner() {
           scannerSessionId: options.scannerSessionId,
           language,
           foilPreference,
-          packHint: selectedSet.name,
-          selectedSetId: selectedSet.id
+          packHint: currentSet.name,
+          selectedSetId: currentSet.id
         })
       });
       return handleScanResponse(response, options);
@@ -687,6 +746,14 @@ export function CardScanner() {
     if (!response.ok || !body?.card) {
       const message = body?.error ?? `Scan failed with status ${response.status}.`;
       if (body?.candidates?.length) {
+        if (body.candidates.length === 1) {
+          console.warn("Scanner invariant: confirmation response contained one candidate; auto-resolving singleton.", {
+            code: body.code,
+            candidateId: body.candidates[0].canonicalCardId
+          });
+          setCandidateChoices([]);
+          return body.candidates[0];
+        }
         setCandidateChoices(body.candidates);
         setNotice("Choose the matching card from the selected set.");
         setScannerState("confirmation-required");
@@ -704,8 +771,14 @@ export function CardScanner() {
   }
 
   function addCard(card: ScannerCardPayload, imageDataUrl?: string | null, scanEventId = crypto.randomUUID()) {
+    const cleanName = cleanCardName({
+      rawName: card.cardName,
+      rawCollectorNumber: card.cardNumber,
+      normalizedCollectorNumber: card.cardNumber
+    }).canonicalName;
     const next: ScannerCard = {
       ...card,
+      cardName: cleanName,
       foil: card.foil ?? isFoilVariant(card.variant),
       id: crypto.randomUUID(),
       scanEventId,
@@ -1142,6 +1215,7 @@ export function CardScanner() {
           totalValue={totalValue}
           error={error}
           notice={notice}
+          diagnostics={diagnostics}
           onScan={() => void scanCameraFrame({ automatic: false, bypassDuplicate: true })}
           onModeChange={setCaptureMode}
           onToggleTorch={() => void toggleTorch()}
@@ -1201,6 +1275,7 @@ function FullScreenScanner({
   totalValue,
   error,
   notice,
+  diagnostics,
   onScan,
   onModeChange,
   onToggleTorch,
@@ -1232,6 +1307,7 @@ function FullScreenScanner({
   totalValue: number;
   error: string | null;
   notice: string | null;
+  diagnostics: AutoCaptureDiagnostics | null;
   onScan: () => void;
   onModeChange: (mode: CaptureMode) => void;
   onToggleTorch: () => void;
@@ -1377,6 +1453,13 @@ function FullScreenScanner({
       </div>
 
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/88 to-transparent px-4 pb-[calc(env(safe-area-inset-bottom)+16px)] pt-24">
+        {process.env.NODE_ENV !== "production" && diagnostics ? (
+          <div className="mb-3 max-h-28 overflow-y-auto rounded-xl border border-cyan-300/25 bg-black/70 p-2 text-[10px] text-cyan-100 backdrop-blur">
+            <p>mode {diagnostics.mode} · state {diagnostics.state} · armed {String(diagnostics.armed)} · active {String(diagnostics.activeScan)}</p>
+            <p>confidence {diagnostics.confidence.toFixed(2)} · readiness {diagnostics.readinessScore.toFixed(2)} · frames {diagnostics.stableFrames} · stable {Math.round(diagnostics.stableDurationMs)}ms</p>
+            <p>capture {String(diagnostics.shouldAutoCapture)} · invoked {String(diagnostics.coordinatorInvoked)} · blockers {diagnostics.blockers.join(", ") || "none"}</p>
+          </div>
+        ) : null}
         {lastCard ? (
           <div className="mx-auto mb-3 max-w-sm rounded-full bg-emerald-400/25 px-4 py-2 text-center text-sm font-black text-emerald-100 backdrop-blur">
             {lastCard.cardName} - {currency(lastCard.estimatedValue)}
@@ -1409,7 +1492,7 @@ function FullScreenScanner({
                       <img src={candidate.referenceImageUrl} alt="" className="h-16 w-11 rounded object-cover" />
                     ) : <div className="grid h-16 w-11 place-items-center rounded bg-white/10 text-[9px] text-white/45">No image</div>}
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-black">{candidate.cardName}</span>
+                      <span className="block truncate text-sm font-black">{displayCardName(candidate)}</span>
                       <span className="block truncate text-xs text-white/60">{[candidate.cardNumber, candidate.setName, candidate.variant].filter(Boolean).join(" - ")}</span>
                       <span className="mt-1 block text-xs text-white/50">Confidence {Math.round((candidate.confidence || 0) * 100)}%</span>
                     </span>
@@ -1449,7 +1532,7 @@ function FullScreenScanner({
                           <img src={candidate.referenceImageUrl} alt="" className="h-14 w-10 rounded object-cover" />
                         ) : <div className="grid h-14 w-10 place-items-center rounded bg-white/10 text-[9px] text-white/45">No image</div>}
                         <span className="min-w-0">
-                          <span className="block truncate text-sm font-black">{candidate.cardName}</span>
+                          <span className="block truncate text-sm font-black">{displayCardName(candidate)}</span>
                           <span className="block truncate text-xs text-white/60">{[candidate.cardNumber, candidate.setName].filter(Boolean).join(" - ")}</span>
                         </span>
                       </button>
@@ -1547,7 +1630,7 @@ function scannerStatusText(state: ScannerState, tracking: TrackingSnapshot | nul
   }
   if (state === "awaiting-removal") return "Remove card";
   if (state === "confirmation-required") return "Confirm card";
-  if (state === "searching" || !tracking) return "Place one card in view";
+  if (!tracking) return "Place one card in view";
   if (tracking.multipleCards) return "Use one card at a time";
   const blocker = tracking.quality.blockers[0];
   if (blocker === "blur") return "Camera is still focusing";
@@ -1559,7 +1642,7 @@ function scannerStatusText(state: ScannerState, tracking: TrackingSnapshot | nul
   if (blocker === "too-large") return "Move card farther away";
   if (blocker === "cropped") return "Keep entire card visible";
   if (state === "stabilizing") return "Hold steady";
-  if (state === "tracking") return "Card detected";
+  if (state === "tracking" || state === "searching") return "Card detected";
   return "Place one card in view";
 }
 
@@ -1569,6 +1652,14 @@ function compactSetName(name: string) {
 
 function candidateKey(candidate: ScannerCardPayload) {
   return [candidate.canonicalCardId, candidate.cardName, candidate.cardNumber, candidate.setName, candidate.variant].filter(Boolean).join(":");
+}
+
+function displayCardName(candidate: Pick<ScannerCardPayload, "cardName" | "cardNumber">) {
+  return cleanCardName({
+    rawName: candidate.cardName,
+    rawCollectorNumber: candidate.cardNumber,
+    normalizedCollectorNumber: candidate.cardNumber
+  }).canonicalName || candidate.cardName;
 }
 
 function preparedCandidateToScannerPayload(candidate: PreparedSetScannerIndex["cards"][number], setName: string): ScannerCardPayload {

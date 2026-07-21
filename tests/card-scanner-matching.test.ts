@@ -6,7 +6,8 @@ import {
   generateCollectorNumberAlternates,
   normalizeCollectorNumber
 } from "../lib/cards/collector-number.ts";
-import { matchCardWithinSelectedSet, type CanonicalCardCandidate } from "../lib/cards/set-matching.ts";
+import { cleanCardName } from "../lib/cards/card-name.ts";
+import { matchCardWithinSelectedSet, resolveSingleCandidate, type CanonicalCardCandidate } from "../lib/cards/set-matching.ts";
 
 test("normalizes complex Pokemon collector numbers", () => {
   assert.equal(normalizeCollectorNumber("025／198")?.normalized, "25/198");
@@ -81,6 +82,73 @@ test("same-name unreadable number requires selected-set confirmation", () => {
 
   assert.equal(result.action, "confirm_candidate");
   assert.deepEqual(result.alternatives.map((candidate) => candidate.setId), ["set-a", "set-a"]);
+});
+
+test("one compatible selected-set candidate is automatically accepted even at low confidence", () => {
+  const cards: CanonicalCardCandidate[] = [
+    card("avalugg-24", "set-a", "Set A", "Avalugg", "24/86")
+  ];
+
+  const result = matchCardWithinSelectedSet({
+    selectedSetId: "set-a",
+    ocrName: "Avalugg",
+    ocrCollectorNumber: null,
+    candidates: cards
+  });
+
+  assert.equal(result.action, "auto_confirmed");
+  assert.equal(result.best.id, "avalugg-24");
+  assert.equal(result.alternatives.length, 0);
+});
+
+test("one candidate with contradictory selected-set collector number is rejected", () => {
+  const cards: CanonicalCardCandidate[] = [
+    card("avalugg-24", "set-a", "Set A", "Avalugg", "24/86"),
+    card("dragalge-65", "set-a", "Set A", "Mega Dragalge ex", "65/86")
+  ];
+
+  const resolution = resolveSingleCandidate({
+    candidate: cards[0],
+    allSelectedSetCandidates: cards,
+    ocrName: "Avalugg",
+    ocrCollectorNumber: "65/86",
+    selectedSetId: "set-a"
+  });
+
+  assert.equal(resolution, "reject");
+});
+
+test("multiple possible selected-set cards still require confirmation", () => {
+  const cards: CanonicalCardCandidate[] = [
+    card("gwynn-78", "set-a", "Set A", "Gwynn", "78/84"),
+    card("gwynn-109", "set-a", "Set A", "Gwynn", "109/84"),
+    card("gwynn-119", "set-a", "Set A", "Gwynn", "119/84")
+  ];
+
+  const result = matchCardWithinSelectedSet({
+    selectedSetId: "set-a",
+    ocrName: "Gwynn",
+    ocrCollectorNumber: null,
+    candidates: cards
+  });
+
+  assert.equal(result.action, "confirm_candidate");
+  assert.ok(result.alternatives.length >= 2);
+});
+
+test("cleans TCGCSV collector-number suffixes only when metadata supports it", () => {
+  assert.equal(cleanCardName({ rawName: "Mega Dragalge ex 065 086", rawCollectorNumber: "65/86" }).canonicalName, "Mega Dragalge ex");
+  assert.equal(cleanCardName({ rawName: "Gwynn 078 084", rawCollectorNumber: "78/84" }).canonicalName, "Gwynn");
+  assert.equal(cleanCardName({ rawName: "Gwynn 109 084", rawCollectorNumber: "109/84" }).canonicalName, "Gwynn");
+  assert.equal(cleanCardName({ rawName: "Gwynn 119 084", rawCollectorNumber: "119/84" }).canonicalName, "Gwynn");
+  assert.equal(cleanCardName({ rawName: "Card Name 025/198", rawCollectorNumber: "25/198" }).canonicalName, "Card Name");
+  assert.equal(cleanCardName({ rawName: "Card Name TG01 TG30", rawCollectorNumber: "TG01/TG30" }).canonicalName, "Card Name");
+  assert.equal(cleanCardName({ rawName: "Porygon2", rawCollectorNumber: "2/86" }).canonicalName, "Porygon2");
+  assert.equal(cleanCardName({ rawName: "Mewtwo", rawCollectorNumber: "150/165" }).canonicalName, "Mewtwo");
+  assert.equal(cleanCardName({ rawName: "Zygarde 10%", rawCollectorNumber: "72/131" }).canonicalName, "Zygarde 10%");
+  assert.equal(cleanCardName({ rawName: "Card Name 123 999", rawCollectorNumber: "25/198" }).canonicalName, "Card Name 123 999");
+  assert.equal(cleanCardName({ rawName: "", rawCollectorNumber: "25/198" }).canonicalName, "");
+  assert.equal(cleanCardName({ rawName: "Gwynn 078 084", rawCollectorNumber: "78/84" }).rawName, "Gwynn 078 084");
 });
 
 function card(id: string, setId: string, setName: string, name: string, number: string): CanonicalCardCandidate {

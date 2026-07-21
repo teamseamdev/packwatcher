@@ -1,3 +1,4 @@
+import { cleanCardName } from "../cards/card-name.ts";
 import { normalizeCollectorNumber } from "../cards/collector-number.ts";
 import { normalizeCardNameForMatch, type CanonicalCardCandidate } from "../cards/set-matching.ts";
 
@@ -51,11 +52,16 @@ export function buildPreparedSetScannerIndex(input: {
 
   for (const card of input.cards) {
     const parsedNumber = normalizeCollectorNumber(card.collectorNumberNormalized ?? card.collectorNumberRaw);
-    const normalizedName = card.normalizedName || normalizeCardNameForMatch(card.name);
+    const cleaned = cleanCardName({
+      rawName: card.name,
+      rawCollectorNumber: card.collectorNumberRaw,
+      normalizedCollectorNumber: parsedNumber?.normalized ?? card.collectorNumberNormalized
+    });
+    const normalizedName = normalizeCardNameForMatch(cleaned.canonicalName);
     const candidate: ScannerCandidate = {
       id: card.id,
       setId: card.setId,
-      name: card.name,
+      name: cleaned.canonicalName,
       normalizedName,
       collectorNumberRaw: card.collectorNumberRaw,
       collectorNumberNormalized: parsedNumber?.normalized ?? card.collectorNumberNormalized,
