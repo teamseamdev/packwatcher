@@ -1,9 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { sendPushToUser } from "@/lib/push";
 import { getRetailerMonitor } from "@/lib/retailers";
 import { errorMetadata, logAppEvent } from "@/lib/monitoring/log";
-import { notificationEventKey, shouldSendRestockAlert } from "@/lib/retailers/shared/restock-events";
-import type { CatalogOffer, CatalogProduct, ProductAlert } from "@/lib/types";
+import { recordCatalogOfferObservation } from "@/lib/tracker/pipeline";
+import type { CatalogOffer, CatalogProduct } from "@/lib/types";
 
 type OfferRow = CatalogOffer & {
   catalog_products: CatalogProduct | null;
@@ -48,72 +47,35 @@ export async function checkExistingCatalogOffers(supabase: SupabaseClient, limit
 
       result.offersChecked += 1;
 
-      const productId = offer.product_id ?? offer.catalog_product_id;
-      if (!previousInStock && nextInStock && productId) {
-        const { data: alerts } = await supabase
-          .from("product_alerts")
-          .select("*")
-          .eq("product_id", productId);
-
-        for (const alert of (alerts ?? []) as ProductAlert[]) {
-          const snapshot = {
-            retailerProductId: offer.retailer_product_id ?? offer.id,
-            retailer,
-            productId,
-            status: checked.status,
-            previousStatus: previousInStock ? "in_stock" as const : "out_of_stock" as const,
-            price: checked.price,
-            sellerName: typeof offer.metadata?.sellerName === "string" ? offer.metadata.sellerName : retailer,
-            officialRetailerSeller: typeof offer.metadata?.officialRetailerSeller === "boolean" ? offer.metadata.officialRetailerSeller : true,
-            availabilityType: "online" as const
-          };
-
-          if (!shouldSendRestockAlert(alert, snapshot)) continue;
-
-          const eventKey = notificationEventKey(alert.user_id, snapshot);
-          if (await hasRecentNotificationEvent(supabase, alert, productId, retailer, "online")) continue;
-
-          const { error: eventError } = await supabase.from("notification_events").insert({
-            user_id: alert.user_id,
-            product_id: productId,
-            event_key: eventKey,
-            status: checked.status,
-            price: checked.price,
-            retailer,
-            availability_type: "online",
-            metadata: {
-              offerId: offer.id,
-              url: offer.url,
-              previousInStock,
-              checkedAt
-            }
-          });
-
-          if (eventError?.code === "23505") continue;
-
-          const productName = offer.catalog_products?.title ?? offer.catalog_products?.name ?? offer.title ?? "A tracked Pokemon product";
-          const title = `${productName} is in stock`;
-          const message = `${retailer} appears to have ${productName} in stock. Open the retailer page to confirm and purchase manually.`;
-
-          await supabase.from("notifications").insert({
-            user_id: alert.user_id,
-            tracked_product_id: null,
-            type: "restock",
-            title,
-            message
-          });
-
-          if (alert.notify_push) {
-            await sendPushToUser(alert.user_id, {
-              title,
-              body: message,
-              url: `/catalog/${productId}`
-            });
+      const pipeline = await recordCatalogOfferObservation({
+        supabase,
+        offer,
+        observation: {
+          status: checked.status,
+          price: checked.price,
+          currency: offer.currency ?? "USD",
+          availabilityType: "online",
+          shippingAvailable: nextInStock ? true : null,
+          pickupAvailable: null,
+          deliveryAvailable: null,
+          sellerName: typeof offer.metadata?.sellerName === "string" ? offer.metadata.sellerName : retailer,
+          officialRetailerSeller: typeof offer.metadata?.officialRetailerSeller === "boolean" ? offer.metadata.officialRetailerSeller : true,
+          confidence: nextInStock ? 0.78 : 0.7,
+          sourceStatus: checked.availabilityText,
+          extractionStrategy: "catalog_offer_monitor",
+          adapterVersion: "catalog-offer-monitor-v2",
+          checkedAt,
+          rawMetadata: {
+            offerId: offer.id,
+            url: offer.url,
+            previousInStock,
+            nextInStock,
+            availabilityText: checked.availabilityText
           }
-
-          result.alertsTriggered += 1;
         }
-      }
+      });
+
+      result.alertsTriggered += pipeline.outboxQueued;
 
       await new Promise((resolve) => setTimeout(resolve, 250));
     } catch (error) {
@@ -128,29 +90,4 @@ export async function checkExistingCatalogOffers(supabase: SupabaseClient, limit
   }
 
   return result;
-}
-
-async function hasRecentNotificationEvent(
-  supabase: SupabaseClient,
-  alert: ProductAlert,
-  productId: string,
-  retailer: string,
-  availabilityType: "online" | "local" | "marketplace"
-) {
-  const cooldownMinutes = alert.cooldown_minutes ?? 60;
-  if (cooldownMinutes <= 0) return false;
-
-  const since = new Date(Date.now() - cooldownMinutes * 60 * 1000).toISOString();
-  const { data, error } = await supabase
-    .from("notification_events")
-    .select("id")
-    .eq("user_id", alert.user_id)
-    .eq("product_id", productId)
-    .eq("retailer", retailer)
-    .eq("availability_type", availabilityType)
-    .gte("sent_at", since)
-    .limit(1);
-
-  if (error) return false;
-  return Boolean(data?.length);
 }

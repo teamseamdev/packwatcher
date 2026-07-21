@@ -17,6 +17,7 @@ import { sendPushToUser } from "@/lib/push";
 import { getAdapter } from "@/lib/stock-checkers";
 import { runProductCheck } from "@/lib/stock-checkers/run-check";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { recordCatalogOfferObservation } from "@/lib/tracker/pipeline";
 
 const CatalogOfferSchema = z.object({
   name: z.string().min(1),
@@ -40,6 +41,11 @@ const TestNotificationSchema = z.object({
   title: z.string().trim().min(1).max(120),
   message: z.string().trim().min(1).max(500),
   send_push: z.coerce.boolean().optional()
+});
+
+const SimulateRestockSchema = z.object({
+  offer_id: z.string().uuid(),
+  price: z.coerce.number().min(0).optional()
 });
 
 const PromoCodeSchema = z.object({
@@ -141,6 +147,99 @@ export async function sendAdminTestNotification(formData: FormData) {
       });
     }
   }
+
+  revalidatePath("/admin");
+  revalidatePath("/alerts");
+}
+
+export async function simulateRestockPipeline(formData: FormData) {
+  const { profile, user } = await requireProfile();
+  if (!isAdmin(profile)) throw new Error("Admin access required.");
+  const parsed = SimulateRestockSchema.parse(Object.fromEntries(formData));
+  const admin = createAdminClient();
+
+  const { data: offer, error } = await admin
+    .from("catalog_offers")
+    .select("*, catalog_products!catalog_offers_catalog_product_id_fkey(*)")
+    .eq("id", parsed.offer_id)
+    .single();
+
+  if (error || !offer) throw new Error(error?.message ?? "Catalog offer not found.");
+
+  const now = new Date();
+  await recordCatalogOfferObservation({
+    supabase: admin,
+    offer,
+    observation: {
+      status: "out_of_stock",
+      price: parsed.price ?? offer.price ?? offer.last_price ?? null,
+      currency: offer.currency ?? "USD",
+      availabilityType: "online",
+      shippingAvailable: false,
+      pickupAvailable: false,
+      deliveryAvailable: false,
+      sellerName: offer.retailer ?? offer.store_name,
+      officialRetailerSeller: true,
+      confidence: 0.99,
+      sourceStatus: "admin simulated starting state",
+      extractionStrategy: "admin_simulation",
+      adapterVersion: "admin-simulation-v1",
+      checkedAt: now.toISOString(),
+      rawMetadata: {
+        isTest: true,
+        offerId: offer.id,
+        simulatedBy: user.id,
+        step: "start"
+      },
+      isTest: true
+    },
+    policy: {
+      sourceStrength: "official",
+      requireConfirmationForWeb: false,
+      minimumRestockConfidence: 0.5
+    }
+  });
+
+  const result = await recordCatalogOfferObservation({
+    supabase: admin,
+    offer,
+    observation: {
+      status: "in_stock",
+      price: parsed.price ?? offer.price ?? offer.last_price ?? null,
+      currency: offer.currency ?? "USD",
+      availabilityType: "online",
+      shippingAvailable: true,
+      pickupAvailable: null,
+      deliveryAvailable: null,
+      sellerName: offer.retailer ?? offer.store_name,
+      officialRetailerSeller: true,
+      confidence: 0.99,
+      sourceStatus: "admin simulated restock",
+      extractionStrategy: "admin_simulation",
+      adapterVersion: "admin-simulation-v1",
+      checkedAt: new Date(now.getTime() + 1000).toISOString(),
+      rawMetadata: {
+        isTest: true,
+        offerId: offer.id,
+        simulatedBy: user.id,
+        step: "restock"
+      },
+      isTest: true
+    },
+    policy: {
+      sourceStrength: "official",
+      requireConfirmationForWeb: false,
+      minimumRestockConfidence: 0.5
+    }
+  });
+
+  await admin.from("app_events").insert({
+    category: "notification",
+    severity: result.restockEventId ? "info" : "warn",
+    message: "Admin simulated restock pipeline completed",
+    user_id: user.id,
+    metadata: { ...result, offerId: offer.id }
+  });
 
   revalidatePath("/admin");
   revalidatePath("/alerts");

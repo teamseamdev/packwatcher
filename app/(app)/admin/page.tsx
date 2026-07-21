@@ -4,7 +4,7 @@ import { StatCard } from "@/components/stat-card";
 import { isAdmin, requireProfile } from "@/lib/auth";
 import { formatPromoDiscount } from "@/lib/promo-codes";
 import type { FeedbackItem, FeedbackStatus } from "@/lib/types";
-import { addCatalogOffer, adminCheckProduct, approveProductMatch, createPromoCode, disableCatalogOffer, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, reconcilePokemonInventory, rejectProductMatch, sendAdminTestNotification, setPromoCodeActive, updateFeedbackStatus, updateUserPlan } from "./actions";
+import { addCatalogOffer, adminCheckProduct, approveProductMatch, createPromoCode, disableCatalogOffer, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, reconcilePokemonInventory, rejectProductMatch, sendAdminTestNotification, setPromoCodeActive, simulateRestockPipeline, updateFeedbackStatus, updateUserPlan } from "./actions";
 
 const panelClass = "rounded-lg border border-white/10 bg-white/[0.04] p-5";
 const scrollPanelClass = `${panelClass} scroll-panel max-h-[680px] pr-4`;
@@ -28,7 +28,9 @@ export default async function AdminPage() {
     { data: matchReviews },
     { data: recentOffers },
     { data: appEvents },
-    { data: feedbackItems }
+    { data: feedbackItems },
+    { data: restockEvents },
+    { data: outboxJobs }
   ] = await Promise.all([
     supabase.from("profiles").select("*", { count: "exact", head: true }),
     supabase.from("profiles").select("*", { count: "exact", head: true }).in("plan", ["pro", "admin"]),
@@ -49,7 +51,9 @@ export default async function AdminPage() {
       .select("*, profiles!feedback_items_user_id_fkey(email), feedback_status_events(*, profiles!feedback_status_events_admin_user_id_fkey(email))")
       .order("created_at", { ascending: false })
       .limit(30)
-      .returns<FeedbackItem[]>()
+      .returns<FeedbackItem[]>(),
+    supabase.from("restock_events").select("*").order("created_at", { ascending: false }).limit(10),
+    supabase.from("notification_outbox").select("*").order("created_at", { ascending: false }).limit(10)
   ]);
 
   const failedChecks = checks?.filter((check) => check.status === "unknown").length ?? 0;
@@ -195,6 +199,20 @@ export default async function AdminPage() {
               Also send browser push to subscribed devices
             </label>
             <button className="h-10 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Send test notification</button>
+          </form>
+          <form action={simulateRestockPipeline} className="mt-4 grid gap-3 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3">
+            <div>
+              <p className="text-sm font-bold text-white">Simulate full restock pipeline</p>
+              <p className="mt-1 text-xs leading-5 text-slate-300">Creates synthetic out-of-stock and in-stock observations, a test restock event, matching alert notifications, and web-push outbox delivery.</p>
+            </div>
+            <select name="offer_id" defaultValue="" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm">
+              <option value="" disabled>Choose catalog offer</option>
+              {recentOffers?.filter((offer) => offer.active !== false).map((offer) => (
+                <option key={offer.id} value={offer.id}>{offer.store_name} - {offer.title ?? offer.id}</option>
+              ))}
+            </select>
+            <input name="price" type="number" min="0" step="0.01" placeholder="Optional test price" className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300" />
+            <button className="h-10 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Simulate restock</button>
           </form>
         </div>
 
@@ -401,6 +419,35 @@ export default async function AdminPage() {
           <h2 className="font-bold text-white">Notification logs</h2>
           <div className="mt-4 space-y-3 text-sm">
             {notifications?.map((item) => <p key={item.id} className="rounded-lg bg-white/5 p-3">{item.title}</p>)}
+          </div>
+        </div>
+
+        <div className={`${scrollPanelClass} lg:col-span-2`}>
+          <h2 className="font-bold text-white">Restock pipeline</h2>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Recent events</p>
+              <div className="mt-2 space-y-2 text-sm">
+                {restockEvents?.length ? restockEvents.map((event) => (
+                  <div key={event.id} className="rounded-lg bg-white/5 p-3">
+                    <p className="font-medium text-white">{event.new_status} - ${event.price ?? "n/a"} {event.is_test ? "(test)" : ""}</p>
+                    <p className="mt-1 text-xs text-slate-500">{event.event_source} - {event.notification_status}</p>
+                  </div>
+                )) : <p className="text-sm text-slate-400">No restock events recorded yet.</p>}
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Notification outbox</p>
+              <div className="mt-2 space-y-2 text-sm">
+                {outboxJobs?.length ? outboxJobs.map((job) => (
+                  <div key={job.id} className="rounded-lg bg-white/5 p-3">
+                    <p className="font-medium text-white">{job.channel} - {job.status} {job.is_test ? "(test)" : ""}</p>
+                    <p className="mt-1 text-xs text-slate-500">Attempts {job.attempts} - {new Date(job.created_at).toLocaleString()}</p>
+                    {job.error_message ? <p className="mt-1 text-xs text-rose-200">{job.error_message}</p> : null}
+                  </div>
+                )) : <p className="text-sm text-slate-400">No outbox jobs recorded yet.</p>}
+              </div>
+            </div>
           </div>
         </div>
       </section>

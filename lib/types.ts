@@ -9,7 +9,15 @@ export type StockStatus =
   | "pickup_available"
   | "shipping_available"
   | "delivery_available"
-  | "unavailable";
+  | "unavailable"
+  | "coming_soon"
+  | "pickup_only"
+  | "shipping_only"
+  | "delivery_only"
+  | "unavailable_at_location"
+  | "listing_removed"
+  | "blocked"
+  | "error";
 
 export type Profile = {
   id: string;

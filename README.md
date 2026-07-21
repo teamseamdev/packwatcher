@@ -171,6 +171,14 @@ If the `clip-source-videos` bucket already exists and uploads fail with "The obj
 
 Run `supabase/migrations/007_retail_aggregation_foundation.sql` to add normalized retail aggregation tables, alert filters, connector health, retail job runs, uncertain match reviews, and notification event dedupe.
 
+Run `supabase/migrations/027_tracker_restock_pipeline.sql` to add the durable tracker pipeline:
+
+- `availability_observations` stores normalized retailer evidence.
+- `listing_latest_state` stores the reduced latest state used by the UI.
+- `restock_events` stores immutable confirmed/test restock transitions.
+- `notification_outbox` queues push delivery separately from retailer checks.
+- `monitor_jobs` is the foundation for durable due-listing worker leases.
+
 During local development, if Supabase Storage still enforces a lower project or plan upload cap, PackWatcher Clips stores the raw source video in the OS temp directory and continues the review/export flow. Set `CLIPS_LOCAL_STORAGE_DIR` to a writable folder if you want to control where local source videos are saved.
 
 ## PackWatcher Scanner
@@ -255,9 +263,18 @@ Catalog importers:
 - Catalog sync always attempts TCGCSV, runs Best Buy when `BESTBUY_API_KEY` is configured, and runs retailer search discovery only for explicitly enabled retailers.
 - Imports use chunked upserts, so repeated syncs update the catalog without creating duplicate products or offers.
 - Existing catalog offers are checked after imports. Only an unavailable-to-available transition creates in-app and web push alerts.
+- Offer checks now record normalized observations, reduce them into latest state, create deduped restock events, queue notification outbox rows, and then process push delivery. Raw retailer output should not directly send a push alert.
 - Dashboard and Watchlist automatically attempt a quick TCGCSV sync if the catalog is empty, so users do not land on a blank catalog.
 - Pokemon Center and Amazon have retailer-specific safe monitoring adapters.
 - Walmart, Target, GameStop, Pokemon Center, Amazon, Best Buy, and other product URLs can be added through the Admin bulk URL importer, then monitored by the safe stock checker.
+
+Admin restock testing:
+
+1. Open Admin.
+2. Use **Send test notification** for a direct device push test.
+3. Use **Simulate full restock pipeline** to create synthetic `out_of_stock -> in_stock` observations for a catalog offer.
+4. Confirm the Admin **Restock pipeline** panel shows a test restock event and notification outbox job.
+5. Test rows are marked `is_test=true` and should not be treated as real retailer analytics.
 - Prefer official feeds/APIs where available. Use URL monitoring only for public product pages and never for checkout, queue, CAPTCHA, or account automation.
 
 Push notifications:
