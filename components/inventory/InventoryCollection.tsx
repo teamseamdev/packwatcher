@@ -228,6 +228,7 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
             ownedCount={selectedSetItems.length}
             checklist={ownedChecklist}
             status={checklistStatus}
+            setOptions={searchableSetOptions}
           />
         )}
       </div>
@@ -393,13 +394,17 @@ function SetChecklistView({
   setName,
   ownedCount,
   checklist,
-  status
+  status,
+  setOptions
 }: {
   setName: string;
   ownedCount: number;
   checklist: Array<SetChecklistCard & { owned: boolean; ownedItem?: InventoryItem | null }>;
   status: "idle" | "loading" | "ready" | "failed";
+  setOptions: string[];
 }) {
+  const [selectedCardRef, setSelectedCardRef] = useState<{ setName: string; key: string } | null>(null);
+
   if (!setName) {
     return (
       <div className="rounded-lg border border-dashed border-white/10 p-8 text-center text-sm text-slate-400">
@@ -410,6 +415,8 @@ function SetChecklistView({
 
   const total = checklist.length;
   const ownedInChecklist = checklist.filter((card) => card.owned).length;
+  const selectedKey = selectedCardRef?.setName === setName ? selectedCardRef.key : null;
+  const selectedCard = selectedKey ? checklist.find((card) => card.key === selectedKey) ?? null : null;
 
   return (
     <div className="space-y-4">
@@ -425,9 +432,60 @@ function SetChecklistView({
         </p>
       </div>
 
+      {selectedCard ? (
+        selectedCard.ownedItem ? (
+          <div className="rounded-lg border border-amber-300/25 bg-amber-300/10 p-3">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <p className="pw-hud text-xs font-black">Selected card</p>
+                <h4 className="mt-1 font-black text-white">{selectedCard.name}</h4>
+                <p className="mt-1 text-xs text-slate-400">{[selectedCard.cardNumber, selectedCard.setName, selectedCard.variant].filter(Boolean).join(" - ")}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedCardRef(null)}
+                className="rounded-md border border-white/10 px-3 py-1.5 text-xs font-bold text-slate-200"
+              >
+                Close
+              </button>
+            </div>
+            <InventoryRow item={selectedCard.ownedItem} setOptions={setOptions} />
+          </div>
+        ) : (
+          <div className="rounded-lg border border-white/10 bg-slate-950/45 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="pw-hud text-xs font-black">Missing card</p>
+                <h4 className="mt-1 font-black text-white">{selectedCard.name}</h4>
+                <p className="mt-1 text-xs text-slate-400">{[selectedCard.cardNumber, selectedCard.setName, selectedCard.variant].filter(Boolean).join(" - ") || "No number"}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedCardRef(null)}
+                className="rounded-md border border-white/10 px-3 py-1.5 text-xs font-bold text-slate-200"
+              >
+                Close
+              </button>
+            </div>
+            <p className="mt-3 text-sm text-slate-400">This card is not in your inventory yet. Scan it from the Scanner tab to add it.</p>
+          </div>
+        )
+      ) : null}
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {checklist.length ? checklist.map((card) => (
-          <div key={card.key} className={`rounded-lg border p-2 ${card.owned ? "border-emerald-300/30 bg-emerald-300/10" : "border-white/10 bg-slate-950/45"}`}>
+          <button
+            key={card.key}
+            type="button"
+            onClick={() => setSelectedCardRef((current) => current?.setName === setName && current.key === card.key ? null : { setName, key: card.key })}
+            className={`rounded-lg border p-2 text-left transition ${
+              selectedKey === card.key
+                ? "border-amber-300 bg-amber-300/15 shadow-[0_0_18px_rgba(252,211,77,0.18)]"
+                : card.owned
+                  ? "border-emerald-300/30 bg-emerald-300/10 hover:border-emerald-200/70"
+                  : "border-white/10 bg-slate-950/45 hover:border-white/25"
+            }`}
+          >
             {card.owned && card.imageUrl ? (
               <div className="aspect-[63/88] rounded-md bg-slate-900 bg-cover bg-center" style={{ backgroundImage: `url(${card.imageUrl})` }} />
             ) : (
@@ -443,7 +501,7 @@ function SetChecklistView({
                 {card.owned ? "Owned" : "Missing"}
               </p>
             </div>
-          </div>
+          </button>
         )) : (
           <div className="col-span-full rounded-lg border border-dashed border-white/10 p-8 text-center text-sm text-slate-400">
             No cards found for this set yet.
