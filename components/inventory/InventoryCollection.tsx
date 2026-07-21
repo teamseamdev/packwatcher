@@ -3,9 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { ArrowDownAZ, CheckCircle2, Clock3, DollarSign, ExternalLink, Grid2X2, Layers3, Save, Search, Trash2 } from "lucide-react";
-import { deleteInventoryItem, updateInventoryItem } from "@/app/(app)/inventory/actions";
-import { SetCombobox } from "@/components/set-combobox";
+import { ArrowDownAZ, CheckCircle2, Clock3, DollarSign, ExternalLink, Grid2X2, Layers3, Search } from "lucide-react";
 import { cleanCardName } from "@/lib/cards/card-name";
 import { compareCollectorNumbers, normalizeCollectorNumber } from "@/lib/cards/collector-number";
 import { calculateProfit, currency } from "@/lib/profit";
@@ -216,7 +214,7 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
       <div className="scroll-panel mt-4 max-h-[68vh] space-y-3 pr-1">
         {viewMode === "list" ? (
           filteredItems.length ? filteredItems.map((item) => (
-            <InventoryRow key={item.id} item={item} setOptions={searchableSetOptions} />
+            <InventoryRow key={item.id} item={item} />
           )) : (
             <div className="rounded-lg border border-dashed border-white/10 p-8 text-center text-sm text-slate-400">
               No inventory items match this filter.
@@ -228,7 +226,6 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
             ownedCount={selectedSetItems.length}
             checklist={ownedChecklist}
             status={checklistStatus}
-            setOptions={searchableSetOptions}
           />
         )}
       </div>
@@ -236,8 +233,7 @@ export function InventoryCollection({ items }: { items: InventoryItem[] }) {
   );
 }
 
-function InventoryRow({ item, setOptions }: { item: InventoryItem; setOptions: string[] }) {
-  const [isEditing, setIsEditing] = useState(false);
+function InventoryRow({ item }: { item: InventoryItem }) {
   const result = inventoryProfit(item);
   const addedDate = item.created_at ? new Date(item.created_at).toLocaleDateString() : null;
   const profitTone = result.profit >= 0 ? "text-emerald-300" : "text-rose-300";
@@ -249,11 +245,6 @@ function InventoryRow({ item, setOptions }: { item: InventoryItem; setOptions: s
     normalizedCollectorNumber: normalizeCollectorNumber(cardNumber)?.normalized
   }).canonicalName;
   const setName = inventorySetName(item);
-
-  async function saveAndCollapse(formData: FormData) {
-    await updateInventoryItem(formData);
-    setIsEditing(false);
-  }
 
   return (
     <article className="rounded-lg border border-cyan-300/10 bg-black/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
@@ -292,100 +283,17 @@ function InventoryRow({ item, setOptions }: { item: InventoryItem; setOptions: s
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          onClick={() => setIsEditing((current) => !current)}
+        <Link
+          href={`/inventory/${item.id}/edit`}
           className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-300/10 px-3 text-center text-sm font-semibold text-slate-100"
         >
           Edit card details
-        </button>
+        </Link>
         <Link href={`/inventory/ebay/${item.id}`} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-amber-300/25 px-3 text-center text-sm font-bold text-amber-100">
           <ExternalLink className="h-4 w-4 shrink-0" />
           <span className="truncate">Sell on eBay</span>
         </Link>
       </div>
-
-      {isEditing ? (
-        <div className="mt-3 rounded-lg border border-white/10 bg-slate-950/45 p-3">
-        <form action={saveAndCollapse} className="grid gap-3">
-          <input type="hidden" name="id" value={item.id} />
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1.4fr)_90px]">
-            <label className="grid gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Name</span>
-              <input name="name" defaultValue={item.name} className={fieldClass} />
-            </label>
-            <label className="grid gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Qty</span>
-              <input name="quantity" type="number" min="1" step="1" defaultValue={item.quantity} className={fieldClass} />
-            </label>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <label className="grid gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Card name</span>
-              <input name="card_name" defaultValue={cardName} className={fieldClass} />
-            </label>
-            <label className="grid gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Set</span>
-              <SetCombobox name="set_name" value={setName ?? ""} options={setOptions} placeholder="Search set" />
-            </label>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <label className="grid gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Card number</span>
-              <input name="card_number" defaultValue={cardNumber ?? ""} className={fieldClass} />
-            </label>
-            <label className="grid gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Finish</span>
-              <select name="variant" defaultValue={item.variant ?? (item.foil ? "Holofoil" : "Normal")} className={fieldClass}>
-                <option value="Normal">Normal</option>
-                <option value="Holofoil">Foil / holo</option>
-                <option value="Reverse Holofoil">Reverse holo</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-3 rounded-lg border border-white/10 bg-slate-950/50 px-3 py-2">
-              <input name="foil" type="checkbox" defaultChecked={Boolean(item.foil)} className="h-5 w-5 accent-amber-300" />
-              <span>
-                <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Foil card</span>
-                <span className="text-sm text-slate-200">Use foil pricing context</span>
-              </span>
-            </label>
-          </div>
-          <input type="hidden" name="language" value={item.language ?? ""} />
-          <div className="grid gap-3 sm:grid-cols-4">
-            <MoneyField name="purchase_price" label="Cost" value={item.purchase_price} />
-            <MoneyField name="estimated_sale_price" label="Value" value={item.estimated_sale_price} />
-            <MoneyField name="fees" label="Fees" value={item.fees} />
-            <MoneyField name="shipping" label="Shipping" value={item.shipping} />
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Purchase date</span>
-              <input name="purchase_date" type="date" defaultValue={item.purchase_date ?? ""} className={fieldClass} />
-            </label>
-            <label className="grid gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Image URL</span>
-              <input name="image_url" defaultValue={item.image_url ?? ""} className={fieldClass} />
-            </label>
-          </div>
-          <label className="grid gap-1">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Notes</span>
-            <textarea name="notes" defaultValue={item.notes ?? ""} className="min-h-24 rounded-lg border border-white/10 bg-slate-950/70 p-3 text-sm text-slate-100 outline-none focus:border-amber-300" />
-          </label>
-          <button className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-bold text-slate-950 sm:w-fit">
-            <Save className="h-4 w-4" />
-            Save changes
-          </button>
-        </form>
-        <form action={deleteInventoryItem} className="mt-3 border-t border-white/10 pt-3">
-          <input type="hidden" name="id" value={item.id} />
-          <button className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-rose-300/30 px-4 text-sm font-semibold text-rose-100">
-            <Trash2 className="h-4 w-4" />
-            Delete card
-          </button>
-          <p className="mt-2 text-xs text-slate-500">Deletes this inventory record from your collection.</p>
-        </form>
-        </div>
-      ) : null}
     </article>
   );
 }
@@ -394,14 +302,12 @@ function SetChecklistView({
   setName,
   ownedCount,
   checklist,
-  status,
-  setOptions
+  status
 }: {
   setName: string;
   ownedCount: number;
   checklist: Array<SetChecklistCard & { owned: boolean; ownedItem?: InventoryItem | null }>;
   status: "idle" | "loading" | "ready" | "failed";
-  setOptions: string[];
 }) {
   const [selectedCardRef, setSelectedCardRef] = useState<{ setName: string; key: string } | null>(null);
 
@@ -493,7 +399,43 @@ function SetChecklistView({
               </button>
             </div>
             {selectedCard.ownedItem ? (
-              <InventoryRow item={selectedCard.ownedItem} setOptions={setOptions} />
+              <div className="grid gap-3">
+                <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-3 rounded-lg border border-white/10 bg-white/[0.04] p-3">
+                  {selectedCard.ownedItem.image_url ? (
+                    <div
+                      aria-hidden="true"
+                      className="h-24 w-[72px] rounded-md bg-slate-900 bg-cover bg-center"
+                      style={{ backgroundImage: `url(${selectedCard.ownedItem.image_url})` }}
+                    />
+                  ) : (
+                    <div className="grid h-24 w-[72px] place-items-center rounded-md border border-white/10 bg-white/5 text-center text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      No image
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="truncate font-black text-white">{selectedCard.name}</p>
+                    <p className="mt-1 truncate text-xs text-slate-400">{[selectedCard.cardNumber, selectedCard.setName, selectedCard.variant].filter(Boolean).join(" - ")}</p>
+                    <p className="mt-3 text-sm text-slate-300">
+                      Value <span className="font-black text-amber-200">{currency(selectedCard.ownedItem.estimated_sale_price)}</span>
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Link
+                    href={`/inventory/${selectedCard.ownedItem.id}/edit`}
+                    className="inline-flex h-12 items-center justify-center rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-3 text-center text-sm font-black text-cyan-50"
+                  >
+                    Edit card
+                  </Link>
+                  <Link
+                    href={`/inventory/ebay/${selectedCard.ownedItem.id}`}
+                    className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-amber-300/30 bg-amber-300/10 px-3 text-center text-sm font-black text-amber-100"
+                  >
+                    <ExternalLink className="h-4 w-4 shrink-0" />
+                    Sell on eBay
+                  </Link>
+                </div>
+              </div>
             ) : (
               <p className="rounded-lg border border-white/10 bg-white/[0.04] p-4 text-sm text-slate-400">
                 This card is not in your inventory yet. Scan it from the Scanner tab to add it.
@@ -503,17 +445,6 @@ function SetChecklistView({
         </div>
       ) : null}
     </div>
-  );
-}
-
-const fieldClass = "h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-slate-100 outline-none focus:border-amber-300";
-
-function MoneyField({ name, label, value }: { name: string; label: string; value: number }) {
-  return (
-    <label className="grid gap-1">
-      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>
-      <input name={name} type="number" min="0" step="0.01" defaultValue={value} className={fieldClass} />
-    </label>
   );
 }
 
