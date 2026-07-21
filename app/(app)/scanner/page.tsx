@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { Ruler } from "lucide-react";
 import { CardScanner } from "@/components/scanner/CardScanner";
 
 export default function ScannerPage() {
@@ -9,6 +11,10 @@ export default function ScannerPage() {
         <p className="mt-3 max-w-3xl text-slate-300">
           Scan cards with the full-screen camera to build an ordered value list, add scanned cards to inventory, or export a PDF.
         </p>
+        <Link href="/scanner/centering" className="mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-amber-300/40 bg-amber-300/10 px-4 text-sm font-black text-amber-100">
+          <Ruler className="h-4 w-4" />
+          Check centering
+        </Link>
       </div>
       <CardScanner />
     </div>

@@ -192,6 +192,12 @@ Run `supabase/migrations/028_monitor_jobs_and_retailer_rollout.sql` after migrat
 
 Admins can run a worker batch from **Admin -> Retail jobs -> Run worker batch**. Cron or an external worker can call `GET /api/monitor/run?enqueue=true&limit=25` with `Authorization: Bearer $CRON_SECRET`; admin tools can call `POST /api/monitor/run` with `x-admin-secret: $ADMIN_CHECK_SECRET`.
 
+Run `supabase/migrations/029_card_centering_analyses.sql` to add Centering Check persistence:
+
+- `card_centering_analyses` stores owner-scoped centering estimates tied to exact inventory entries when available.
+- `card-centering` is a private Supabase Storage bucket for optional front/back photos.
+- Users can save measurements without saving photos; saved images live under user-specific private paths and require signed access.
+
 During local development, if Supabase Storage still enforces a lower project or plan upload cap, PackWatcher Clips stores the raw source video in the OS temp directory and continues the review/export flow. Set `CLIPS_LOCAL_STORAGE_DIR` to a writable folder if you want to control where local source videos are saved.
 
 ## PackWatcher Scanner
@@ -207,8 +213,22 @@ What V1 includes:
 - Ordered card list with estimated values.
 - Manual card add fallback when AI recognition is unavailable or cannot read the card.
 - PDF export of the scan results and total estimated value.
+- Centering Check at `/scanner/centering` for front/back centering estimates separate from normal card identification.
 
 Scanner pricing uses the free TCGCSV data source. Camera/image recognition uses OpenAI only when `CLIPS_ENABLE_OPENAI=true` and `OPENAI_API_KEY` are configured. For Japanese, Chinese, and Korean cards, Scanner attempts to identify the printed card and normalize it to an English pricing name when possible. If OpenAI is unavailable, quota-limited, or the card cannot be matched, users can still manually add card names and get TCGCSV pricing.
+
+### Centering Check
+
+Centering Check is a grading-precheck measurement tool, not a grading prediction. It estimates front and back centering from captured photos, lets the user adjust physical card corners and inner printed-frame lines, and compares the measured ratios to versioned informational PSA/Beckett centering references. It does not evaluate corners, edges, surface, print defects, authenticity, staining, alteration, focus, or eye appeal.
+
+Access points:
+
+- Scanner: `/scanner` -> **Check centering**.
+- Inventory: `/inventory/[id]/edit` -> **Centering Check**.
+
+Centering Check loads OpenCV.js at runtime for automatic card-boundary contour detection and perspective correction, then falls back to PackWatcher-owned edge detection if OpenCV is unavailable. When an inventory card has a reference image, the flow attempts reference-assisted front-frame initialization; if the image cannot be read because of CORS or image quality, the user can still adjust the inner printed-frame lines manually.
+
+No OpenCV.js source code or third-party crop-editor code is copied into the repository.
 
 Scanner limits reset on a rolling 30-day window:
 

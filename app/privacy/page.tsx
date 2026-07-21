@@ -21,6 +21,7 @@ export default function PrivacyPage() {
         <section>
           <h2 className="text-lg font-bold text-white">Linked Marketplaces</h2>
           <p className="mt-2">If you connect eBay, PackWatcher stores encrypted eBay authorization tokens and seller listing defaults so you can create listings from your inventory. You can disconnect eBay from the Account tab.</p>
+          <p className="mt-2">If you use Centering Check, card photos are saved only when you explicitly choose to save photos. You may save measurements without photos. Saved centering photos are stored privately and are not used to train models unless a separate opt-in is offered and accepted.</p>
         </section>
         <section>
           <h2 className="text-lg font-bold text-white">Notifications</h2>

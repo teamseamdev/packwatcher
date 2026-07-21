@@ -208,3 +208,43 @@ export type FeedbackItem = {
   profiles?: Pick<Profile, "email"> | null;
   feedback_status_events?: FeedbackStatusEvent[];
 };
+
+export type CenteringConfidence = "high" | "medium" | "low";
+export type CenteringRecommendation = "excellent" | "strong" | "acceptable" | "off_center" | "retake";
+
+export type CardCenteringAnalysis = {
+  id: string;
+  user_id: string;
+  inventory_item_id: string | null;
+  canonical_card_id: string | null;
+  front_original_path: string | null;
+  front_corrected_path: string | null;
+  back_original_path: string | null;
+  back_corrected_path: string | null;
+  front_left_margin: number | null;
+  front_right_margin: number | null;
+  front_top_margin: number | null;
+  front_bottom_margin: number | null;
+  back_left_margin: number | null;
+  back_right_margin: number | null;
+  back_top_margin: number | null;
+  back_bottom_margin: number | null;
+  front_lr_ratio: string | null;
+  front_tb_ratio: string | null;
+  back_lr_ratio: string | null;
+  back_tb_ratio: string | null;
+  front_confidence: CenteringConfidence | null;
+  back_confidence: CenteringConfidence | null;
+  overall_confidence: CenteringConfidence;
+  recommendation: CenteringRecommendation;
+  detection_method: string;
+  reference_image_used: string | null;
+  reference_registration_score: number | null;
+  grading_standard_version: string;
+  analysis_engine_version: string;
+  user_adjusted_corners: boolean;
+  sleeve_toploader_warning: boolean;
+  measurements: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};

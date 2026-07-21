@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Ruler, Save, Trash2 } from "lucide-react";
 import { deleteInventoryItem, updateInventoryItem } from "@/app/(app)/inventory/actions";
 import { SetCombobox } from "@/components/set-combobox";
 import { requireUser } from "@/lib/auth";
 import { cleanCardName } from "@/lib/cards/card-name";
 import { normalizeCollectorNumber } from "@/lib/cards/collector-number";
 import { currency } from "@/lib/profit";
-import type { InventoryItem } from "@/lib/types";
+import type { CardCenteringAnalysis, InventoryItem } from "@/lib/types";
 
 export default async function EditInventoryItemPage({
   params,
@@ -21,9 +21,17 @@ export default async function EditInventoryItemPage({
   const returnPath = safeInventoryReturnPath(returnTo);
   const { supabase, user } = await requireUser();
 
-  const [{ data: item }, { data: sets }] = await Promise.all([
+  const [{ data: item }, { data: sets }, { data: latestCentering }] = await Promise.all([
     supabase.from("inventory_items").select("*").eq("id", id).eq("user_id", user.id).single<InventoryItem>(),
-    supabase.from("pokemon_card_sets").select("name").order("name", { ascending: true }).returns<Array<{ name: string }>>()
+    supabase.from("pokemon_card_sets").select("name").order("name", { ascending: true }).returns<Array<{ name: string }>>(),
+    supabase
+      .from("card_centering_analyses")
+      .select("*")
+      .eq("inventory_item_id", id)
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<CardCenteringAnalysis>()
   ]);
 
   if (!item) notFound();
@@ -155,6 +163,31 @@ export default async function EditInventoryItemPage({
         </div>
       </section>
 
+      <section className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="pw-hud text-xs font-black">Grading precheck</p>
+            <h2 className="mt-1 text-xl font-black text-white">Centering Check</h2>
+            {latestCentering ? (
+              <div className="mt-2 text-sm leading-6 text-slate-300">
+                <p>Front: {latestCentering.front_lr_ratio ?? "not checked"} L/R · {latestCentering.front_tb_ratio ?? "not checked"} T/B</p>
+                <p>Back: {latestCentering.back_lr_ratio ?? "not checked"} L/R · {latestCentering.back_tb_ratio ?? "not checked"} T/B</p>
+                <p className="text-xs text-slate-500">Confidence {latestCentering.overall_confidence} · {centerRecommendation(latestCentering.recommendation)} · {new Date(latestCentering.created_at).toLocaleDateString()}</p>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-slate-400">No centering analysis saved for this inventory card yet.</p>
+            )}
+            <p className="mt-2 text-xs leading-5 text-slate-500">
+              Centering is only one part of professional grading and does not guarantee a PSA, Beckett, CGC, or other grading result.
+            </p>
+          </div>
+          <Link href={`/inventory/${item.id}/centering`} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-black text-slate-950">
+            <Ruler className="h-4 w-4" />
+            {latestCentering ? "Recheck" : "Check centering"}
+          </Link>
+        </div>
+      </section>
+
       <form action={deleteAndReturn} className="pw-panel rounded-lg border border-rose-300/25 bg-rose-500/10 p-4">
         <input type="hidden" name="id" value={item.id} />
         <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-rose-300/30 px-4 text-sm font-semibold text-rose-100">
@@ -203,6 +236,16 @@ function parseNotesValue(notes: string | null, label: string) {
 function cleanInventoryText(value?: string | null) {
   const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
   return text || null;
+}
+
+function centerRecommendation(value: CardCenteringAnalysis["recommendation"]) {
+  switch (value) {
+    case "excellent": return "Excellent centering";
+    case "strong": return "Strong centering";
+    case "acceptable": return "Acceptable centering";
+    case "off_center": return "Noticeably off-center";
+    default: return "Retake recommended";
+  }
 }
 
 function safeInventoryReturnPath(value?: string | null) {
