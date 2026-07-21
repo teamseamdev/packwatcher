@@ -54,6 +54,11 @@ TCGCSV_MAX_PRODUCTS=5000
 TCGCSV_QUICK_MAX_GROUPS=40
 TCGCSV_QUICK_MAX_PRODUCTS=1000
 CATALOG_OFFER_CHECK_LIMIT=100
+MONITOR_JOB_BATCH_LIMIT=25
+MONITOR_JOB_ENQUEUE_LIMIT=1000
+MONITOR_JOB_LEASE_SECONDS=300
+MONITOR_JOB_IN_STOCK_INTERVAL_MINUTES=20
+MONITOR_JOB_OUT_OF_STOCK_INTERVAL_MINUTES=120
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 NEXT_PUBLIC_STRIPE_PRO_PRICE_ID=
@@ -177,7 +182,15 @@ Run `supabase/migrations/027_tracker_restock_pipeline.sql` to add the durable tr
 - `listing_latest_state` stores the reduced latest state used by the UI.
 - `restock_events` stores immutable confirmed/test restock transitions.
 - `notification_outbox` queues push delivery separately from retailer checks.
-- `monitor_jobs` is the foundation for durable due-listing worker leases.
+- `monitor_jobs` stores due retailer checks and worker leases.
+
+Run `supabase/migrations/028_monitor_jobs_and_retailer_rollout.sql` after migration `027` to add:
+
+- `retailer_rollout`, the admin-visible 20-retailer support matrix.
+- `claim_monitor_jobs(...)`, an atomic `FOR UPDATE SKIP LOCKED` lease function for workers.
+- A unique offer-job key so each catalog offer has one reusable monitor job.
+
+Admins can run a worker batch from **Admin -> Retail jobs -> Run worker batch**. Cron or an external worker can call `GET /api/monitor/run?enqueue=true&limit=25` with `Authorization: Bearer $CRON_SECRET`; admin tools can call `POST /api/monitor/run` with `x-admin-secret: $ADMIN_CHECK_SECRET`.
 
 During local development, if Supabase Storage still enforces a lower project or plan upload cap, PackWatcher Clips stores the raw source video in the OS temp directory and continues the review/export flow. Set `CLIPS_LOCAL_STORAGE_DIR` to a writable folder if you want to control where local source videos are saved.
 
@@ -317,7 +330,9 @@ Retail aggregation foundation:
 - Restock alert filtering and dedupe live in `lib/retailers/shared/restock-events.ts`. Event keys include user, retailer listing, availability type, store, price bucket, and status.
 - Optional shopping-search discovery uses `SHOPPING_SEARCH_PROVIDER`, `SHOPPING_SEARCH_API_URL`, and `SHOPPING_SEARCH_API_KEY`. Shopping-search results are discovery and price hints only; PackWatcher still attempts retailer-specific verification before treating inventory as confirmed.
 - Authenticated users can run search-triggered discovery from the catalog search box. The `/api/catalog/discover` route searches enabled retailer sources and the optional shopping-search provider for the entered pack/box name, saves discovered listings, records search interest when possible, and refreshes local catalog results. It is intentionally click-triggered, rate-limited, and bounded by `USER_DISCOVERY_RESULT_LIMIT`.
-- Background processing currently uses the existing Vercel Cron-compatible `/api/catalog/sync` path plus admin-triggered sync. The new job/health tables make it straightforward to move catalog sync, discovery, availability checks, aggregation, and notifications into Trigger.dev, Inngest, Upstash QStash, BullMQ, or a dedicated worker when check volume grows.
+- Background processing now has two paths: `/api/catalog/sync` imports/discovers catalog data, while `/api/monitor/run` claims leased `monitor_jobs`, checks due catalog offers, records observations, queues restock notifications, and reschedules jobs with jitter/backoff. This works from Admin, Vercel Cron, or an authenticated external scheduler/worker.
+- Local-first sorting prioritizes verified pickup/local offers ahead of shipping and marketplace listings, then orders local offers by `distanceMiles` metadata or store/user coordinates when available. ZIP-based searches still bias discovery toward nearby stores even when a retailer does not expose exact coordinates.
+- `retailer_rollout` keeps the full 20-retailer matrix visible to admins and separates `connected`, `partially_supported`, and `not_supported` retailers. Public UI should only treat `public_enabled=true` rows as live inventory sources.
 
 Admin cron endpoints:
 
@@ -334,6 +349,12 @@ curl -X POST http://localhost:3000/api/catalog/sync \
   -H "x-admin-secret: $ADMIN_CHECK_SECRET"
 
 curl http://localhost:3000/api/catalog/sync \
+  -H "Authorization: Bearer $CRON_SECRET"
+
+curl -X POST "http://localhost:3000/api/monitor/run?enqueue=true&limit=25" \
+  -H "x-admin-secret: $ADMIN_CHECK_SECRET"
+
+curl "http://localhost:3000/api/monitor/run?enqueue=true&limit=25" \
   -H "Authorization: Bearer $CRON_SECRET"
 ```
 
@@ -367,6 +388,7 @@ Create Stripe prices, then set:
 8. Configure Vercel Cron jobs:
    - `/api/catalog/sync` daily to refresh searchable catalog products.
    - Vercel Cron should call `GET /api/catalog/sync` with `Authorization: Bearer $CRON_SECRET`.
+   - `/api/monitor/run?enqueue=true&limit=25` can be scheduled daily on Vercel Hobby or more frequently through an external scheduler/worker.
    - Manual/admin calls can still use `POST /api/catalog/sync` with `x-admin-secret`.
    - For checks more frequent than the Vercel Hobby daily schedule, use an authenticated external scheduler such as GitHub Actions, cron-job.org, Upstash QStash, or a paid Vercel plan.
 9. Configure the Stripe webhook URL:

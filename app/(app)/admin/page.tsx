@@ -4,7 +4,7 @@ import { StatCard } from "@/components/stat-card";
 import { isAdmin, requireProfile } from "@/lib/auth";
 import { formatPromoDiscount } from "@/lib/promo-codes";
 import type { FeedbackItem, FeedbackStatus } from "@/lib/types";
-import { addCatalogOffer, adminCheckProduct, approveProductMatch, createPromoCode, disableCatalogOffer, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, reconcilePokemonInventory, rejectProductMatch, sendAdminTestNotification, setPromoCodeActive, simulateRestockPipeline, updateFeedbackStatus, updateUserPlan } from "./actions";
+import { addCatalogOffer, adminCheckProduct, approveProductMatch, createPromoCode, disableCatalogOffer, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, reconcilePokemonInventory, rejectProductMatch, runMonitorJobsNow, sendAdminTestNotification, setPromoCodeActive, simulateRestockPipeline, updateFeedbackStatus, updateUserPlan } from "./actions";
 
 const panelClass = "rounded-lg border border-white/10 bg-white/[0.04] p-5";
 const scrollPanelClass = `${panelClass} scroll-panel max-h-[680px] pr-4`;
@@ -30,7 +30,8 @@ export default async function AdminPage() {
     { data: appEvents },
     { data: feedbackItems },
     { data: restockEvents },
-    { data: outboxJobs }
+    { data: outboxJobs },
+    { data: retailerRollout }
   ] = await Promise.all([
     supabase.from("profiles").select("*", { count: "exact", head: true }),
     supabase.from("profiles").select("*", { count: "exact", head: true }).in("plan", ["pro", "admin"]),
@@ -53,7 +54,8 @@ export default async function AdminPage() {
       .limit(30)
       .returns<FeedbackItem[]>(),
     supabase.from("restock_events").select("*").order("created_at", { ascending: false }).limit(10),
-    supabase.from("notification_outbox").select("*").order("created_at", { ascending: false }).limit(10)
+    supabase.from("notification_outbox").select("*").order("created_at", { ascending: false }).limit(10),
+    supabase.from("retailer_rollout").select("*").order("tier", { ascending: true }).order("display_name", { ascending: true })
   ]);
 
   const failedChecks = checks?.filter((check) => check.status === "unknown").length ?? 0;
@@ -369,6 +371,11 @@ export default async function AdminPage() {
 
         <div className={scrollPanelClass}>
           <h2 className="font-bold text-white">Retail jobs</h2>
+          <form action={runMonitorJobsNow} className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3">
+            <p className="text-sm font-semibold text-white">Leased monitor worker</p>
+            <p className="mt-1 text-xs leading-5 text-slate-300">Enqueue active catalog offers, atomically claim due jobs, run a bounded batch, and reschedule with jitter/backoff.</p>
+            <button className="mt-3 h-10 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950">Run worker batch</button>
+          </form>
           <div className="mt-4 space-y-3 text-sm">
             {retailJobRuns?.length ? retailJobRuns.map((job) => (
               <div key={job.id} className="rounded-lg bg-white/5 p-3">
@@ -376,6 +383,33 @@ export default async function AdminPage() {
                 <p className="mt-1 text-slate-400">{job.retailer ?? "all retailers"} - checked {job.checked_count}, changed {job.changed_count}, errors {job.error_count}</p>
               </div>
             )) : <p className="text-sm text-slate-400">No retail job runs recorded yet.</p>}
+          </div>
+        </div>
+
+        <div className={`${scrollPanelClass} lg:col-span-2`}>
+          <h2 className="font-bold text-white">Retailer rollout</h2>
+          <p className="mt-1 text-xs text-slate-400">Publicly enabled retailers are separated from discovered or planned retailers. Local inventory is only claimed when a supported adapter exists.</p>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {retailerRollout?.length ? retailerRollout.map((retailer) => (
+              <div key={retailer.retailer} className="rounded-lg bg-white/5 p-3 text-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-white">{retailer.display_name}</p>
+                    <p className="mt-1 text-xs text-slate-500">Tier {retailer.tier} - {retailer.acquisition_method}</p>
+                  </div>
+                  <span className={`rounded-full px-2 py-1 text-[11px] font-bold ${retailer.public_enabled ? "bg-emerald-300/15 text-emerald-200" : "bg-white/10 text-slate-300"}`}>
+                    {retailer.public_enabled ? "Enabled" : retailer.support_state}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-slate-400">{retailer.notes}</p>
+                <div className="mt-3 flex flex-wrap gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-300">
+                  {retailer.product_discovery ? <span className="rounded-full bg-cyan-300/15 px-2 py-1 text-cyan-100">Discovery</span> : null}
+                  {retailer.online_inventory ? <span className="rounded-full bg-amber-300/15 px-2 py-1 text-amber-100">Online</span> : null}
+                  {retailer.local_inventory ? <span className="rounded-full bg-emerald-300/15 px-2 py-1 text-emerald-100">Local</span> : null}
+                  {retailer.price_tracking ? <span className="rounded-full bg-white/10 px-2 py-1">Price</span> : null}
+                </div>
+              </div>
+            )) : <p className="text-sm text-slate-400">Run migration 028 to seed retailer rollout records.</p>}
           </div>
         </div>
 

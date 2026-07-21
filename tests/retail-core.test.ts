@@ -4,6 +4,8 @@ import { aggregatePrices } from "../lib/retailers/shared/price-aggregation.ts";
 import { isLikelyPokemonProduct, pokemonShoppingQuery } from "../lib/catalog-importers/pokemon-product-filter.ts";
 import { isGoogleUrl, resolveRetailerUrl } from "../lib/catalog/retailer-url.ts";
 import { FOUNDER_CARD_SCAN_LIMIT, FOUNDER_MEMBERSHIP_LIMIT, FOUNDER_VIDEO_SCAN_LIMIT, usageLimitForPlan } from "../lib/plans.ts";
+import { compareCatalogOffers, distanceLabel, offerDistanceMiles } from "../lib/catalog/offer-ranking.ts";
+import { distanceMiles } from "../lib/location/distance.ts";
 import { matchProduct } from "../lib/retailers/shared/product-matching.ts";
 import { freshnessLabel, normalizeAvailabilityStatus, normalizeTitle, normalizeUpc } from "../lib/retailers/shared/normalize.ts";
 import { notificationEventKey, shouldSendRestockAlert } from "../lib/retailers/shared/restock-events.ts";
@@ -190,6 +192,46 @@ test("classifies extended availability statuses and confidence labels", () => {
   assert.equal(confidenceLevel(0.63, new Date().toISOString()), "medium");
   assert.equal(confidenceLevel(0.3, new Date().toISOString()), "low");
   assert.equal(confidenceLevel(0.95, new Date(Date.now() - 180 * 60000).toISOString()), "last_known");
+});
+
+test("ranks nearby local pickup offers before farther local offers and shipping", () => {
+  const near = {
+    id: "near",
+    catalog_product_id: "p",
+    product_id: "p",
+    store_name: "Target",
+    retailer: "Target",
+    retailer_product_id: null,
+    title: "Pokemon Booster Bundle",
+    url: "https://target.example",
+    status: "pickup_available" as const,
+    last_price: 49.99,
+    price: 49.99,
+    currency: "USD",
+    image_url: null,
+    in_stock: true,
+    availability_text: "Pickup available",
+    last_checked_at: new Date().toISOString(),
+    metadata: { distanceMiles: 2.4, pickupText: "Pickup available" },
+    active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    catalog_products: null
+  };
+  const far = { ...near, id: "far", store_name: "Target Far", metadata: { distanceMiles: 18, pickupText: "Pickup available" } };
+  const shipping = { ...near, id: "ship", store_name: "TCGplayer", status: "shipping_available" as const, metadata: { shippingText: "In stock for shipping" } };
+
+  assert.equal(compareCatalogOffers(near, far) < 0, true);
+  assert.equal(compareCatalogOffers(near, shipping) < 0, true);
+  assert.equal(distanceLabel(near), "2.4 miles");
+  assert.equal(offerDistanceMiles(far), 18);
+});
+
+test("calculates haversine distance for local ranking", () => {
+  const pittsburgh = { latitude: 40.4406, longitude: -79.9959 };
+  const northHills = { latitude: 40.5434, longitude: -80.0078 };
+  const distance = distanceMiles(pittsburgh, northHills);
+  assert.equal(distance > 6 && distance < 8, true);
 });
 
 test("restock event keys isolate test events from production events", () => {

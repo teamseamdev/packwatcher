@@ -1,4 +1,5 @@
-import type { CatalogOffer, StockStatus } from "@/lib/types";
+import { distanceMiles, numberFromUnknown, parseCoordinates, type Coordinates } from "../location/distance.ts";
+import type { CatalogOffer, StockStatus } from "../types.ts";
 
 const localPatterns = /\b(pickup|pick up|in store|in-store|store pickup|available at|nearby|curbside|local|ready within|today at)\b/i;
 const shippingPatterns = /\b(ship|shipping|delivery|deliver|arrives|free delivery|free shipping)\b/i;
@@ -57,9 +58,17 @@ export function fulfillmentTone(offer: CatalogOffer) {
   return "bg-white/10 text-slate-300";
 }
 
-export function compareCatalogOffers(a: CatalogOffer, b: CatalogOffer, postalCode?: string | null) {
-  const rankDifference = offerPriority(a, postalCode) - offerPriority(b, postalCode);
+export type OfferRankingLocation = {
+  postalCode?: string | null;
+  coordinates?: Coordinates | null;
+};
+
+export function compareCatalogOffers(a: CatalogOffer, b: CatalogOffer, location?: string | OfferRankingLocation | null) {
+  const rankDifference = offerPriority(a, location) - offerPriority(b, location);
   if (rankDifference !== 0) return rankDifference;
+
+  const distanceDifference = normalizedDistance(a, location) - normalizedDistance(b, location);
+  if (distanceDifference !== 0) return distanceDifference;
 
   const priceDifference = normalizedPrice(a) - normalizedPrice(b);
   if (priceDifference !== 0) return priceDifference;
@@ -70,13 +79,15 @@ export function compareCatalogOffers(a: CatalogOffer, b: CatalogOffer, postalCod
   return a.store_name.localeCompare(b.store_name);
 }
 
-export function offerPriority(offer: CatalogOffer, postalCode?: string | null) {
+export function offerPriority(offer: CatalogOffer, location?: string | OfferRankingLocation | null) {
   const local = isLocalOffer(offer);
-  const zipMatch = isZipBiasedOffer(offer, postalCode);
+  const zipMatch = isZipBiasedOffer(offer, location);
   const available = isAvailableStatus(offer.status) || offer.in_stock === true;
   const shippingOnly = isShippingOnlyOffer(offer);
   const marketplace = isMarketplaceOffer(offer);
+  const hasDistance = normalizedDistance(offer, location) < Number.MAX_SAFE_INTEGER;
 
+  if (local && zipMatch && available && hasDistance) return 0;
   if (local && zipMatch && available) return 0;
   if (local && available) return 1;
   if (local) return 2;
@@ -102,16 +113,47 @@ export function isMarketplaceOffer(offer: CatalogOffer) {
   return marketplacePatterns.test(text);
 }
 
-function isZipBiasedOffer(offer: CatalogOffer, postalCode?: string | null) {
-  const normalizedZip = postalCode?.trim();
+export function offerDistanceMiles(offer: CatalogOffer, location?: string | OfferRankingLocation | null) {
+  const explicitDistance = numberFromUnknown(offer.metadata?.distanceMiles ?? offer.metadata?.distance_miles);
+  if (explicitDistance !== null && explicitDistance >= 0) return explicitDistance;
+
+  const userCoordinates = normalizeRankingLocation(location).coordinates;
+  const storeCoordinates = parseCoordinates(offer.metadata?.storeCoordinates)
+    ?? parseCoordinates(offer.metadata)
+    ?? parseCoordinates(offer.metadata?.store);
+
+  if (!userCoordinates || !storeCoordinates) return null;
+  return distanceMiles(userCoordinates, storeCoordinates);
+}
+
+export function distanceLabel(offer: CatalogOffer, location?: string | OfferRankingLocation | null) {
+  const distance = offerDistanceMiles(offer, location);
+  if (distance === null) return null;
+  return `${distance < 10 ? distance.toFixed(1) : Math.round(distance)} miles`;
+}
+
+function normalizedDistance(offer: CatalogOffer, location?: string | OfferRankingLocation | null) {
+  if (!isLocalOffer(offer)) return Number.MAX_SAFE_INTEGER;
+  const distance = offerDistanceMiles(offer, location);
+  return distance === null ? Number.MAX_SAFE_INTEGER : distance;
+}
+
+function isZipBiasedOffer(offer: CatalogOffer, location?: string | OfferRankingLocation | null) {
+  const normalizedZip = normalizeRankingLocation(location).postalCode?.trim();
   if (!normalizedZip) return false;
   const offerZip = metadataText(offer, "postalCode");
   const localRequested = offer.metadata?.localSearchRequested === true;
   return offerZip === normalizedZip || localRequested;
 }
 
+function normalizeRankingLocation(location?: string | OfferRankingLocation | null): OfferRankingLocation {
+  if (!location) return {};
+  if (typeof location === "string") return { postalCode: location };
+  return location;
+}
+
 function isAvailableStatus(status: StockStatus) {
-  return ["in_stock", "limited_stock", "pickup_available", "shipping_available", "delivery_available"].includes(status);
+  return ["in_stock", "limited_stock", "pickup_available", "shipping_available", "delivery_available", "pickup_only", "shipping_only", "delivery_only", "preorder", "backorder"].includes(status);
 }
 
 function normalizedPrice(offer: CatalogOffer) {

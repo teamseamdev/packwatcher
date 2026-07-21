@@ -8,6 +8,61 @@ type OfferRow = CatalogOffer & {
   catalog_products: CatalogProduct | null;
 };
 
+export async function checkCatalogOffer(supabase: SupabaseClient, offer: OfferRow) {
+  if (offer.active === false) return { checked: false, outboxQueued: 0 };
+
+  const previousInStock = offer.in_stock ?? offer.status === "in_stock";
+  const retailer = offer.retailer ?? offer.store_name;
+  const monitor = getRetailerMonitor(offer.url, retailer);
+  const checked = await monitor.checkOffer(offer);
+  const nextInStock = checked.inStock;
+  const checkedAt = checked.checkedAt;
+
+  await supabase
+    .from("catalog_offers")
+    .update({
+      status: checked.status,
+      last_price: checked.price ?? offer.last_price,
+      price: checked.price ?? offer.price ?? offer.last_price,
+      in_stock: nextInStock,
+      availability_text: checked.availabilityText,
+      last_checked_at: checkedAt,
+      updated_at: checkedAt,
+      image_url: checked.imageUrl ?? offer.image_url
+    })
+    .eq("id", offer.id);
+
+  const pipeline = await recordCatalogOfferObservation({
+    supabase,
+    offer,
+    observation: {
+      status: checked.status,
+      price: checked.price,
+      currency: offer.currency ?? "USD",
+      availabilityType: "online",
+      shippingAvailable: nextInStock ? true : null,
+      pickupAvailable: null,
+      deliveryAvailable: null,
+      sellerName: typeof offer.metadata?.sellerName === "string" ? offer.metadata.sellerName : retailer,
+      officialRetailerSeller: typeof offer.metadata?.officialRetailerSeller === "boolean" ? offer.metadata.officialRetailerSeller : true,
+      confidence: nextInStock ? 0.78 : 0.7,
+      sourceStatus: checked.availabilityText,
+      extractionStrategy: "catalog_offer_monitor",
+      adapterVersion: "catalog-offer-monitor-v2",
+      checkedAt,
+      rawMetadata: {
+        offerId: offer.id,
+        url: offer.url,
+        previousInStock,
+        nextInStock,
+        availabilityText: checked.availabilityText
+      }
+    }
+  });
+
+  return { checked: true, outboxQueued: pipeline.outboxQueued, checkedAt };
+}
+
 export async function checkExistingCatalogOffers(supabase: SupabaseClient, limit = Number(process.env.CATALOG_OFFER_CHECK_LIMIT ?? 100)) {
   const result = { offersChecked: 0, alertsTriggered: 0, errors: [] as string[] };
   const { data: offers, error } = await supabase
@@ -22,60 +77,10 @@ export async function checkExistingCatalogOffers(supabase: SupabaseClient, limit
   }
 
   for (const offer of (offers ?? []) as OfferRow[]) {
-    if (offer.active === false) continue;
     try {
-      const previousInStock = offer.in_stock ?? offer.status === "in_stock";
-      const retailer = offer.retailer ?? offer.store_name;
-      const monitor = getRetailerMonitor(offer.url, retailer);
-      const checked = await monitor.checkOffer(offer);
-      const nextInStock = checked.inStock;
-      const checkedAt = checked.checkedAt;
-
-      await supabase
-        .from("catalog_offers")
-        .update({
-          status: checked.status,
-          last_price: checked.price ?? offer.last_price,
-          price: checked.price ?? offer.price ?? offer.last_price,
-          in_stock: nextInStock,
-          availability_text: checked.availabilityText,
-          last_checked_at: checkedAt,
-          updated_at: checkedAt,
-          image_url: checked.imageUrl ?? offer.image_url
-        })
-        .eq("id", offer.id);
-
-      result.offersChecked += 1;
-
-      const pipeline = await recordCatalogOfferObservation({
-        supabase,
-        offer,
-        observation: {
-          status: checked.status,
-          price: checked.price,
-          currency: offer.currency ?? "USD",
-          availabilityType: "online",
-          shippingAvailable: nextInStock ? true : null,
-          pickupAvailable: null,
-          deliveryAvailable: null,
-          sellerName: typeof offer.metadata?.sellerName === "string" ? offer.metadata.sellerName : retailer,
-          officialRetailerSeller: typeof offer.metadata?.officialRetailerSeller === "boolean" ? offer.metadata.officialRetailerSeller : true,
-          confidence: nextInStock ? 0.78 : 0.7,
-          sourceStatus: checked.availabilityText,
-          extractionStrategy: "catalog_offer_monitor",
-          adapterVersion: "catalog-offer-monitor-v2",
-          checkedAt,
-          rawMetadata: {
-            offerId: offer.id,
-            url: offer.url,
-            previousInStock,
-            nextInStock,
-            availabilityText: checked.availabilityText
-          }
-        }
-      });
-
-      result.alertsTriggered += pipeline.outboxQueued;
+      const checked = await checkCatalogOffer(supabase, offer);
+      if (checked.checked) result.offersChecked += 1;
+      result.alertsTriggered += checked.outboxQueued;
 
       await new Promise((resolve) => setTimeout(resolve, 250));
     } catch (error) {

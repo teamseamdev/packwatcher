@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ExternalLink } from "lucide-react";
 import { ProductTrackButton } from "@/components/product-track-button";
 import { requireProfile } from "@/lib/auth";
-import { compareCatalogOffers, fulfillmentLabel, fulfillmentText, fulfillmentTone, metadataText, verificationLabel } from "@/lib/catalog/offer-ranking";
+import { compareCatalogOffers, distanceLabel, fulfillmentLabel, fulfillmentText, fulfillmentTone, metadataText, verificationLabel } from "@/lib/catalog/offer-ranking";
 import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
 import { optionalCurrency } from "@/lib/profit";
 import { aggregatePrices } from "@/lib/retailers/shared/price-aggregation";
@@ -116,6 +116,7 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
                 <p className="mt-5 text-2xl font-black text-white">{optionalCurrency(offer.price ?? offer.last_price)}</p>
                 {metadataText(offer, "shippingText") ? <p className="mt-2 text-sm text-slate-300">Shipping: {metadataText(offer, "shippingText")}</p> : null}
                 {metadataText(offer, "pickupText") ? <p className="mt-1 text-sm text-slate-300">Pickup: {metadataText(offer, "pickupText")}</p> : null}
+                {distanceLabel(offer) ? <p className="mt-1 text-sm text-slate-300">Distance: {distanceLabel(offer)}</p> : null}
                 {fulfillmentText(offer) ? <p className="mt-2 text-xs text-slate-500">{fulfillmentText(offer)}</p> : null}
                 <p className="mt-2 text-xs font-semibold text-slate-500">{verificationLabel(offer)}</p>
                 <p className="mt-2 text-xs text-slate-500">

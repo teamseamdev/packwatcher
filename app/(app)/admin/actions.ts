@@ -17,6 +17,7 @@ import { sendPushToUser } from "@/lib/push";
 import { getAdapter } from "@/lib/stock-checkers";
 import { runProductCheck } from "@/lib/stock-checkers/run-check";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { runMonitorJobBatch } from "@/lib/tracker/monitor-jobs";
 import { recordCatalogOfferObservation } from "@/lib/tracker/pipeline";
 
 const CatalogOfferSchema = z.object({
@@ -500,6 +501,18 @@ export async function syncAllAvailableCatalogsWithState(
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Catalog sync failed." };
   }
+}
+
+export async function runMonitorJobsNow() {
+  const { profile } = await requireProfile();
+  if (!isAdmin(profile)) throw new Error("Admin access required.");
+  const admin = createAdminClient();
+  await runMonitorJobBatch(admin, {
+    enqueueFirst: true,
+    limit: Number(process.env.MONITOR_JOB_BATCH_LIMIT ?? 25)
+  });
+  revalidatePath("/admin");
+  revalidatePath("/watchlist");
 }
 
 function storeNameFromUrl(url: string) {
