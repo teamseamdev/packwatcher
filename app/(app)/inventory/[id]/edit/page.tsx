@@ -9,8 +9,16 @@ import { normalizeCollectorNumber } from "@/lib/cards/collector-number";
 import { currency } from "@/lib/profit";
 import type { InventoryItem } from "@/lib/types";
 
-export default async function EditInventoryItemPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EditInventoryItemPage({
+  params,
+  searchParams
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ returnTo?: string }>;
+}) {
   const { id } = await params;
+  const { returnTo } = await searchParams;
+  const returnPath = safeInventoryReturnPath(returnTo);
   const { supabase, user } = await requireUser();
 
   const [{ data: item }, { data: sets }] = await Promise.all([
@@ -34,18 +42,18 @@ export default async function EditInventoryItemPage({ params }: { params: Promis
   async function saveAndReturn(formData: FormData) {
     "use server";
     await updateInventoryItem(formData);
-    redirect("/inventory");
+    redirect(returnPath);
   }
 
   async function deleteAndReturn(formData: FormData) {
     "use server";
     await deleteInventoryItem(formData);
-    redirect("/inventory");
+    redirect(returnPath);
   }
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
-      <Link href="/inventory" className="inline-flex items-center gap-2 text-sm font-bold text-slate-300">
+      <Link href={returnPath} className="inline-flex items-center gap-2 text-sm font-bold text-slate-300">
         <ArrowLeft className="h-4 w-4" />
         Back to inventory
       </Link>
@@ -195,4 +203,17 @@ function parseNotesValue(notes: string | null, label: string) {
 function cleanInventoryText(value?: string | null) {
   const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
   return text || null;
+}
+
+function safeInventoryReturnPath(value?: string | null) {
+  if (!value) return "/inventory";
+
+  try {
+    const parsed = new URL(value, "https://packwatcher.local");
+    if (parsed.origin !== "https://packwatcher.local") return "/inventory";
+    if (parsed.pathname !== "/inventory") return "/inventory";
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return "/inventory";
+  }
 }

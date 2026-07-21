@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { createPortal } from "react-dom";
 import { ArrowDownAZ, CheckCircle2, Clock3, DollarSign, ExternalLink, Grid2X2, Layers3, Search } from "lucide-react";
 import { cleanCardName } from "@/lib/cards/card-name";
 import { compareCollectorNumbers, normalizeCollectorNumber } from "@/lib/cards/collector-number";
@@ -18,6 +20,11 @@ type SetChecklistCard = {
   cardNumber: string | null;
   variant: string | null;
   imageUrl: string | null;
+};
+type OwnedSetChecklistCard = SetChecklistCard & {
+  owned: boolean;
+  ownedItem?: InventoryItem | null;
+  ownedItems?: InventoryItem[];
 };
 
 const sortLabels: Record<SortMode, string> = {
@@ -36,10 +43,11 @@ const sortLabels: Record<SortMode, string> = {
 };
 
 export function InventoryCollection({ items }: { items: InventoryItem[] }) {
+  const searchParams = useSearchParams();
   const [query, setQuery] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("recent");
-  const [setFilter, setSetFilter] = useState("all");
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [setFilter, setSetFilter] = useState(() => cleanInventoryText(searchParams.get("set")) ?? "all");
+  const [viewMode, setViewMode] = useState<ViewMode>(() => searchParams.get("view") === "full-set" ? "set" : "list");
   const [checklist, setChecklist] = useState<SetChecklistCard[]>([]);
   const [allSetOptions, setAllSetOptions] = useState<string[]>([]);
   const [allSetObjects, setAllSetObjects] = useState<Array<{ id: string; name: string }>>([]);
@@ -306,10 +314,11 @@ function SetChecklistView({
 }: {
   setName: string;
   ownedCount: number;
-  checklist: Array<SetChecklistCard & { owned: boolean; ownedItem?: InventoryItem | null }>;
+  checklist: OwnedSetChecklistCard[];
   status: "idle" | "loading" | "ready" | "failed";
 }) {
   const [selectedCardRef, setSelectedCardRef] = useState<{ setName: string; key: string } | null>(null);
+  const lastTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   if (!setName) {
     return (
@@ -323,6 +332,12 @@ function SetChecklistView({
   const ownedInChecklist = checklist.filter((card) => card.owned).length;
   const selectedKey = selectedCardRef?.setName === setName ? selectedCardRef.key : null;
   const selectedCard = selectedKey ? checklist.find((card) => card.key === selectedKey) ?? null : null;
+  const returnTo = `/inventory?view=full-set&set=${encodeURIComponent(setName)}`;
+
+  function closeActionSheet() {
+    setSelectedCardRef(null);
+    window.requestAnimationFrame(() => lastTriggerRef.current?.focus());
+  }
 
   return (
     <div className="space-y-4">
@@ -343,7 +358,10 @@ function SetChecklistView({
           <button
             key={card.key}
             type="button"
-            onClick={() => setSelectedCardRef((current) => current?.setName === setName && current.key === card.key ? null : { setName, key: card.key })}
+            onClick={(event) => {
+              lastTriggerRef.current = event.currentTarget;
+              setSelectedCardRef((current) => current?.setName === setName && current.key === card.key ? null : { setName, key: card.key });
+            }}
             className={`rounded-lg border p-2 text-left transition ${
               selectedKey === card.key
                 ? "border-amber-300 bg-amber-300/15 shadow-[0_0_18px_rgba(252,211,77,0.18)]"
@@ -375,76 +393,190 @@ function SetChecklistView({
         )}
       </div>
 
-      {selectedCard ? (
-        <div className="fixed inset-0 z-[90] bg-black/55 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-label={`${selectedCard.name} details`}>
+      <FullSetCardActionSheet
+        card={selectedCard}
+        returnTo={returnTo}
+        onClose={closeActionSheet}
+      />
+    </div>
+  );
+}
+
+function FullSetCardActionSheet({
+  card,
+  returnTo,
+  onClose
+}: {
+  card: OwnedSetChecklistCard | null;
+  returnTo: string;
+  onClose: () => void;
+}) {
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  const sheetRef = useRef<HTMLDivElement | null>(null);
+  const ownedEntries = card?.ownedItems?.length ? card.ownedItems : card?.ownedItem ? [card.ownedItem] : [];
+  const selectedEntry = ownedEntries.find((entry) => entry.id === selectedEntryId) ?? ownedEntries[0] ?? null;
+  const metadata = [card?.cardNumber, card?.setName, card?.variant].filter(Boolean).join(" - ") || "No number";
+
+  useEffect(() => {
+    if (!card) return;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousDocumentOverscroll = document.documentElement.style.overscrollBehavior;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overscrollBehavior = "contain";
+
+    window.requestAnimationFrame(() => {
+      const firstFocusable = sheetRef.current?.querySelector<HTMLElement>("a[href], button:not([disabled])");
+      firstFocusable?.focus();
+    });
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overscrollBehavior = previousDocumentOverscroll;
+    };
+  }, [card]);
+
+  if (!card || typeof document === "undefined") return null;
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+
+    if (event.key !== "Tab" || !sheetRef.current) return;
+    const focusable = Array.from(sheetRef.current.querySelectorAll<HTMLElement>("a[href], button:not([disabled])"))
+      .filter((element) => !element.hasAttribute("disabled") && element.tabIndex !== -1);
+    if (!focusable.length) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  const scanHref = `/scanner?set=${encodeURIComponent(card.setName)}&number=${encodeURIComponent(card.cardNumber ?? "")}`;
+  const editHref = selectedEntry ? `/inventory/${selectedEntry.id}/edit?returnTo=${encodeURIComponent(returnTo)}` : "#";
+  const sellHref = selectedEntry ? `/inventory/ebay/${selectedEntry.id}?returnTo=${encodeURIComponent(returnTo)}` : "#";
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[120] bg-black/60 backdrop-blur-[2px]"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${card.name} actions`}
+      onKeyDown={handleKeyDown}
+    >
+      <button
+        type="button"
+        aria-label="Close card actions"
+        className="absolute inset-0 h-full w-full cursor-default"
+        onClick={onClose}
+      />
+      <div
+        ref={sheetRef}
+        className="absolute inset-x-0 bottom-0 max-h-[calc(100dvh-72px)] overflow-y-auto rounded-t-2xl border border-amber-300/25 bg-slate-950 p-4 pb-[calc(env(safe-area-inset-bottom)+92px)] shadow-[0_-18px_50px_rgba(0,0,0,0.55)] sm:bottom-auto sm:left-1/2 sm:right-auto sm:top-1/2 sm:w-full sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:pb-4"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="grid min-w-0 grid-cols-[64px_minmax(0,1fr)] gap-3">
+            {card.imageUrl ? (
+              <div
+                aria-hidden="true"
+                className="h-24 w-16 rounded-md bg-slate-900 bg-cover bg-center"
+                style={{ backgroundImage: `url(${card.imageUrl})` }}
+              />
+            ) : (
+              <div className="grid h-24 w-16 place-items-center rounded-md border border-dashed border-white/15 bg-white/[0.03] text-3xl font-black text-slate-600">
+                ?
+              </div>
+            )}
+            <div className="min-w-0 pt-1">
+              <p className="pw-hud text-xs font-black">{ownedEntries.length ? "Inventory card" : "Missing card"}</p>
+              <h4 className="mt-1 truncate text-lg font-black text-white">{card.name}</h4>
+              <p className="mt-1 truncate text-xs text-slate-400">{metadata}</p>
+              {selectedEntry ? (
+                <p className="mt-2 text-sm text-slate-300">
+                  Qty {selectedEntry.quantity ?? 1} - <span className="font-black text-amber-200">{currency(selectedEntry.estimated_sale_price)}</span>
+                </p>
+              ) : null}
+            </div>
+          </div>
           <button
             type="button"
-            aria-label="Close card details"
-            className="absolute inset-0 h-full w-full cursor-default"
-            onClick={() => setSelectedCardRef(null)}
-          />
-          <div className="absolute inset-x-0 bottom-0 max-h-[82dvh] overflow-y-auto rounded-t-2xl border border-amber-300/25 bg-slate-950 p-4 pb-[calc(env(safe-area-inset-bottom)+18px)] shadow-[0_-18px_50px_rgba(0,0,0,0.55)] sm:left-1/2 sm:right-auto sm:w-full sm:max-w-2xl sm:-translate-x-1/2 sm:rounded-2xl">
-            <div className="mb-3 flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="pw-hud text-xs font-black">{selectedCard.ownedItem ? "Selected inventory card" : "Missing card"}</p>
-                <h4 className="mt-1 truncate text-lg font-black text-white">{selectedCard.name}</h4>
-                <p className="mt-1 truncate text-xs text-slate-400">{[selectedCard.cardNumber, selectedCard.setName, selectedCard.variant].filter(Boolean).join(" - ") || "No number"}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedCardRef(null)}
-                className="shrink-0 rounded-md border border-white/10 px-3 py-1.5 text-xs font-bold text-slate-200"
-              >
-                Close
-              </button>
-            </div>
-            {selectedCard.ownedItem ? (
-              <div className="grid gap-3">
-                <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-3 rounded-lg border border-white/10 bg-white/[0.04] p-3">
-                  {selectedCard.ownedItem.image_url ? (
-                    <div
-                      aria-hidden="true"
-                      className="h-24 w-[72px] rounded-md bg-slate-900 bg-cover bg-center"
-                      style={{ backgroundImage: `url(${selectedCard.ownedItem.image_url})` }}
-                    />
-                  ) : (
-                    <div className="grid h-24 w-[72px] place-items-center rounded-md border border-white/10 bg-white/5 text-center text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                      No image
-                    </div>
-                  )}
-                  <div className="min-w-0">
-                    <p className="truncate font-black text-white">{selectedCard.name}</p>
-                    <p className="mt-1 truncate text-xs text-slate-400">{[selectedCard.cardNumber, selectedCard.setName, selectedCard.variant].filter(Boolean).join(" - ")}</p>
-                    <p className="mt-3 text-sm text-slate-300">
-                      Value <span className="font-black text-amber-200">{currency(selectedCard.ownedItem.estimated_sale_price)}</span>
-                    </p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Link
-                    href={`/inventory/${selectedCard.ownedItem.id}/edit`}
-                    className="inline-flex h-12 items-center justify-center rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-3 text-center text-sm font-black text-cyan-50"
-                  >
-                    Edit card
-                  </Link>
-                  <Link
-                    href={`/inventory/ebay/${selectedCard.ownedItem.id}`}
-                    className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-amber-300/30 bg-amber-300/10 px-3 text-center text-sm font-black text-amber-100"
-                  >
-                    <ExternalLink className="h-4 w-4 shrink-0" />
-                    Sell on eBay
-                  </Link>
-                </div>
-              </div>
-            ) : (
-              <p className="rounded-lg border border-white/10 bg-white/[0.04] p-4 text-sm text-slate-400">
-                This card is not in your inventory yet. Scan it from the Scanner tab to add it.
-              </p>
-            )}
-          </div>
+            onClick={onClose}
+            className="shrink-0 rounded-md border border-white/10 px-3 py-1.5 text-xs font-bold text-slate-200"
+          >
+            Close
+          </button>
         </div>
-      ) : null}
-    </div>
+
+        {ownedEntries.length > 1 ? (
+          <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.04] p-3">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Choose copy</p>
+            <div className="mt-2 grid gap-2">
+              {ownedEntries.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  onClick={() => setSelectedEntryId(entry.id)}
+                  className={`rounded-lg border px-3 py-2 text-left text-sm ${
+                    selectedEntry?.id === entry.id
+                      ? "border-amber-300 bg-amber-300/15 text-white"
+                      : "border-white/10 bg-slate-950/50 text-slate-300"
+                  }`}
+                >
+                  {[entry.variant, entry.condition, entry.language, `Qty ${entry.quantity ?? 1}`].filter(Boolean).join(" - ")}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {selectedEntry ? (
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <Link
+              href={editHref}
+              className="inline-flex h-12 items-center justify-center rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-3 text-center text-sm font-black text-cyan-50"
+            >
+              Edit
+            </Link>
+            <Link
+              href={sellHref}
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-amber-300/30 bg-amber-300/10 px-3 text-center text-sm font-black text-amber-100"
+            >
+              <ExternalLink className="h-4 w-4 shrink-0" />
+              Sell
+            </Link>
+          </div>
+        ) : (
+          <div className="mt-4 grid gap-2">
+            <Link
+              href={scanHref}
+              className="inline-flex h-12 items-center justify-center rounded-lg bg-amber-300 px-4 text-sm font-black text-slate-950"
+            >
+              Scan this set
+            </Link>
+            <p className="rounded-lg border border-white/10 bg-white/[0.04] p-3 text-sm text-slate-400">
+              This card is missing from your inventory. Sell is only available after you add an owned copy.
+            </p>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-lg border border-white/10 px-4 text-sm font-bold text-slate-200"
+        >
+          Close
+        </button>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -474,8 +606,8 @@ function compareInventoryCollectorNumbers(left: InventoryItem, right: InventoryI
 }
 
 function buildOwnedSetChecklist(checklist: SetChecklistCard[], ownedItems: InventoryItem[]) {
-  const ownedByNumber = new Map<string, InventoryItem>();
-  const ownedByName = new Map<string, InventoryItem>();
+  const ownedByNumber = new Map<string, InventoryItem[]>();
+  const ownedByName = new Map<string, InventoryItem[]>();
 
   for (const item of ownedItems) {
     const lookup = parseInventoryLookup(item.name);
@@ -485,21 +617,32 @@ function buildOwnedSetChecklist(checklist: SetChecklistCard[], ownedItems: Inven
       rawCollectorNumber: item.card_number ?? lookup.cardNumber,
       normalizedCollectorNumber: cardNumber
     }).canonicalName);
-    if (cardNumber) ownedByNumber.set(cardNumber, item);
-    if (cardName) ownedByName.set(cardName, item);
+    if (cardNumber) appendInventoryMatch(ownedByNumber, cardNumber, item);
+    if (cardName) appendInventoryMatch(ownedByName, cardName, item);
   }
 
   return checklist.map((card) => {
     const numberMatch = normalizeCollectorNumber(card.cardNumber)?.normalized ?? "";
     const nameMatch = normalizeLookup(card.name);
-    const ownedItem = (numberMatch ? ownedByNumber.get(numberMatch) : null) ?? ownedByName.get(nameMatch) ?? null;
+    const matchedItems = (numberMatch ? ownedByNumber.get(numberMatch) : null) ?? ownedByName.get(nameMatch) ?? [];
+    const ownedItem = matchedItems[0] ?? null;
     return {
       ...card,
       imageUrl: ownedItem?.image_url ?? card.imageUrl,
       owned: Boolean(ownedItem),
-      ownedItem
+      ownedItem,
+      ownedItems: matchedItems
     };
   });
+}
+
+function appendInventoryMatch(map: Map<string, InventoryItem[]>, key: string, item: InventoryItem) {
+  const existing = map.get(key);
+  if (existing) {
+    if (!existing.some((match) => match.id === item.id)) existing.push(item);
+  } else {
+    map.set(key, [item]);
+  }
 }
 
 function inventorySetName(item: InventoryItem) {

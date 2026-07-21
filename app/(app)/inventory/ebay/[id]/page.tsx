@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ExternalLink, Store } from "lucide-react";
+import { ArrowLeft, ExternalLink, Store } from "lucide-react";
 import { publishInventoryItemToEbay } from "@/app/(app)/inventory/ebay/actions";
 import { requireUser } from "@/lib/auth";
 import { cleanCardName } from "@/lib/cards/card-name";
@@ -8,8 +8,16 @@ import { defaultEbayListingDefaults, ebayCardDescription, ebayCardTitle, missing
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { EbayConnection, EbayListing, EbayListingDefaults, InventoryItem } from "@/lib/types";
 
-export default async function EbayInventoryListingPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EbayInventoryListingPage({
+  params,
+  searchParams
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ returnTo?: string }>;
+}) {
   const { id } = await params;
+  const { returnTo } = await searchParams;
+  const returnPath = safeInventoryReturnPath(returnTo);
   const { supabase, user } = await requireUser();
   const admin = createAdminClient();
 
@@ -40,6 +48,11 @@ export default async function EbayInventoryListingPage({ params }: { params: Pro
 
   return (
     <div className="max-w-4xl space-y-5">
+      <Link href={returnPath} className="inline-flex items-center gap-2 text-sm font-bold text-slate-300">
+        <ArrowLeft className="h-4 w-4" />
+        Back to inventory
+      </Link>
+
       <header className="pw-hero p-5">
         <p className="pw-hud text-xs font-black">eBay</p>
         <h1 className="mt-1 text-3xl font-black text-white">Sell inventory card</h1>
@@ -155,4 +168,17 @@ function Field({ name, label, defaultValue, type = "text", step }: { name: strin
       <input name={name} type={type} step={step} defaultValue={defaultValue} className={fieldClass} />
     </label>
   );
+}
+
+function safeInventoryReturnPath(value?: string | null) {
+  if (!value) return "/inventory";
+
+  try {
+    const parsed = new URL(value, "https://packwatcher.local");
+    if (parsed.origin !== "https://packwatcher.local") return "/inventory";
+    if (parsed.pathname !== "/inventory") return "/inventory";
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return "/inventory";
+  }
 }
