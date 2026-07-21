@@ -432,46 +432,6 @@ function SetChecklistView({
         </p>
       </div>
 
-      {selectedCard ? (
-        selectedCard.ownedItem ? (
-          <div className="rounded-lg border border-amber-300/25 bg-amber-300/10 p-3">
-            <div className="mb-3 flex items-start justify-between gap-3">
-              <div>
-                <p className="pw-hud text-xs font-black">Selected card</p>
-                <h4 className="mt-1 font-black text-white">{selectedCard.name}</h4>
-                <p className="mt-1 text-xs text-slate-400">{[selectedCard.cardNumber, selectedCard.setName, selectedCard.variant].filter(Boolean).join(" - ")}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedCardRef(null)}
-                className="rounded-md border border-white/10 px-3 py-1.5 text-xs font-bold text-slate-200"
-              >
-                Close
-              </button>
-            </div>
-            <InventoryRow item={selectedCard.ownedItem} setOptions={setOptions} />
-          </div>
-        ) : (
-          <div className="rounded-lg border border-white/10 bg-slate-950/45 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="pw-hud text-xs font-black">Missing card</p>
-                <h4 className="mt-1 font-black text-white">{selectedCard.name}</h4>
-                <p className="mt-1 text-xs text-slate-400">{[selectedCard.cardNumber, selectedCard.setName, selectedCard.variant].filter(Boolean).join(" - ") || "No number"}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedCardRef(null)}
-                className="rounded-md border border-white/10 px-3 py-1.5 text-xs font-bold text-slate-200"
-              >
-                Close
-              </button>
-            </div>
-            <p className="mt-3 text-sm text-slate-400">This card is not in your inventory yet. Scan it from the Scanner tab to add it.</p>
-          </div>
-        )
-      ) : null}
-
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {checklist.length ? checklist.map((card) => (
           <button
@@ -508,6 +468,40 @@ function SetChecklistView({
           </div>
         )}
       </div>
+
+      {selectedCard ? (
+        <div className="fixed inset-0 z-[90] bg-black/55 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-label={`${selectedCard.name} details`}>
+          <button
+            type="button"
+            aria-label="Close card details"
+            className="absolute inset-0 h-full w-full cursor-default"
+            onClick={() => setSelectedCardRef(null)}
+          />
+          <div className="absolute inset-x-0 bottom-0 max-h-[82dvh] overflow-y-auto rounded-t-2xl border border-amber-300/25 bg-slate-950 p-4 pb-[calc(env(safe-area-inset-bottom)+18px)] shadow-[0_-18px_50px_rgba(0,0,0,0.55)] sm:left-1/2 sm:right-auto sm:w-full sm:max-w-2xl sm:-translate-x-1/2 sm:rounded-2xl">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="pw-hud text-xs font-black">{selectedCard.ownedItem ? "Selected inventory card" : "Missing card"}</p>
+                <h4 className="mt-1 truncate text-lg font-black text-white">{selectedCard.name}</h4>
+                <p className="mt-1 truncate text-xs text-slate-400">{[selectedCard.cardNumber, selectedCard.setName, selectedCard.variant].filter(Boolean).join(" - ") || "No number"}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedCardRef(null)}
+                className="shrink-0 rounded-md border border-white/10 px-3 py-1.5 text-xs font-bold text-slate-200"
+              >
+                Close
+              </button>
+            </div>
+            {selectedCard.ownedItem ? (
+              <InventoryRow item={selectedCard.ownedItem} setOptions={setOptions} />
+            ) : (
+              <p className="rounded-lg border border-white/10 bg-white/[0.04] p-4 text-sm text-slate-400">
+                This card is not in your inventory yet. Scan it from the Scanner tab to add it.
+              </p>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
