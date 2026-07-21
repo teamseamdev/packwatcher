@@ -40,6 +40,131 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+.pw-splash {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255, 208, 47, 0.14), transparent 28%),
+    linear-gradient(115deg, rgba(255, 208, 47, 0.08), transparent 22%, transparent 72%, rgba(66, 245, 215, 0.08)),
+    #050507;
+}
+
+.pw-splash::before {
+  pointer-events: none;
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 208, 47, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(66, 245, 215, 0.07) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(circle at center, black, transparent 72%);
+}
+
+.pw-splash-frame {
+  isolation: isolate;
+}
+
+.pw-splash-corner {
+  position: absolute;
+  z-index: 2;
+  height: 18px;
+  width: 18px;
+  border-color: rgba(255, 208, 47, 0.8);
+}
+
+.pw-splash-scan {
+  pointer-events: none;
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: 16px;
+  z-index: 3;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(66, 245, 215, 0.95), transparent);
+  box-shadow: 0 0 18px rgba(66, 245, 215, 0.5);
+}
+
+.pw-loading-dots::after {
+  content: "";
+  animation: pwLoadingDots 1.2s steps(4, end) infinite;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pw-splash-frame {
+    animation: pwSplashBreathe 1.8s ease-in-out infinite;
+  }
+
+  .pw-splash-scan {
+    animation: pwSplashScan 1.45s ease-in-out infinite;
+  }
+
+  .pw-splash-corner {
+    animation: pwSplashCorners 1.8s ease-in-out infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pw-splash-frame,
+  .pw-splash-scan,
+  .pw-splash-corner,
+  .pw-loading-dots::after {
+    animation: none !important;
+  }
+}
+
+@keyframes pwSplashBreathe {
+  0%, 100% {
+    transform: scale(0.98);
+    box-shadow: 0 0 28px rgba(255, 208, 47, 0.14);
+  }
+  50% {
+    transform: scale(1.02);
+    box-shadow: 0 0 48px rgba(66, 245, 215, 0.16);
+  }
+}
+
+@keyframes pwSplashScan {
+  0% {
+    transform: translateY(8px);
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(78px);
+    opacity: 0.25;
+  }
+}
+
+@keyframes pwSplashCorners {
+  0%, 100% {
+    transform: scale(0.92);
+    opacity: 0.65;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+
+@keyframes pwLoadingDots {
+  0% {
+    content: "";
+  }
+  25% {
+    content: ".";
+  }
+  50% {
+    content: "..";
+  }
+  75%, 100% {
+    content: "...";
+  }
+}
+
 body,
 main {
   position: relative;

@@ -2,6 +2,7 @@
 
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCircle2, FileDown, Flashlight, FlashlightOff, Loader2, Plus, ScanLine, Search, Trash2, X } from "lucide-react";
+import { PackWatcherSplash } from "@/components/packwatcher-splash";
 import { SetCombobox } from "@/components/set-combobox";
 import { averageCornerDistance, distance, mapVideoPointToCover, orderQuadPoints, polygonArea, quadCenter, smoothQuad, type Point, type Quad } from "@/lib/scanner/geometry";
 import { CAPTURE_POLICIES, computeAutoReadiness, type ReadinessFrame } from "@/lib/scanner/capture-policy";
@@ -857,6 +858,7 @@ export function CardScanner() {
 
   return (
     <div className="space-y-5">
+      {isPreparingSet ? <PackWatcherSplash variant="scanner-prepare" message={selectedSet ? `Preparing ${selectedSet.name}` : undefined} /> : null}
       <section className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-4">
         <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_220px_190px]">
           <SetCombobox value={packHint} onChange={setPackHint} options={setOptions} placeholder="Search Pokemon set" />
