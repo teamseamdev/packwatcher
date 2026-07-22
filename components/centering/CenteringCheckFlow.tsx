@@ -3,7 +3,6 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Camera, CheckCircle2, Eye, ImageIcon, RotateCcw, Save, ShieldAlert, Trash2 } from "lucide-react";
-import { analyzeCenteringPhoto } from "@/lib/centering/browser-vision";
 import { buildCenteringAnalysis, CENTERING_DISCLAIMER } from "@/lib/centering/grading-standards";
 import { analyzeCenteringSide, marginLinesFromPercent, overallConfidence, ratioText, recommendationFor } from "@/lib/centering/geometry";
 import type { CenteringAnalysisResult, CenteringMethod, CenteringSide, CenteringSideResult, MarginMeasurement } from "@/lib/centering/types";
@@ -30,6 +29,24 @@ type ExistingAnalysis = {
   created_at: string;
 };
 
+type CenteringProcessResponse = {
+  ok: boolean;
+  result?: {
+    corners: Quad;
+    correctedDataUrl: string;
+    width: number;
+    height: number;
+    innerFrame: MarginMeasurement;
+    method: CenteringMethod;
+    detectionConfidence: number;
+    referenceImageUsed: string | null;
+    referenceRegistrationScore: number | null;
+    blockers: string[];
+  };
+  code?: string;
+  error?: string;
+};
+
 type SideCapture = {
   side: CenteringSide;
   dataUrl: string;
@@ -49,7 +66,7 @@ type SideCapture = {
 const defaultFrontMargins = { left: 0.085, right: 0.085, top: 0.1, bottom: 0.105 };
 const defaultBackMargins = { left: 0.13, right: 0.13, top: 0.11, bottom: 0.11 };
 const CENTERING_MAX_CAPTURE_DIMENSION = 900;
-const CENTERING_DETECTION_TIMEOUT_MS = 6000;
+const CENTERING_PROCESS_TIMEOUT_MS = 18000;
 
 export function CenteringCheckFlow({
   inventoryItem,
@@ -267,40 +284,18 @@ function ImageCaptureButton({
     if (!file) return;
     if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return;
     setDetecting(true);
-    onStatus(`Detecting ${side} card boundary...`);
+    onStatus(`Uploading ${side} photo for server processing...`);
     onError(null);
     let prepared: { dataUrl: string; width: number; height: number } | null = null;
     try {
       const rawDataUrl = await readFileDataUrl(file);
       prepared = await prepareCenteringDataUrl(rawDataUrl);
       await nextFrame();
-      if (!shouldAutoDetectOnCapture()) {
-        onCapture({
-          side,
-          dataUrl: prepared.dataUrl,
-          correctedDataUrl: prepared.dataUrl,
-          width: prepared.width,
-          height: prepared.height,
-          corners: initialCorners(prepared.width, prepared.height),
-          innerFrame: side === "front" ? defaultFrontMargins : defaultBackMargins,
-          detectionMethod: "manual",
-          detectionConfidence: 0.5,
-          referenceImageUsed: null,
-          referenceRegistrationScore: null,
-          blockers: ["manual-corner-review-required"],
-          userAdjusted: true
-        });
-        onStatus("Photo loaded. Adjust the card corners and printed-frame lines, then analyze centering.");
-        return;
-      }
-      const detected = await withTimeout(analyzeCenteringPhoto({
+      const detected = await processCenteringPhoto({
         dataUrl: prepared.dataUrl,
         side,
-        width: prepared.width,
-        height: prepared.height,
-        referenceImageUrl,
-        useOpenCv: shouldUseOpenCvForCentering()
-      }), CENTERING_DETECTION_TIMEOUT_MS);
+        referenceImageUrl
+      });
       onCapture({
         side,
         dataUrl: prepared.dataUrl,
@@ -317,8 +312,8 @@ function ImageCaptureButton({
         userAdjusted: false
       });
       onStatus(detected.referenceImageUsed
-        ? "Boundary detected. Reference image was used to initialize the front frame."
-        : "Boundary detected. Review corners and printed-frame lines before analysis.");
+        ? "Server processed the photo and used the reference image to initialize the front frame."
+        : "Server processed the photo. Review corners and printed-frame lines before analysis.");
     } catch (error) {
       if (!prepared) {
         const rawDataUrl = await readFileDataUrl(file);
@@ -339,7 +334,7 @@ function ImageCaptureButton({
         blockers: ["automatic-boundary-detection-failed"],
         userAdjusted: true
       });
-      onError(error instanceof Error ? `Automatic detection failed: ${error.message}. Adjust corners manually.` : "Automatic detection failed. Adjust corners manually.");
+      onError(error instanceof Error ? `${error.message} Adjust corners manually.` : "Card was not recognized. Adjust corners manually.");
     } finally {
       setDetecting(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -358,7 +353,7 @@ function ImageCaptureButton({
       />
       <button type="button" onClick={() => inputRef.current?.click()} disabled={detecting} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-amber-300/40 bg-amber-300/10 px-4 text-sm font-bold text-amber-100 disabled:opacity-60">
         <Camera className="h-4 w-4" />
-        {detecting ? "Detecting..." : `Capture ${side}`}
+        {detecting ? "Processing..." : `Capture ${side}`}
       </button>
     </>
   );
@@ -523,15 +518,6 @@ function readFileDataUrl(file: File) {
   });
 }
 
-function imageSize(dataUrl: string) {
-  return new Promise<{ width: number; height: number }>((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
-    image.onerror = () => reject(new Error("Could not decode image."));
-    image.src = dataUrl;
-  });
-}
-
 async function prepareCenteringDataUrl(dataUrl: string) {
   const image = await loadImage(dataUrl);
   const width = image.naturalWidth || image.width;
@@ -554,21 +540,6 @@ async function prepareCenteringDataUrl(dataUrl: string) {
   };
 }
 
-function shouldUseOpenCvForCentering() {
-  if (typeof navigator === "undefined") return false;
-  const userAgent = navigator.userAgent.toLowerCase();
-  const mobile = /iphone|ipad|ipod|android|mobile/.test(userAgent);
-  const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
-  const lowMemory = typeof deviceMemory === "number" && deviceMemory <= 4;
-  return !mobile && !lowMemory;
-}
-
-function shouldAutoDetectOnCapture() {
-  if (typeof navigator === "undefined") return false;
-  const userAgent = navigator.userAgent.toLowerCase();
-  return !/iphone|ipad|ipod|android|mobile/.test(userAgent);
-}
-
 function loadImage(src: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
@@ -578,20 +549,29 @@ function loadImage(src: string) {
   });
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
-  return new Promise<T>((resolve, reject) => {
-    const timeout = window.setTimeout(() => reject(new Error("Detection took too long. Adjust corners manually.")), timeoutMs);
-    promise.then(
-      (value) => {
-        window.clearTimeout(timeout);
-        resolve(value);
-      },
-      (error: unknown) => {
-        window.clearTimeout(timeout);
-        reject(error);
-      }
-    );
-  });
+async function processCenteringPhoto(input: { dataUrl: string; side: CenteringSide; referenceImageUrl?: string | null }) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), CENTERING_PROCESS_TIMEOUT_MS);
+  try {
+    const response = await fetch("/api/centering/process", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify(input)
+    });
+    const body = await response.json().catch(() => null) as CenteringProcessResponse | null;
+    if (!response.ok || !body?.ok || !body.result) {
+      throw new Error(body?.error ?? "Card was not recognized.");
+    }
+    return body.result;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Server processing timed out.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 function nextFrame() {
