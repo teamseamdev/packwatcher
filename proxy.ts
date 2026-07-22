@@ -1,10 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { shouldRouteCodeToSupabaseAuth } from "@/lib/auth/code-routing";
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
 
-  if (request.nextUrl.pathname !== "/auth/callback" && request.nextUrl.searchParams.has("code")) {
+  if (shouldRouteCodeToSupabaseAuth(request.nextUrl.pathname, request.nextUrl.searchParams.has("code"))) {
     const url = request.nextUrl.clone();
     url.pathname = "/auth/callback";
     return NextResponse.redirect(url);

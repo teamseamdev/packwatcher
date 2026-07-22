@@ -139,8 +139,13 @@ export type EbayConnection = {
   ebay_user_id: string | null;
   ebay_username: string | null;
   environment: string;
+  marketplace_id?: string | null;
+  access_token_expires_at?: string | null;
   token_scope: string | null;
   refresh_token_expires_at: string | null;
+  status?: string | null;
+  last_refreshed_at?: string | null;
+  last_error?: string | null;
   connected_at: string;
   updated_at: string;
 };

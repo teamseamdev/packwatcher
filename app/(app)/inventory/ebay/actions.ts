@@ -3,9 +3,9 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
-import { publishEbayInventoryOffer, refreshEbayAccessToken } from "@/lib/ebay/client";
+import { publishEbayInventoryOffer } from "@/lib/ebay/client";
+import { getValidEbayAccessToken } from "@/lib/ebay/connection";
 import { ebayListingUrl } from "@/lib/ebay/config";
-import { decryptEbayToken } from "@/lib/ebay/token-crypto";
 import { errorMetadata, logAppEvent } from "@/lib/monitoring/log";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { InventoryItem } from "@/lib/types";
@@ -42,15 +42,6 @@ export async function publishInventoryItemToEbay(formData: FormData) {
   if (itemError || !item) throw new Error(itemError?.message ?? "Inventory item was not found.");
   if (!item.image_url) throw new Error("Add an image URL to this inventory card before publishing to eBay.");
 
-  const { data: connection, error: connectionError } = await admin
-    .from("ebay_connections")
-    .select("refresh_token_encrypted")
-    .eq("user_id", user.id)
-    .maybeSingle<{ refresh_token_encrypted: string }>();
-
-  if (connectionError) throw new Error(connectionError.message);
-  if (!connection) throw new Error("Connect your eBay account from Account before publishing.");
-
   const sku = `PW-${parsed.inventory_item_id.replace(/-/g, "").slice(0, 24)}`;
   const payload = {
     ...parsed,
@@ -60,9 +51,9 @@ export async function publishInventoryItemToEbay(formData: FormData) {
   let listingUrl: string | null = null;
 
   try {
-    const token = await refreshEbayAccessToken(decryptEbayToken(connection.refresh_token_encrypted));
+    const accessToken = await getValidEbayAccessToken(admin, user.id);
     const published = await publishEbayInventoryOffer({
-      accessToken: token.access_token,
+      accessToken,
       sku,
       title: parsed.title,
       description: parsed.description,

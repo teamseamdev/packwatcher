@@ -28,7 +28,7 @@ export default async function AccountPage() {
       .order("created_at", { ascending: false })
       .limit(5)
       .returns<FeedbackItem[]>(),
-    admin.from("ebay_connections").select("user_id,ebay_user_id,ebay_username,environment,token_scope,refresh_token_expires_at,connected_at,updated_at").eq("user_id", user.id).maybeSingle<EbayConnection>(),
+    admin.from("ebay_connections").select("user_id,ebay_user_id,ebay_username,environment,marketplace_id,access_token_expires_at,token_scope,refresh_token_expires_at,status,last_refreshed_at,last_error,connected_at,updated_at").eq("user_id", user.id).maybeSingle<EbayConnection>(),
     supabase.from("ebay_listing_defaults").select("*").eq("user_id", user.id).maybeSingle<EbayListingDefaults>()
   ]);
 
@@ -108,11 +108,19 @@ export default async function AccountPage() {
             </div>
           </div>
           {ebayConnection ? (
-            <form action={disconnectEbay}>
-              <button className="h-10 rounded-lg border border-rose-300/30 px-4 text-sm font-semibold text-rose-100">Disconnect eBay</button>
-            </form>
+            <div className="flex flex-wrap gap-2">
+              {ebayConnection.status === "reauthorization_required" ? (
+                <Link href="/api/ebay/oauth/start?returnTo=%2Faccount%3Fsection%3Debay" className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-black text-slate-950">
+                  <ExternalLink className="h-4 w-4" />
+                  Reconnect eBay
+                </Link>
+              ) : null}
+              <form action={disconnectEbay}>
+                <button className="h-10 rounded-lg border border-rose-300/30 px-4 text-sm font-semibold text-rose-100">Disconnect eBay</button>
+              </form>
+            </div>
           ) : (
-            <Link href="/api/ebay/oauth/start" className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-black text-slate-950">
+            <Link href="/api/ebay/oauth/start?returnTo=%2Faccount%3Fsection%3Debay" className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-black text-slate-950">
               <ExternalLink className="h-4 w-4" />
               Connect eBay
             </Link>
@@ -120,8 +128,16 @@ export default async function AccountPage() {
         </div>
 
         <div className="mt-4 rounded-lg border border-white/10 bg-slate-950/45 p-3 text-sm">
-          <p className="font-semibold text-white">Status: {ebayConnection ? "Connected" : "Not connected"}</p>
-          {ebayConnection ? <p className="mt-1 text-xs text-slate-500">Environment: {ebayConnection.environment} - Connected {new Date(ebayConnection.connected_at).toLocaleString()}</p> : null}
+          <p className="font-semibold text-white">Status: {ebayConnection ? ebayStatusLabel(ebayConnection.status) : "Not connected"}</p>
+          {ebayConnection ? (
+            <div className="mt-1 space-y-1 text-xs text-slate-500">
+              <p>Account: {ebayConnection.ebay_username || ebayConnection.ebay_user_id || "Connected eBay account"}</p>
+              <p>Marketplace: {ebayConnection.marketplace_id ?? ebayDefaults?.marketplace_id ?? "EBAY_US"}</p>
+              <p>Environment: {ebayConnection.environment} - Connected {new Date(ebayConnection.connected_at).toLocaleString()}</p>
+              {ebayConnection.last_refreshed_at ? <p>Token refreshed: {new Date(ebayConnection.last_refreshed_at).toLocaleString()}</p> : null}
+              {ebayConnection.status === "reauthorization_required" ? <p className="text-rose-200">Reconnect required: {ebayConnection.last_error ?? "eBay authorization expired or was revoked."}</p> : null}
+            </div>
+          ) : null}
         </div>
 
         <form action={saveEbayDefaults} className="mt-4 grid gap-3">
@@ -230,6 +246,12 @@ export default async function AccountPage() {
 
 function feedbackStatusLabel(status: FeedbackStatus) {
   return status.replace(/_/g, " ");
+}
+
+function ebayStatusLabel(status: string | null | undefined) {
+  if (status === "reauthorization_required") return "Reconnect required";
+  if (status === "disconnected") return "Disconnected";
+  return "Connected";
 }
 
 function Field({ name, label, defaultValue }: { name: string; label: string; defaultValue: string }) {

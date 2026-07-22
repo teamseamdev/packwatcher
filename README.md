@@ -114,7 +114,8 @@ Required setup:
 4. Set `EBAY_TOKEN_ENCRYPTION_KEY` to a long random secret. Changing it invalidates stored eBay refresh tokens.
 5. Add the eBay scopes in `.env.example`.
 6. Run `supabase/migrations/016_ebay_selling.sql`.
-7. In Account, connect eBay and save seller defaults:
+7. Run `supabase/migrations/031_ebay_oauth_state_and_token_health.sql` to add server-side eBay OAuth state tracking and token-health fields.
+8. In Account, connect eBay and save seller defaults:
    - Merchant location key
    - Payment policy ID
    - Return policy ID
@@ -134,6 +135,10 @@ How to test:
 
 If eBay rejects the listing, PackWatcher stores the failed attempt and displays the eBay error on the listing draft page. Common failures are missing business policies, missing inventory location, invalid category, missing card image, or seller account restrictions.
 
+eBay OAuth is an account integration, not a PackWatcher sign-in provider. Google/Discord Supabase auth stays separate from eBay authorization. PackWatcher stores a short-lived server-side eBay OAuth state tied to the current Supabase user before redirecting to eBay, then the eBay callback uses that state to save the eBay connection without calling Supabase auth callback/session exchange.
+
+Existing users who connected eBay before `commerce.identity.readonly` was added should disconnect and reconnect once so PackWatcher can store the immutable eBay user ID used for account-deletion matching.
+
 ### eBay Marketplace Account Deletion
 
 PackWatcher exposes the eBay marketplace account deletion endpoint at:
@@ -144,7 +149,7 @@ https://packwatcher.vercel.app/api/ebay/account-deletion
 
 Required setup:
 
-1. Run `supabase/migrations/030_ebay_account_deletion_events.sql`.
+1. Run `supabase/migrations/030_ebay_account_deletion_events.sql` and `supabase/migrations/031_ebay_oauth_state_and_token_health.sql`.
 2. Set `EBAY_ACCOUNT_DELETION_ENDPOINT` to the exact URL entered in the eBay Developer Portal. The default production value is `https://packwatcher.vercel.app/api/ebay/account-deletion`.
 3. Set `EBAY_ACCOUNT_DELETION_VERIFICATION_TOKEN` to the same 32-80 character verification token entered in eBay. Use only letters, numbers, underscores, and hyphens.
 4. In the eBay Developer Portal marketplace account deletion settings, enter:

@@ -88,11 +88,28 @@ create table public.ebay_connections (
   ebay_user_id text,
   ebay_username text,
   environment text not null default 'production',
+  marketplace_id text not null default 'EBAY_US',
+  access_token_encrypted text,
   refresh_token_encrypted text not null,
+  access_token_expires_at timestamptz,
   token_scope text,
   refresh_token_expires_at timestamptz,
+  status text not null default 'connected',
+  last_refreshed_at timestamptz,
+  last_error text,
   connected_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+create table public.ebay_oauth_states (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  state_hash text not null unique,
+  return_path text not null default '/account?section=ebay',
+  environment text not null default 'production',
+  expires_at timestamptz not null,
+  consumed_at timestamptz,
+  created_at timestamptz not null default now()
 );
 
 create table public.ebay_listing_defaults (
@@ -382,6 +399,7 @@ alter table public.notifications enable row level security;
 alter table public.inventory_items enable row level security;
 alter table public.billing_status enable row level security;
 alter table public.ebay_connections enable row level security;
+alter table public.ebay_oauth_states enable row level security;
 alter table public.ebay_listing_defaults enable row level security;
 alter table public.ebay_listings enable row level security;
 alter table public.ebay_account_deletion_events enable row level security;
@@ -427,6 +445,8 @@ create policy "billing own select" on public.billing_status for select using (au
 create policy "billing admin select" on public.billing_status for select using (public.is_admin());
 
 create policy "ebay connections admin all" on public.ebay_connections
+  for all using (public.is_admin()) with check (public.is_admin());
+create policy "ebay oauth states admin all" on public.ebay_oauth_states
   for all using (public.is_admin()) with check (public.is_admin());
 create policy "ebay listing defaults own all" on public.ebay_listing_defaults
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
@@ -513,6 +533,9 @@ create index notifications_user_id_created_idx on public.notifications(user_id, 
 create index inventory_items_user_id_idx on public.inventory_items(user_id);
 create index inventory_items_user_set_idx on public.inventory_items(user_id, set_name);
 create index inventory_items_user_card_number_idx on public.inventory_items(user_id, card_number);
+create index ebay_oauth_states_user_created_idx on public.ebay_oauth_states(user_id, created_at desc);
+create index ebay_oauth_states_expires_idx on public.ebay_oauth_states(expires_at);
+create index ebay_connections_status_idx on public.ebay_connections(status);
 create index ebay_listings_user_id_idx on public.ebay_listings(user_id);
 create index ebay_listings_inventory_item_id_idx on public.ebay_listings(inventory_item_id);
 create index ebay_listings_listing_id_idx on public.ebay_listings(listing_id);

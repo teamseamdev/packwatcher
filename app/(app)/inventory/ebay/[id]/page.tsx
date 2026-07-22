@@ -23,7 +23,7 @@ export default async function EbayInventoryListingPage({
 
   const [{ data: item }, { data: connection }, { data: defaults }, { data: listings }] = await Promise.all([
     supabase.from("inventory_items").select("*").eq("id", id).eq("user_id", user.id).single<InventoryItem>(),
-    admin.from("ebay_connections").select("user_id,ebay_user_id,ebay_username,environment,token_scope,refresh_token_expires_at,connected_at,updated_at").eq("user_id", user.id).maybeSingle<EbayConnection>(),
+    admin.from("ebay_connections").select("user_id,ebay_user_id,ebay_username,environment,marketplace_id,token_scope,refresh_token_expires_at,status,last_error,connected_at,updated_at").eq("user_id", user.id).maybeSingle<EbayConnection>(),
     supabase.from("ebay_listing_defaults").select("*").eq("user_id", user.id).maybeSingle<EbayListingDefaults>(),
     supabase.from("ebay_listings").select("*").eq("inventory_item_id", id).eq("user_id", user.id).order("created_at", { ascending: false }).limit(5).returns<EbayListing[]>()
   ]);
@@ -39,7 +39,8 @@ export default async function EbayInventoryListingPage({
 
   const listingDefaults = defaultEbayListingDefaults(user.id, defaults);
   const missing = missingEbayDefaults(listingDefaults);
-  const canPublish = Boolean(connection) && !missing.length && Boolean(item.image_url);
+  const needsReconnect = connection?.status === "reauthorization_required";
+  const canPublish = Boolean(connection) && !needsReconnect && !missing.length && Boolean(item.image_url);
   const cleanDisplayName = cleanCardName({
     rawName: item.card_name ?? item.name,
     rawCollectorNumber: item.card_number,
@@ -74,13 +75,15 @@ export default async function EbayInventoryListingPage({
         </div>
       </section>
 
-      {!connection ? (
+      {!connection || needsReconnect ? (
         <section className="pw-panel rounded-lg border border-amber-300/25 bg-amber-300/10 p-5">
-          <h2 className="font-bold text-white">Connect eBay first</h2>
-          <p className="mt-2 text-sm text-slate-300">PackWatcher needs your eBay consent before it can create listings for your seller account.</p>
-          <Link href="/api/ebay/oauth/start" className="mt-4 inline-flex h-10 items-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-black text-slate-950">
+          <h2 className="font-bold text-white">{needsReconnect ? "Reconnect eBay" : "Connect eBay first"}</h2>
+          <p className="mt-2 text-sm text-slate-300">
+            {needsReconnect ? "Your eBay authorization expired or was revoked. Reconnect eBay to publish listings." : "PackWatcher needs your eBay consent before it can create listings for your seller account."}
+          </p>
+          <Link href={`/api/ebay/oauth/start?returnTo=${encodeURIComponent(`/inventory/ebay/${item.id}?returnTo=${encodeURIComponent(returnPath)}`)}`} className="mt-4 inline-flex h-10 items-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-black text-slate-950">
             <ExternalLink className="h-4 w-4" />
-            Connect eBay
+            {needsReconnect ? "Reconnect eBay" : "Connect eBay"}
           </Link>
         </section>
       ) : null}
