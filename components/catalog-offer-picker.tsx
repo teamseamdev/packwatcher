@@ -9,7 +9,7 @@ import { removeTrackedProduct, trackCatalogProduct, untrackCatalogProduct } from
 import { LocationPostalCodeField } from "@/components/location-postal-code-field";
 import { isLikelyPokemonProduct } from "@/lib/catalog-importers/pokemon-product-filter";
 import { isCatalogOfferAvailable } from "@/lib/catalog/offer-availability";
-import { compareCatalogOffers, fulfillmentLabel, fulfillmentText, fulfillmentTone, isLocalOffer, metadataText, offerDistanceMiles, verificationLabel, verificationText } from "@/lib/catalog/offer-ranking";
+import { compareCatalogOffers, fulfillmentLabel, fulfillmentText, fulfillmentTone, isLocalOffer, isShippingOnlyOffer, metadataText, offerDistanceMiles, verificationLabel, verificationText } from "@/lib/catalog/offer-ranking";
 import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
 import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, TrackedProduct } from "@/lib/types";
@@ -20,6 +20,13 @@ const LOCAL_RADIUS_MILES = 50;
 function productForOffer(offer: CatalogOffer) {
   const related = offer.catalog_products as CatalogProduct | CatalogProduct[] | null;
   return Array.isArray(related) ? related[0] ?? null : related;
+}
+
+function isNearbyPickupOffer(offer: CatalogOffer, postalCode: string) {
+  if (!postalCode.trim() || !isLocalOffer(offer)) return false;
+  const distance = offerDistanceMiles(offer, postalCode);
+  if (distance !== null) return distance <= LOCAL_RADIUS_MILES;
+  return offer.metadata?.localSearchRequested === true && metadataText(offer, "postalCode") === postalCode.trim();
 }
 
 export function CatalogOfferPicker({
@@ -51,9 +58,12 @@ export function CatalogOfferPicker({
       .filter((offer) => {
         const product = productForOffer(offer);
         if (!isLikelyPokemonProduct({
-          title: product?.title ?? product?.name ?? offer.title,
+          title: [product?.title ?? product?.name, offer.title].filter(Boolean).join(" "),
           productUrl: offer.url,
-          storeName: offer.store_name
+          storeName: offer.store_name,
+          availabilityText: offer.availability_text,
+          shippingText: metadataText(offer, "shippingText"),
+          pickupText: metadataText(offer, "pickupText")
         })) {
           return false;
         }
@@ -118,10 +128,9 @@ export function CatalogOfferPicker({
     const other: CatalogOffer[] = [];
 
     for (const offer of filtered) {
-      const distance = offerDistanceMiles(offer, postalCode);
-      if (isLocalOffer(offer) && (distance === null || distance <= LOCAL_RADIUS_MILES)) {
+      if (isNearbyPickupOffer(offer, postalCode)) {
         nearby.push(offer);
-      } else if (fulfillmentText(offer).toLowerCase().includes("ship") || fulfillmentLabel(offer).toLowerCase().includes("shipping")) {
+      } else if (isShippingOnlyOffer(offer) || fulfillmentText(offer).toLowerCase().includes("ship") || fulfillmentLabel(offer).toLowerCase().includes("shipping")) {
         shipping.push(offer);
       } else {
         other.push(offer);
@@ -129,8 +138,8 @@ export function CatalogOfferPicker({
     }
 
     return [
-      { key: "nearby", title: `Nearby pickup within ${LOCAL_RADIUS_MILES} miles`, subtitle: "Local results are prioritized when the retailer/search provider gives store or pickup evidence.", offers: nearby },
-      { key: "shipping", title: "Shipping and online options", subtitle: "These may ship to you, but may not be near your selected ZIP.", offers: [...shipping, ...other] }
+      { key: "nearby", title: `Nearby pickup within ${LOCAL_RADIUS_MILES} miles`, subtitle: "Only results with pickup or local-store evidence are shown here.", offers: nearby },
+      { key: "shipping", title: "Shipping and outside-area options", subtitle: "Shipping results and local results outside your nearby pickup list stay separated here.", offers: [...shipping, ...other] }
     ];
   }, [filtered, postalCode]);
 
@@ -229,6 +238,8 @@ export function CatalogOfferPicker({
             const trackedUrlProduct = trackedProducts.find((trackedProduct) => trackedProduct.url === offer.url);
             const isUrlTracked = Boolean(trackedUrlProduct);
             const isCatalogTracked = product ? trackedCatalogProducts.has(product.id) : false;
+            const imageUrl = product?.image_url ?? offer.image_url;
+            const displayName = product?.name ?? offer.title ?? "Catalog product";
 
             return (
               <article key={offer.id} className="rounded-lg border border-cyan-300/10 bg-black/45 p-3 transition hover:border-amber-300/35 hover:shadow-[0_0_28px_rgba(255,208,47,0.08)]">
@@ -238,12 +249,12 @@ export function CatalogOfferPicker({
                   className="grid w-full grid-cols-[72px_1fr] gap-3 text-left"
                 >
                 <div className="relative h-20 overflow-hidden rounded-lg bg-slate-900">
-                  {product?.image_url ? <Image src={product.image_url} alt={product.name} fill sizes="72px" className="object-cover" /> : <div className="grid h-full place-items-center text-xs text-slate-600">No image</div>}
+                  {imageUrl ? <Image src={imageUrl} alt={displayName} fill sizes="72px" className="object-cover" /> : <div className="grid h-full place-items-center text-xs text-slate-600">No image</div>}
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <h3 className="line-clamp-2 text-sm font-bold text-white">{product?.name ?? "Catalog product"}</h3>
+                      <h3 className="line-clamp-2 text-sm font-bold text-white">{displayName}</h3>
                       <p className="mt-1 text-xs text-slate-400">{offer.store_name} - {product?.set_name ?? product?.tcg ?? "TCG"}</p>
                     </div>
                     <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${fulfillmentTone(offer)}`}>{fulfillmentLabel(offer)}</span>

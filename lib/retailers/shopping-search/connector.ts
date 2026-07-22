@@ -1,4 +1,5 @@
 import { isGoogleUrl, resolveRetailerUrl } from "../../catalog/retailer-url.ts";
+import { isLikelyPokemonProduct, isRetailerBlockResult } from "../../catalog-importers/pokemon-product-filter.ts";
 import type { ShoppingSearchProvider, ShoppingSearchResult } from "../shared/types.ts";
 
 type ProviderResponseItem = {
@@ -188,10 +189,29 @@ async function searchSerpApiEngine(input: {
   return resultItemsForEngine(input.engine, body).flatMap((item) => {
     const retailer = retailerForEngine(input.engine, item);
     const rawProductUrl = urlForEngine(input.engine, item);
-    const productUrl = resolveRetailerUrl(rawProductUrl, retailer, item.title);
+    const shipping = joinedText(item.delivery) ?? textOrNull(item.shipping);
+    const availabilityText = availabilityForEngine(input.engine, item);
+    const pickupText = textOrNull(item.pickup);
+    if (isRetailerBlockResult({
+      title: item.title,
+      productUrl: rawProductUrl,
+      storeName: retailer,
+      availabilityText,
+      shippingText: shipping,
+      pickupText
+    })) return [];
+    if (!isLikelyPokemonProduct({
+      title: item.title,
+      productUrl: rawProductUrl,
+      storeName: retailer,
+      availabilityText,
+      shippingText: shipping,
+      pickupText
+    })) return [];
+
+    const productUrl = resolveRetailerUrl(rawProductUrl, retailer, item.title, input.postalCode);
     if (!item.title || !retailer || !productUrl) return [];
     if (isGoogleUrl(productUrl)) return [];
-    const shipping = joinedText(item.delivery) ?? textOrNull(item.shipping);
     const sourceUrl = item.sourceUrl ?? item.source_url ?? rawProductUrl ?? productUrl;
     return [{
       provider: `${input.providerName}:${input.engine}`,
@@ -201,9 +221,9 @@ async function searchSerpApiEngine(input: {
       price: priceForEngine(item),
       sellerName: sellerName(item),
       imageUrl: item.imageUrl ?? item.image_url ?? item.thumbnail ?? null,
-      availabilityText: availabilityForEngine(input.engine, item),
+      availabilityText,
       shippingText: shipping,
-      pickupText: textOrNull(item.pickup),
+      pickupText,
       sourceUrl,
       retrievedAt,
       confidence: item.confidence ?? (input.engine === "google_shopping" ? 0.62 : 0.68)
@@ -266,7 +286,27 @@ export function createConfiguredShoppingSearchProvider(): ShoppingSearchProvider
       return items.flatMap((item) => {
         const retailer = item.retailer ?? item.source;
         const rawProductUrl = item.productUrl ?? item.product_url ?? item.direct_link ?? item.merchant_link ?? item.link ?? item.product_link;
-        const productUrl = resolveRetailerUrl(rawProductUrl, retailer, item.title);
+        const availabilityText = textOrNull(item.availability) ?? joinedExtensions(item);
+        const shippingText = textOrNull(item.delivery) ?? textOrNull(item.shipping);
+        const pickupText = textOrNull(item.pickup);
+        if (isRetailerBlockResult({
+          title: item.title,
+          productUrl: rawProductUrl,
+          storeName: retailer,
+          availabilityText,
+          shippingText,
+          pickupText
+        })) return [];
+        if (!isLikelyPokemonProduct({
+          title: item.title,
+          productUrl: rawProductUrl,
+          storeName: retailer,
+          availabilityText,
+          shippingText,
+          pickupText
+        })) return [];
+
+        const productUrl = resolveRetailerUrl(rawProductUrl, retailer, item.title, postalCode);
         if (!item.title || !retailer || !productUrl) return [];
         if (isGoogleUrl(productUrl)) return [];
         return [{
@@ -277,9 +317,9 @@ export function createConfiguredShoppingSearchProvider(): ShoppingSearchProvider
           price: parsePrice(item.extracted_price) ?? parsePrice(item.price),
           sellerName: item.sellerName ?? item.seller_name ?? null,
           imageUrl: item.imageUrl ?? item.image_url ?? item.thumbnail ?? null,
-          availabilityText: textOrNull(item.availability) ?? joinedExtensions(item),
-          shippingText: textOrNull(item.delivery) ?? textOrNull(item.shipping),
-          pickupText: textOrNull(item.pickup),
+          availabilityText,
+          shippingText,
+          pickupText,
           sourceUrl: item.sourceUrl ?? item.source_url ?? rawProductUrl ?? productUrl,
           retrievedAt,
           confidence: item.confidence ?? 0.6

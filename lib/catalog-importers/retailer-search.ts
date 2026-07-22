@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ImportedCatalogOffer } from "@/lib/catalog-importers/types";
 import { classifyOfferAvailability } from "@/lib/catalog/offer-availability";
-import { isLikelyPokemonProduct, pokemonShoppingQuery } from "@/lib/catalog-importers/pokemon-product-filter";
+import { isLikelyPokemonProduct, isRetailerBlockResult, pokemonShoppingQuery } from "@/lib/catalog-importers/pokemon-product-filter";
 import { fetchPageHtml } from "@/lib/fetch-page-html";
 import { fetchProductMetadata } from "@/lib/product-metadata";
 import { createConfiguredShoppingSearchProvider } from "@/lib/retailers/shopping-search/connector";
@@ -159,23 +159,36 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
       const results = (await shoppingSearch.searchProducts(discoveryQuery, { postalCode: options.postalCode })).slice(0, perRetailerLimit * 2);
       for (const result of results) {
         if (offers.length >= perRetailerLimit) break;
-        if (!isLikelyPokemonProduct({ title: result.title, productUrl: result.productUrl, storeName: result.retailer })) continue;
+        if (isRetailerBlockResult({
+          title: result.title,
+          productUrl: result.productUrl,
+          storeName: result.retailer,
+          availabilityText: result.availabilityText,
+          shippingText: result.shippingText,
+          pickupText: result.pickupText
+        })) continue;
+        if (!isLikelyPokemonProduct({
+          title: result.title,
+          productUrl: result.productUrl,
+          storeName: result.retailer,
+          availabilityText: result.availabilityText,
+          shippingText: result.shippingText,
+          pickupText: result.pickupText
+        })) continue;
 
         const retailer = result.retailer || "Retailer";
         const id = sourceProductId(result.productUrl);
-        const adapter = getAdapter(result.productUrl, retailer);
-        const check = await adapter.check({ id: result.productUrl, url: result.productUrl, storeName: retailer }).catch(() => null);
-        const price = firstValidPrice(result.price, check?.price);
+        const price = firstValidPrice(result.price);
         const providerAvailability = [result.availabilityText, result.shippingText, result.pickupText].filter(Boolean).join(" | ");
-        const availabilityText = check?.rawMatchReason ?? (providerAvailability || "Discovered by shopping-search provider; stock not verified");
+        const availabilityText = providerAvailability || "Discovered by shopping-search provider; stock not verified";
         const classification = classifyOfferAvailability({
-          status: check?.status ?? "unknown",
+          status: "unknown",
           availabilityText,
           shippingText: result.shippingText,
           pickupText: result.pickupText,
           retailer,
           sourceConfidence: result.confidence,
-          verifiedByRetailerConnector: Boolean(check)
+          verifiedByRetailerConnector: false
         });
 
         offers.push({
@@ -188,7 +201,7 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
           setName: null,
           seriesName: null,
           productType: "Sealed Product",
-          imageUrl: result.imageUrl ?? check?.imageUrl ?? null,
+          imageUrl: result.imageUrl ?? null,
           msrp: price,
           storeName: retailer,
           retailerProductId: id,
@@ -199,13 +212,13 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
           metadata: {
             discoverySource: "shopping-search",
             provider: result.provider,
-            verificationStatus: check ? "verified" : "discovery",
+            verificationStatus: "discovery",
             sourceUrl: result.sourceUrl,
             retrievedAt: result.retrievedAt,
             sourceConfidence: result.confidence,
-            verifiedByRetailerConnector: Boolean(check),
+            verifiedByRetailerConnector: false,
             providerPrice: result.price,
-            checkedPrice: check?.price ?? null,
+            checkedPrice: null,
             availabilityText,
             shippingText: result.shippingText ?? null,
             pickupText: result.pickupText ?? null,

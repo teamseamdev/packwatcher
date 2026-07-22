@@ -2,6 +2,9 @@ type DiscoveryCandidate = {
   title?: string | null;
   productUrl?: string | null;
   storeName?: string | null;
+  availabilityText?: string | null;
+  shippingText?: string | null;
+  pickupText?: string | null;
 };
 
 const nonPokemonPatterns = [
@@ -14,8 +17,12 @@ const retailerBlockPatterns = [
   /\brobot\s+or\s+human\b/i,
   /\bare\s+you\s+a\s+robot\b/i,
   /\bverify\s+you(?:'| a)?re\s+human\b/i,
+  /\bchecking\s+if\s+the\s+site\s+connection\s+is\s+secure\b/i,
   /\baccess\s+denied\b/i,
+  /\brequest\s+blocked\b/i,
   /\bcaptcha\b/i,
+  /\bperimeterx\b/i,
+  /\bcloudflare\b/i,
   /\bautomated\s+access\b/i,
   /\bunusual\s+traffic\b/i
 ];
@@ -52,14 +59,32 @@ export function pokemonShoppingQuery(query: string) {
 
 export function isLikelyPokemonProduct(candidate: DiscoveryCandidate) {
   const titleAndUrl = normalizeText(`${candidate.title ?? ""} ${candidate.productUrl ?? ""}`);
-  const allText = normalizeText(`${titleAndUrl} ${candidate.storeName ?? ""}`);
+  const allText = normalizeText([
+    titleAndUrl,
+    candidate.storeName,
+    candidate.availabilityText,
+    candidate.shippingText,
+    candidate.pickupText
+  ].filter(Boolean).join(" "));
 
   if (!titleAndUrl.trim()) return false;
-  if (retailerBlockPatterns.some((pattern) => pattern.test(allText))) return false;
+  if (isRetailerBlockResult({ ...candidate, combinedText: allText })) return false;
   if (nonPokemonPatterns.some((pattern) => pattern.test(allText))) return false;
 
   const hasPokemonSignal = pokemonPatterns.some((pattern) => pattern.test(titleAndUrl));
   const hasSealedSignal = sealedProductPatterns.some((pattern) => pattern.test(titleAndUrl));
 
   return hasPokemonSignal || hasSealedSignal;
+}
+
+export function isRetailerBlockResult(candidate: DiscoveryCandidate & { combinedText?: string | null }) {
+  const allText = normalizeText(candidate.combinedText ?? [
+    candidate.title,
+    candidate.productUrl,
+    candidate.storeName,
+    candidate.availabilityText,
+    candidate.shippingText,
+    candidate.pickupText
+  ].filter(Boolean).join(" "));
+  return retailerBlockPatterns.some((pattern) => pattern.test(allText));
 }

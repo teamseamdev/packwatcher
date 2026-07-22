@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { aggregatePrices } from "../lib/retailers/shared/price-aggregation.ts";
-import { isLikelyPokemonProduct, pokemonShoppingQuery } from "../lib/catalog-importers/pokemon-product-filter.ts";
+import { isLikelyPokemonProduct, isRetailerBlockResult, pokemonShoppingQuery } from "../lib/catalog-importers/pokemon-product-filter.ts";
 import { classifyOfferAvailability, isAvailableCatalogStatus } from "../lib/catalog/offer-availability.ts";
 import { isGoogleUrl, resolveRetailerUrl } from "../lib/catalog/retailer-url.ts";
 import { FOUNDER_CARD_SCAN_LIMIT, FOUNDER_MEMBERSHIP_LIMIT, FOUNDER_VIDEO_SCAN_LIMIT, usageLimitForPlan } from "../lib/plans.ts";
@@ -316,6 +316,8 @@ test("filters shopping discovery to Pokemon sealed/card products", () => {
   assert.equal(isLikelyPokemonProduct({ title: "Pokemon Chaos Rising Blister Pack", storeName: "TCGplayer", productUrl: "https://example.com/pokemon" }), true);
   assert.equal(isLikelyPokemonProduct({ title: "Surging Sparks Elite Trainer Box", storeName: "Target", productUrl: "https://example.com/item" }), true);
   assert.equal(isLikelyPokemonProduct({ title: "Robot or human?", storeName: "Walmart - pokemon", productUrl: "https://www.walmart.com/blocked" }), false);
+  assert.equal(isRetailerBlockResult({ title: "Pokemon cards", availabilityText: "Checking if the site connection is secure" }), true);
+  assert.equal(isRetailerBlockResult({ title: "Pokemon cards", availabilityText: "Pickup today" }), false);
 });
 
 test("resolves shopping provider Google URLs to retailer URLs", () => {
@@ -355,9 +357,11 @@ test("SerpAPI provider normalizes Google Shopping, Walmart, Amazon, and eBay sea
   process.env.SHOPPING_SEARCH_API_URL = "https://serpapi.test/search";
   process.env.SHOPPING_SEARCH_API_KEY = "test-key";
   process.env.SERPAPI_SEARCH_ENGINES = "google_shopping,walmart,amazon,ebay";
+  const requestedUrls: URL[] = [];
 
   globalThis.fetch = (async (input: string | URL | Request) => {
     const url = new URL(String(input));
+    requestedUrls.push(url);
     const engine = url.searchParams.get("engine");
     const payload = engine === "google_shopping" ? {
       shopping_results: [{ title: "Pokemon Booster Bundle", source: "Target", link: "https://target.com/p/test", extracted_price: 49.99, thumbnail: "https://img.test/a.jpg", delivery: "Free shipping" }]
@@ -376,11 +380,48 @@ test("SerpAPI provider normalizes Google Shopping, Walmart, Amazon, and eBay sea
     assert.ok(provider);
     const results = await provider.searchProducts("pokemon cards", { postalCode: "15237" });
     assert.equal(results.length, 4);
+    assert.equal(requestedUrls.find((url) => url.searchParams.get("engine") === "walmart")?.searchParams.get("location"), "15237");
+    assert.equal(requestedUrls.find((url) => url.searchParams.get("engine") === "amazon")?.searchParams.get("delivery_zip"), "15237");
+    assert.equal(requestedUrls.find((url) => url.searchParams.get("engine") === "ebay")?.searchParams.get("_stpos"), "15237");
     assert.deepEqual(results.map((result) => result.provider).sort(), ["serpapi:amazon", "serpapi:ebay", "serpapi:google_shopping", "serpapi:walmart"]);
     assert.equal(results.find((result) => result.retailer === "Walmart")?.price, 54.99);
     assert.equal(results.find((result) => result.retailer === "Walmart")?.pickupText, "Pickup today");
     assert.equal(results.find((result) => result.retailer === "Amazon")?.shippingText, "FREE delivery Tomorrow");
     assert.equal(results.find((result) => result.retailer === "eBay")?.sellerName, "card-shop");
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnv("SHOPPING_SEARCH_PROVIDER", originalProvider);
+    restoreEnv("SHOPPING_SEARCH_API_URL", originalUrl);
+    restoreEnv("SHOPPING_SEARCH_API_KEY", originalKey);
+    restoreEnv("SERPAPI_SEARCH_ENGINES", originalEngines);
+  }
+});
+
+test("SerpAPI provider drops retailer blocker pages before import", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalProvider = process.env.SHOPPING_SEARCH_PROVIDER;
+  const originalUrl = process.env.SHOPPING_SEARCH_API_URL;
+  const originalKey = process.env.SHOPPING_SEARCH_API_KEY;
+  const originalEngines = process.env.SERPAPI_SEARCH_ENGINES;
+
+  process.env.SHOPPING_SEARCH_PROVIDER = "serpapi";
+  process.env.SHOPPING_SEARCH_API_URL = "https://serpapi.test/search";
+  process.env.SHOPPING_SEARCH_API_KEY = "test-key";
+  process.env.SERPAPI_SEARCH_ENGINES = "walmart";
+
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    organic_results: [
+      { title: "Robot or human?", product_page_url: "https://www.walmart.com/blocked", extracted_price: null },
+      { title: "Pokemon Elite Trainer Box", product_page_url: "https://www.walmart.com/ip/123", extracted_price: 54.99, pickup: "Pickup today" }
+    ]
+  }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+
+  try {
+    const provider = createConfiguredShoppingSearchProvider();
+    assert.ok(provider);
+    const results = await provider.searchProducts("pokemon cards", { postalCode: "15237" });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].title, "Pokemon Elite Trainer Box");
   } finally {
     globalThis.fetch = originalFetch;
     restoreEnv("SHOPPING_SEARCH_PROVIDER", originalProvider);
