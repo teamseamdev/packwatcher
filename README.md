@@ -77,7 +77,9 @@ EBAY_CLIENT_SECRET=
 EBAY_RU_NAME=
 EBAY_TOKEN_ENCRYPTION_KEY=
 EBAY_MARKETPLACE_ID=EBAY_US
-EBAY_SCOPES=https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account
+EBAY_SCOPES=https://api.ebay.com/oauth/api_scope/commerce.identity.readonly https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account
+EBAY_ACCOUNT_DELETION_ENDPOINT=https://packwatcher.vercel.app/api/ebay/account-deletion
+EBAY_ACCOUNT_DELETION_VERIFICATION_TOKEN=
 NEXT_PUBLIC_SENTRY_DSN=
 SENTRY_DSN=
 SENTRY_ORG=
@@ -131,6 +133,45 @@ How to test:
 6. Click `Publish and open eBay listing`.
 
 If eBay rejects the listing, PackWatcher stores the failed attempt and displays the eBay error on the listing draft page. Common failures are missing business policies, missing inventory location, invalid category, missing card image, or seller account restrictions.
+
+### eBay Marketplace Account Deletion
+
+PackWatcher exposes the eBay marketplace account deletion endpoint at:
+
+```text
+https://packwatcher.vercel.app/api/ebay/account-deletion
+```
+
+Required setup:
+
+1. Run `supabase/migrations/030_ebay_account_deletion_events.sql`.
+2. Set `EBAY_ACCOUNT_DELETION_ENDPOINT` to the exact URL entered in the eBay Developer Portal. The default production value is `https://packwatcher.vercel.app/api/ebay/account-deletion`.
+3. Set `EBAY_ACCOUNT_DELETION_VERIFICATION_TOKEN` to the same 32-80 character verification token entered in eBay. Use only letters, numbers, underscores, and hyphens.
+4. In the eBay Developer Portal marketplace account deletion settings, enter:
+   - Endpoint URL: `https://packwatcher.vercel.app/api/ebay/account-deletion`
+   - Verification token: the exact value from `EBAY_ACCOUNT_DELETION_VERIFICATION_TOKEN`
+5. Send eBay's endpoint validation challenge and confirm it succeeds.
+6. Send a test account-deletion notification from eBay.
+
+The GET challenge response uses SHA-256 over:
+
+```text
+challengeCode + verificationToken + endpointURL
+```
+
+with no separators. The endpoint URL must match `EBAY_ACCOUNT_DELETION_ENDPOINT` exactly, including protocol, host, path, and any trailing slash differences.
+
+Local challenge verification:
+
+```bash
+EBAY_ACCOUNT_DELETION_VERIFICATION_TOKEN=test_token_123456789012345678901234567890 \
+EBAY_ACCOUNT_DELETION_ENDPOINT=https://packwatcher.vercel.app/api/ebay/account-deletion \
+node scripts/ebay-account-deletion-challenge.mjs test_challenge
+```
+
+On POST, PackWatcher records the `notificationId` idempotently, matches stored eBay connections by `notification.data.userId` or `notification.data.username` when present, removes encrypted eBay tokens and seller defaults, and scrubs eBay listing identifiers/payload metadata. Normal PackWatcher inventory and collection data is preserved.
+
+eBay sends an `X-EBAY-SIGNATURE` header for notification validation. PackWatcher does not invent a custom signature algorithm; the deletion logic is isolated so the official eBay Event Notification SDK verifier can be added without changing the data deletion path.
 
 ## Production Monitoring
 

@@ -2,9 +2,10 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { exchangeEbayAuthorizationCode } from "@/lib/ebay/client";
+import { exchangeEbayAuthorizationCode, fetchEbayUserIdentity } from "@/lib/ebay/client";
 import { getEbayConfig } from "@/lib/ebay/config";
 import { encryptEbayToken } from "@/lib/ebay/token-crypto";
+import { errorMetadata, logAppEvent } from "@/lib/monitoring/log";
 
 export async function GET(request: Request) {
   const { user } = await requireUser();
@@ -29,14 +30,34 @@ export async function GET(request: Request) {
   const refreshTokenExpiresAt = token.refresh_token_expires_in
     ? new Date(Date.now() + token.refresh_token_expires_in * 1000).toISOString()
     : null;
+  let identity: { userId?: string; username?: string } | null = null;
 
-  const { error: upsertError } = await admin.from("ebay_connections").upsert({
+  try {
+    identity = await fetchEbayUserIdentity(token.access_token);
+  } catch (error) {
+    await logAppEvent({
+      category: "ebay",
+      severity: "warn",
+      message: "Could not read eBay identity after OAuth connection",
+      userId: user.id,
+      metadata: errorMetadata(error)
+    });
+  }
+
+  const connectionPayload: Record<string, unknown> = {
     user_id: user.id,
     environment: config.environment,
     refresh_token_encrypted: encryptEbayToken(token.refresh_token),
     token_scope: token.scope ?? config.scopes.join(" "),
     refresh_token_expires_at: refreshTokenExpiresAt,
     updated_at: new Date().toISOString()
+  };
+
+  if (identity?.userId) connectionPayload.ebay_user_id = identity.userId;
+  if (identity?.username) connectionPayload.ebay_username = identity.username;
+
+  const { error: upsertError } = await admin.from("ebay_connections").upsert({
+    ...connectionPayload
   });
 
   if (upsertError) redirect(`/account?ebay_error=${encodeURIComponent(upsertError.message)}`);

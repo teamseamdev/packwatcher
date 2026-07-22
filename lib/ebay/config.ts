@@ -8,10 +8,12 @@ export type EbayConfig = {
   scopes: string[];
   authBaseUrl: string;
   apiBaseUrl: string;
+  identityBaseUrl: string;
   marketplaceId: string;
 };
 
 const DEFAULT_SCOPES = [
+  "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
   "https://api.ebay.com/oauth/api_scope/sell.inventory",
   "https://api.ebay.com/oauth/api_scope/sell.account"
 ];
@@ -34,6 +36,7 @@ export function getEbayConfig(): EbayConfig {
     scopes: (process.env.EBAY_SCOPES ?? DEFAULT_SCOPES.join(" ")).split(/\s+/).filter(Boolean),
     authBaseUrl: environment === "sandbox" ? "https://auth.sandbox.ebay.com" : "https://auth.ebay.com",
     apiBaseUrl: environment === "sandbox" ? "https://api.sandbox.ebay.com" : "https://api.ebay.com",
+    identityBaseUrl: environment === "sandbox" ? "https://apiz.sandbox.ebay.com" : "https://apiz.ebay.com",
     marketplaceId: process.env.EBAY_MARKETPLACE_ID ?? "EBAY_US"
   };
 }

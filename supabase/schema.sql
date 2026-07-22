@@ -127,6 +127,17 @@ create table public.ebay_listings (
   updated_at timestamptz not null default now()
 );
 
+create table public.ebay_account_deletion_events (
+  id uuid primary key default gen_random_uuid(),
+  notification_id text not null unique,
+  ebay_user_id text,
+  event_date timestamptz,
+  received_at timestamptz not null default now(),
+  processed_at timestamptz,
+  status text not null default 'received' check (status in ('received', 'processed', 'processed_no_match', 'duplicate', 'failed')),
+  error_message text
+);
+
 create table public.promo_codes (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
@@ -373,6 +384,7 @@ alter table public.billing_status enable row level security;
 alter table public.ebay_connections enable row level security;
 alter table public.ebay_listing_defaults enable row level security;
 alter table public.ebay_listings enable row level security;
+alter table public.ebay_account_deletion_events enable row level security;
 alter table public.promo_codes enable row level security;
 alter table public.promo_code_redemptions enable row level security;
 alter table public.app_usage_events enable row level security;
@@ -422,6 +434,8 @@ create policy "ebay listing defaults admin select" on public.ebay_listing_defaul
 create policy "ebay listings own all" on public.ebay_listings
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "ebay listings admin select" on public.ebay_listings for select using (public.is_admin());
+create policy "ebay account deletion events admin select" on public.ebay_account_deletion_events
+  for select using (public.is_admin());
 
 create policy "promo codes admin all" on public.promo_codes
   for all using (public.is_admin()) with check (public.is_admin());
@@ -502,6 +516,8 @@ create index inventory_items_user_card_number_idx on public.inventory_items(user
 create index ebay_listings_user_id_idx on public.ebay_listings(user_id);
 create index ebay_listings_inventory_item_id_idx on public.ebay_listings(inventory_item_id);
 create index ebay_listings_listing_id_idx on public.ebay_listings(listing_id);
+create index ebay_account_deletion_events_received_idx on public.ebay_account_deletion_events(received_at desc);
+create index ebay_account_deletion_events_ebay_user_idx on public.ebay_account_deletion_events(ebay_user_id);
 create index app_usage_events_user_kind_created_idx on public.app_usage_events(user_id, usage_kind, created_at desc);
 create index catalog_products_search_idx on public.catalog_products using gin (to_tsvector('english', name || ' ' || coalesce(set_name, '') || ' ' || coalesce(category, '') || ' ' || tcg));
 create index catalog_offers_product_id_idx on public.catalog_offers(catalog_product_id);

@@ -9,6 +9,11 @@ type EbayTokenResponse = {
   scope?: string;
 };
 
+type EbayUserIdentityResponse = {
+  userId?: string;
+  username?: string;
+};
+
 type PublishInput = {
   accessToken: string;
   sku: string;
@@ -55,6 +60,22 @@ export async function refreshEbayAccessToken(refreshToken: string) {
     refresh_token: refreshToken,
     scope: config.scopes.join(" ")
   });
+}
+
+export async function fetchEbayUserIdentity(accessToken: string) {
+  const config = getEbayConfig();
+  const response = await fetch(`${config.identityBaseUrl}/commerce/identity/v1/user/`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(await ebayErrorMessage(response));
+  }
+
+  return response.json() as Promise<EbayUserIdentityResponse>;
 }
 
 export async function publishEbayInventoryOffer(input: PublishInput) {
