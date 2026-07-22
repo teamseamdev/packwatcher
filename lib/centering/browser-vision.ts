@@ -1,4 +1,5 @@
 import { CARD_ASPECT_RATIO } from "./geometry.ts";
+import { calibrateInnerFrameFromRgba } from "./calibration.ts";
 import type { CenteringMethod, CenteringSide, MarginMeasurement } from "./types.ts";
 import type { Point, Quad } from "../scanner/geometry.ts";
 import { orderQuadPoints, polygonArea } from "../scanner/geometry.ts";
@@ -67,19 +68,27 @@ export async function analyzeCenteringPhoto(input: {
     correctedDataUrl = cropBoundingBox(canvas, corners);
   }
 
+  const correctedImage = await loadImage(correctedDataUrl);
+  const correctedCanvas = imageToCanvas(correctedImage, correctedImage.naturalWidth || correctedImage.width, correctedImage.naturalHeight || correctedImage.height);
   const reference = input.referenceImageUrl && input.side === "front"
     ? await estimateReferenceMargins(input.referenceImageUrl)
     : null;
+  const calibrated = estimateInnerMarginsFromImage(
+    correctedCanvas,
+    input.side,
+    reference?.margins ?? null
+  );
+  blockers.push(...calibrated.blockers);
 
   return {
     corners,
     correctedDataUrl,
-    innerFrame: reference?.margins ?? estimateInnerMarginsFromImage(canvas, input.side),
+    innerFrame: calibrated.margins,
     method: reference ? "reference-aligned" : input.side === "back" ? "template-aligned" : "generic-border",
-    detectionConfidence,
+    detectionConfidence: Math.min(1, detectionConfidence * 0.64 + calibrated.confidenceScore * 0.36),
     referenceImageUsed: reference?.url ?? null,
     referenceRegistrationScore: reference?.score ?? null,
-    blockers
+    blockers: Array.from(new Set(blockers))
   };
 }
 
@@ -117,21 +126,18 @@ export function detectCardBoundaryFallback(canvas: HTMLCanvasElement): { corners
   return { corners, confidence: areaRatio > 0.2 && areaRatio < 0.9 ? 0.58 : 0.42 };
 }
 
-export function estimateInnerMarginsFromImage(canvas: HTMLCanvasElement, side: CenteringSide): MarginMeasurement {
+export function estimateInnerMarginsFromImage(canvas: HTMLCanvasElement, side: CenteringSide, referenceMargins?: MarginMeasurement | null) {
   const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) return side === "back" ? { left: 0.13, right: 0.13, top: 0.11, bottom: 0.11 } : { left: 0.085, right: 0.085, top: 0.1, bottom: 0.105 };
-  const data = context.getImageData(0, 0, canvas.width, canvas.height);
-  const left = firstStrongVerticalEdge(data.data, canvas.width, canvas.height, "left");
-  const right = firstStrongVerticalEdge(data.data, canvas.width, canvas.height, "right");
-  const top = firstStrongHorizontalEdge(data.data, canvas.width, canvas.height, "top");
-  const bottom = firstStrongHorizontalEdge(data.data, canvas.width, canvas.height, "bottom");
   const fallback = side === "back" ? { left: 0.13, right: 0.13, top: 0.11, bottom: 0.11 } : { left: 0.085, right: 0.085, top: 0.1, bottom: 0.105 };
-  return {
-    left: left ?? fallback.left,
-    right: right ?? fallback.right,
-    top: top ?? fallback.top,
-    bottom: bottom ?? fallback.bottom
-  };
+  if (!context) return { margins: fallback, confidenceScore: 0.35, blockers: ["canvas-unavailable"] };
+  const data = context.getImageData(0, 0, canvas.width, canvas.height);
+  return calibrateInnerFrameFromRgba({
+    data: data.data,
+    width: canvas.width,
+    height: canvas.height,
+    side,
+    referenceMargins
+  });
 }
 
 async function loadOpenCv(): Promise<OpenCv | null> {
@@ -241,10 +247,11 @@ async function estimateReferenceMargins(url: string) {
   try {
     const image = await loadImage(url, "anonymous");
     const canvas = imageToCanvas(image, image.naturalWidth, image.naturalHeight);
+    const calibrated = estimateInnerMarginsFromImage(canvas, "front");
     return {
       url,
-      margins: estimateInnerMarginsFromImage(canvas, "front"),
-      score: 0.72
+      margins: calibrated.margins,
+      score: Math.max(0.58, calibrated.confidenceScore)
     };
   } catch {
     return null;
@@ -285,36 +292,6 @@ function scoreQuad(corners: Quad, width: number, height: number, frameArea: numb
   return Math.max(0, Math.min(1, score));
 }
 
-function firstStrongVerticalEdge(data: Uint8ClampedArray, width: number, height: number, direction: "left" | "right") {
-  const start = direction === "left" ? Math.floor(width * 0.03) : Math.floor(width * 0.35);
-  const end = direction === "left" ? Math.floor(width * 0.35) : Math.floor(width * 0.97);
-  const step = Math.max(1, Math.floor(width / 200));
-  const xs = direction === "left" ? range(start, end, step) : range(end, start, -step);
-  for (const x of xs) {
-    let gradient = 0;
-    for (let y = Math.floor(height * 0.18); y < height * 0.82; y += 4) {
-      gradient += Math.abs(luminanceAt(data, width, x, y) - luminanceAt(data, width, clamp(x + (direction === "left" ? 4 : -4), 0, width - 1), y));
-    }
-    if (gradient / Math.max(1, height / 4) > 8) return direction === "left" ? x / width : (width - x) / width;
-  }
-  return null;
-}
-
-function firstStrongHorizontalEdge(data: Uint8ClampedArray, width: number, height: number, direction: "top" | "bottom") {
-  const start = direction === "top" ? Math.floor(height * 0.03) : Math.floor(height * 0.35);
-  const end = direction === "top" ? Math.floor(height * 0.35) : Math.floor(height * 0.97);
-  const step = Math.max(1, Math.floor(height / 200));
-  const ys = direction === "top" ? range(start, end, step) : range(end, start, -step);
-  for (const y of ys) {
-    let gradient = 0;
-    for (let x = Math.floor(width * 0.18); x < width * 0.82; x += 4) {
-      gradient += Math.abs(luminanceAt(data, width, x, y) - luminanceAt(data, width, x, clamp(y + (direction === "top" ? 4 : -4), 0, height - 1)));
-    }
-    if (gradient / Math.max(1, width / 4) > 8) return direction === "top" ? y / height : (height - y) / height;
-  }
-  return null;
-}
-
 function defaultCorners(width: number, height: number): Quad {
   const insetX = width * 0.06;
   const insetY = height * 0.04;
@@ -348,16 +325,6 @@ function loadImage(src: string, crossOrigin?: "" | "anonymous") {
 function luminanceAt(data: Uint8ClampedArray, width: number, x: number, y: number) {
   const index = (y * width + x) * 4;
   return data[index] * 0.2126 + data[index + 1] * 0.7152 + data[index + 2] * 0.0722;
-}
-
-function range(start: number, end: number, step: number) {
-  const values: number[] = [];
-  if (step > 0) {
-    for (let value = start; value <= end; value += step) values.push(value);
-  } else {
-    for (let value = start; value >= end; value += step) values.push(value);
-  }
-  return values;
 }
 
 function clamp(value: number, min: number, max: number) {

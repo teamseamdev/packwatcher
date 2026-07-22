@@ -175,8 +175,9 @@ export function CardScanner() {
   const preparedSetPackRef = useRef<PreparedSetScannerIndex | null>(null);
   const isScanningRef = useRef(false);
   const confirmationOpenRef = useRef(false);
-  const duplicateGuardRef = useRef<{ hash: string; canonicalCardId: string | null; capturedAt: number; armed: boolean }>({ hash: "", canonicalCardId: null, capturedAt: 0, armed: true });
+  const duplicateGuardRef = useRef<{ hash: string; canonicalCardId: string | null; capturedAt: number; armed: boolean; corners: Quad | null; areaRatio: number | null }>({ hash: "", canonicalCardId: null, capturedAt: 0, armed: true, corners: null, areaRatio: null });
   const noCardSinceRef = useRef<number | null>(null);
+  const rearmVisibleChangeFramesRef = useRef(0);
   const [mode, setMode] = useState<ScannerMode>("scanner");
   const [captureMode, setCaptureMode] = useState<CaptureMode>("auto");
   const [preparedSetPack, setPreparedSetPack] = useState<PreparedSetScannerIndex | null>(null);
@@ -440,7 +441,8 @@ export function CardScanner() {
       const noCardSince = noCardSinceRef.current ?? timestamp;
       noCardSinceRef.current = noCardSince;
       if (timestamp - noCardSince > SCANNER_DETECTION_CONFIG.rearmNoCardMs) {
-        duplicateGuardRef.current.armed = true;
+        duplicateGuardRef.current = { ...duplicateGuardRef.current, armed: true, corners: null, areaRatio: null };
+        rearmVisibleChangeFramesRef.current = 0;
         setScannerState("searching");
       }
       setCardReady(false);
@@ -475,6 +477,35 @@ export function CardScanner() {
     }
 
     const stableForMs = stableSinceRef.current ? timestamp - stableSinceRef.current : 0;
+    if (!duplicateGuardRef.current.armed) {
+      const changedEnough = shouldRearmForVisibleCardChange(detection, duplicateGuardRef.current);
+      rearmVisibleChangeFramesRef.current = changedEnough ? rearmVisibleChangeFramesRef.current + 1 : 0;
+      setTracking({
+        detection,
+        quality,
+        stableForMs,
+        consecutiveDetectedFrames: trackingCountersRef.current.detected,
+        consecutiveStableFrames: trackingCountersRef.current.stable,
+        multipleCards: analysis.multipleCards
+      });
+      setCardReady(false);
+      autoProgressRef.current = 0;
+      setAutoProgress(0);
+
+      if (rearmVisibleChangeFramesRef.current >= 4) {
+        duplicateGuardRef.current = { ...duplicateGuardRef.current, armed: true, corners: detection.corners, areaRatio: detection.areaRatio };
+        rearmVisibleChangeFramesRef.current = 0;
+        setNotice("Ready for next card.");
+        setScannerState("searching");
+        return;
+      }
+
+      setNotice("Remove card for next scan.");
+      setScannerState("awaiting-removal");
+      return;
+    }
+    rearmVisibleChangeFramesRef.current = 0;
+
     readinessBufferRef.current = [
       ...readinessBufferRef.current.slice(-7),
       {
@@ -578,7 +609,7 @@ export function CardScanner() {
       setScannerState("awaiting-removal");
       return null;
     }
-    duplicateGuardRef.current.armed = false;
+    duplicateGuardRef.current = { ...duplicateGuardRef.current, armed: false, corners: detection?.corners ?? null, areaRatio: detection?.areaRatio ?? null };
     setIsScanning(true);
     captureLockRef.current = true;
     setScanPhase("capturing");
@@ -594,6 +625,14 @@ export function CardScanner() {
         setScannerState("awaiting-removal");
         return null;
       }
+      duplicateGuardRef.current = {
+        ...duplicateGuardRef.current,
+        hash: fingerprint,
+        capturedAt: Date.now(),
+        armed: false,
+        corners: detection?.corners ?? duplicateGuardRef.current.corners,
+        areaRatio: detection?.areaRatio ?? duplicateGuardRef.current.areaRatio
+      };
 
       const frames = detection ? [sourceImage] : await captureCameraBurst(videoRef.current);
       const scanFailures: string[] = [];
@@ -636,7 +675,9 @@ export function CardScanner() {
         hash: fingerprint,
         canonicalCardId: card.canonicalCardId,
         capturedAt: Date.now(),
-        armed: false
+        armed: false,
+        corners: detection?.corners ?? null,
+        areaRatio: detection?.areaRatio ?? null
       };
       showScannedCard(card);
       setNotice(null);
@@ -1235,6 +1276,9 @@ export function CardScanner() {
             setNotice("Retake when ready.");
             setScannerState("searching");
             duplicateGuardRef.current.armed = true;
+            duplicateGuardRef.current.corners = null;
+            duplicateGuardRef.current.areaRatio = null;
+            rearmVisibleChangeFramesRef.current = 0;
           }}
           onClose={() => {
             setIsComplete(true);
@@ -1823,6 +1867,21 @@ function isDuplicatePhysicalCardHash(
   if (!hash || guard.armed || !guard.hash) return false;
   if (Date.now() - guard.capturedAt > SCANNER_DETECTION_CONFIG.sameCardCooldownMs && noCardSince) return false;
   return hammingDistance(hash, guard.hash) <= SCANNER_DETECTION_CONFIG.duplicateHammingDistance;
+}
+
+function shouldRearmForVisibleCardChange(
+  detection: CardDetection,
+  guard: { capturedAt: number; corners: Quad | null; areaRatio: number | null }
+) {
+  if (Date.now() - guard.capturedAt < 650) return false;
+  if (!guard.corners || guard.areaRatio === null) return Date.now() - guard.capturedAt > SCANNER_DETECTION_CONFIG.sameCardCooldownMs;
+  const frameDiagonal = Math.hypot(detection.videoWidth, detection.videoHeight);
+  const cornerMovement = averageCornerDistance(detection.corners, guard.corners) / Math.max(1, frameDiagonal);
+  const areaChange = Math.abs(detection.areaRatio - guard.areaRatio);
+  const currentCenter = quadCenter(detection.corners);
+  const capturedCenter = quadCenter(guard.corners);
+  const centerMovement = Math.hypot(currentCenter.x - capturedCenter.x, currentCenter.y - capturedCenter.y) / Math.max(1, frameDiagonal);
+  return cornerMovement > 0.13 || centerMovement > 0.11 || areaChange > 0.18;
 }
 
 function hammingDistance(left: string, right: string) {
