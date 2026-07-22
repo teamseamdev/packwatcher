@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import type { PointerEvent } from "react";
 import Link from "next/link";
 import { Camera, CheckCircle2, Eye, ImageIcon, RotateCcw, Save, ShieldAlert, Trash2 } from "lucide-react";
 import { buildCenteringAnalysis, CENTERING_DISCLAIMER } from "@/lib/centering/grading-standards";
@@ -49,6 +50,7 @@ type CenteringProcessResponse = {
 
 type SideCapture = {
   side: CenteringSide;
+  sourceDataUrl: string;
   dataUrl: string;
   correctedDataUrl: string;
   width: number;
@@ -117,9 +119,9 @@ export function CenteringCheckFlow({
         sleeveToploaderWarning: sleeveWarning,
         result,
         images: [
-          front ? { side: "front", kind: "original", dataUrl: front.dataUrl } : null,
+          front ? { side: "front", kind: "original", dataUrl: front.sourceDataUrl } : null,
           front ? { side: "front", kind: "corrected", dataUrl: front.correctedDataUrl } : null,
-          back ? { side: "back", kind: "original", dataUrl: back.dataUrl } : null,
+          back ? { side: "back", kind: "original", dataUrl: back.sourceDataUrl } : null,
           back ? { side: "back", kind: "corrected", dataUrl: back.correctedDataUrl } : null
         ].filter(Boolean)
       })
@@ -296,13 +298,17 @@ function ImageCaptureButton({
         side,
         referenceImageUrl
       });
+      const correctedImage = await loadImage(detected.correctedDataUrl);
+      const correctedWidth = correctedImage.naturalWidth || correctedImage.width;
+      const correctedHeight = correctedImage.naturalHeight || correctedImage.height;
       onCapture({
         side,
-        dataUrl: prepared.dataUrl,
+        sourceDataUrl: prepared.dataUrl,
+        dataUrl: detected.correctedDataUrl,
         correctedDataUrl: detected.correctedDataUrl,
-        width: detected.width,
-        height: detected.height,
-        corners: detected.corners,
+        width: correctedWidth,
+        height: correctedHeight,
+        corners: correctedImageCorners(correctedWidth, correctedHeight),
         innerFrame: detected.innerFrame,
         detectionMethod: detected.method,
         detectionConfidence: detected.detectionConfidence,
@@ -321,6 +327,7 @@ function ImageCaptureButton({
       }
       onCapture({
         side,
+        sourceDataUrl: prepared.dataUrl,
         dataUrl: prepared.dataUrl,
         correctedDataUrl: prepared.dataUrl,
         width: prepared.width,
@@ -361,6 +368,7 @@ function ImageCaptureButton({
 
 function CenteringSideEditor({ capture, onChange }: { capture: SideCapture; onChange: (capture: SideCapture) => void }) {
   const [activeCorner, setActiveCorner] = useState<number | null>(null);
+  const [activeMargin, setActiveMargin] = useState<keyof MarginMeasurement | null>(null);
   const lines = marginLinesFromPercent(capture.innerFrame, capture.width, capture.height);
 
   function updateCorner(index: number, point: Point) {
@@ -369,7 +377,34 @@ function CenteringSideEditor({ capture, onChange }: { capture: SideCapture; onCh
   }
 
   function updateMargin(key: keyof MarginMeasurement, value: number) {
-    onChange({ ...capture, innerFrame: { ...capture.innerFrame, [key]: value }, userAdjusted: true });
+    onChange({ ...capture, innerFrame: { ...capture.innerFrame, [key]: clamp(value, 0.01, 0.35) }, userAdjusted: true });
+  }
+
+  function updateMarginFromPoint(key: keyof MarginMeasurement, point: Point) {
+    switch (key) {
+      case "left":
+        updateMargin(key, point.x / capture.width);
+        return;
+      case "right":
+        updateMargin(key, (capture.width - point.x) / capture.width);
+        return;
+      case "top":
+        updateMargin(key, point.y / capture.height);
+        return;
+      case "bottom":
+        updateMargin(key, (capture.height - point.y) / capture.height);
+        return;
+    }
+  }
+
+  function eventPoint(event: PointerEvent<SVGSVGElement>): Point | null {
+    const svg = event.currentTarget;
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    return {
+      x: clamp((event.clientX - rect.left) / rect.width * capture.width, 0, capture.width),
+      y: clamp((event.clientY - rect.top) / rect.height * capture.height, 0, capture.height)
+    };
   }
 
   return (
@@ -377,9 +412,52 @@ function CenteringSideEditor({ capture, onChange }: { capture: SideCapture; onCh
       <div className="relative overflow-hidden rounded-lg border border-white/10 bg-slate-950">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={capture.dataUrl} alt={`${capture.side} card capture`} className="block w-full select-none" draggable={false} />
-        <svg className="absolute inset-0 h-full w-full touch-none" viewBox={`0 0 ${capture.width} ${capture.height}`} preserveAspectRatio="none">
+        <svg
+          className="absolute inset-0 h-full w-full touch-none"
+          viewBox={`0 0 ${capture.width} ${capture.height}`}
+          preserveAspectRatio="none"
+          onPointerMove={(event) => {
+            if (!activeMargin) return;
+            const point = eventPoint(event);
+            if (!point) return;
+            updateMarginFromPoint(activeMargin, point);
+          }}
+          onPointerUp={() => setActiveMargin(null)}
+          onPointerCancel={() => setActiveMargin(null)}
+        >
           <polygon points={capture.corners.map((point) => `${point.x},${point.y}`).join(" ")} fill="rgba(250,204,21,0.08)" stroke="rgb(250,204,21)" strokeWidth={Math.max(4, capture.width * 0.006)} />
           <rect x={lines.leftX} y={lines.topY} width={lines.rightX - lines.leftX} height={lines.bottomY - lines.topY} fill="rgba(34,211,238,0.08)" stroke="rgb(34,211,238)" strokeDasharray="12 10" strokeWidth={Math.max(3, capture.width * 0.004)} />
+          {([
+            ["left", lines.leftX, lines.topY, lines.leftX, lines.bottomY],
+            ["right", lines.rightX, lines.topY, lines.rightX, lines.bottomY],
+            ["top", lines.leftX, lines.topY, lines.rightX, lines.topY],
+            ["bottom", lines.leftX, lines.bottomY, lines.rightX, lines.bottomY]
+          ] as const).map(([key, x1, y1, x2, y2]) => (
+            <line
+              key={key}
+              x1={x1}
+              y1={y1}
+              x2={x2}
+              y2={y2}
+              stroke="rgb(34,211,238)"
+              strokeLinecap="round"
+              strokeOpacity={activeMargin === key ? 0.95 : 0.35}
+              strokeWidth={Math.max(16, capture.width * 0.022)}
+              onPointerDown={(event) => {
+                event.currentTarget.setPointerCapture(event.pointerId);
+                setActiveCorner(null);
+                setActiveMargin(key);
+              }}
+            />
+          ))}
+          {[
+            [lines.leftX, lines.topY],
+            [lines.rightX, lines.topY],
+            [lines.rightX, lines.bottomY],
+            [lines.leftX, lines.bottomY]
+          ].map(([x, y], index) => (
+            <circle key={`margin-${index}`} cx={x} cy={y} r={Math.max(8, capture.width * 0.011)} fill="rgb(34,211,238)" />
+          ))}
           {capture.corners.map((point, index) => (
             <circle
               key={index}
@@ -407,16 +485,16 @@ function CenteringSideEditor({ capture, onChange }: { capture: SideCapture; onCh
             />
           ))}
         </svg>
-        {activeCorner !== null ? (
+        {activeCorner !== null || activeMargin !== null ? (
           <div className="absolute left-3 top-3 rounded-lg border border-cyan-300/30 bg-slate-950/90 px-3 py-2 text-xs text-cyan-100">
-            Align handle to the physical card corner.
+            {activeMargin ? "Drag the cyan line to the printed frame." : "Align handle to the physical card corner."}
           </div>
         ) : null}
       </div>
 
       <div className="rounded-lg border border-white/10 bg-slate-950/50 p-3">
         <p className="text-sm font-bold text-white">Inner printed-frame lines</p>
-        <p className="mt-1 text-xs text-slate-500">Adjust these to the printed design boundary, not the outer card edge.</p>
+        <p className="mt-1 text-xs text-slate-500">Drag the cyan outline to the printed design boundary, or fine-tune with the sliders.</p>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           {(["left", "right", "top", "bottom"] as const).map((key) => (
             <label key={key} className="grid gap-1">
@@ -501,6 +579,17 @@ function analyzeCapture(capture: SideCapture) {
 function initialCorners(width: number, height: number): Quad {
   const insetX = width * 0.06;
   const insetY = height * 0.04;
+  return [
+    { x: insetX, y: insetY },
+    { x: width - insetX, y: insetY },
+    { x: width - insetX, y: height - insetY },
+    { x: insetX, y: height - insetY }
+  ];
+}
+
+function correctedImageCorners(width: number, height: number): Quad {
+  const insetX = width * 0.025;
+  const insetY = height * 0.025;
   return [
     { x: insetX, y: insetY },
     { x: width - insetX, y: insetY },
