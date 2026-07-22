@@ -48,6 +48,8 @@ type SideCapture = {
 
 const defaultFrontMargins = { left: 0.085, right: 0.085, top: 0.1, bottom: 0.105 };
 const defaultBackMargins = { left: 0.13, right: 0.13, top: 0.11, bottom: 0.11 };
+const CENTERING_MAX_CAPTURE_DIMENSION = 1200;
+const CENTERING_DETECTION_TIMEOUT_MS = 12000;
 
 export function CenteringCheckFlow({
   inventoryItem,
@@ -267,22 +269,24 @@ function ImageCaptureButton({
     setDetecting(true);
     onStatus(`Detecting ${side} card boundary...`);
     onError(null);
+    let prepared: { dataUrl: string; width: number; height: number } | null = null;
     try {
-      const dataUrl = await readFileDataUrl(file);
-      const size = await imageSize(dataUrl);
-      const detected = await analyzeCenteringPhoto({
-        dataUrl,
+      const rawDataUrl = await readFileDataUrl(file);
+      prepared = await prepareCenteringDataUrl(rawDataUrl);
+      await nextFrame();
+      const detected = await withTimeout(analyzeCenteringPhoto({
+        dataUrl: prepared.dataUrl,
         side,
-        width: size.width,
-        height: size.height,
+        width: prepared.width,
+        height: prepared.height,
         referenceImageUrl
-      });
+      }), CENTERING_DETECTION_TIMEOUT_MS);
       onCapture({
         side,
-        dataUrl,
+        dataUrl: prepared.dataUrl,
         correctedDataUrl: detected.correctedDataUrl,
-        width: size.width,
-        height: size.height,
+        width: detected.width,
+        height: detected.height,
         corners: detected.corners,
         innerFrame: detected.innerFrame,
         detectionMethod: detected.method,
@@ -296,15 +300,17 @@ function ImageCaptureButton({
         ? "Boundary detected. Reference image was used to initialize the front frame."
         : "Boundary detected. Review corners and printed-frame lines before analysis.");
     } catch (error) {
-      const dataUrl = await readFileDataUrl(file);
-      const size = await imageSize(dataUrl);
+      if (!prepared) {
+        const rawDataUrl = await readFileDataUrl(file);
+        prepared = await prepareCenteringDataUrl(rawDataUrl);
+      }
       onCapture({
         side,
-        dataUrl,
-        correctedDataUrl: dataUrl,
-        width: size.width,
-        height: size.height,
-        corners: initialCorners(size.width, size.height),
+        dataUrl: prepared.dataUrl,
+        correctedDataUrl: prepared.dataUrl,
+        width: prepared.width,
+        height: prepared.height,
+        corners: initialCorners(prepared.width, prepared.height),
         innerFrame: side === "front" ? defaultFrontMargins : defaultBackMargins,
         detectionMethod: "manual",
         detectionConfidence: 0.35,
@@ -316,6 +322,7 @@ function ImageCaptureButton({
       onError(error instanceof Error ? `Automatic detection failed: ${error.message}. Adjust corners manually.` : "Automatic detection failed. Adjust corners manually.");
     } finally {
       setDetecting(false);
+      if (inputRef.current) inputRef.current.value = "";
     }
   }
 
@@ -503,6 +510,57 @@ function imageSize(dataUrl: string) {
     image.onerror = () => reject(new Error("Could not decode image."));
     image.src = dataUrl;
   });
+}
+
+async function prepareCenteringDataUrl(dataUrl: string) {
+  const image = await loadImage(dataUrl);
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  const longest = Math.max(width, height);
+  if (longest <= CENTERING_MAX_CAPTURE_DIMENSION) return { dataUrl, width, height };
+  const scale = CENTERING_MAX_CAPTURE_DIMENSION / longest;
+  const outputWidth = Math.max(1, Math.round(width * scale));
+  const outputHeight = Math.max(1, Math.round(height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = outputWidth;
+  canvas.height = outputHeight;
+  const context = canvas.getContext("2d");
+  if (!context) return { dataUrl, width, height };
+  context.drawImage(image, 0, 0, outputWidth, outputHeight);
+  return {
+    dataUrl: canvas.toDataURL("image/jpeg", 0.9),
+    width: outputWidth,
+    height: outputHeight
+  };
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not decode image."));
+    image.src = src;
+  });
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = window.setTimeout(() => reject(new Error("Detection took too long. Adjust corners manually.")), timeoutMs);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        window.clearTimeout(timeout);
+        reject(error);
+      }
+    );
+  });
+}
+
+function nextFrame() {
+  return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
 function tabClass(active: boolean) {

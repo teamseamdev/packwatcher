@@ -9,6 +9,8 @@ type OpenCv = Record<string, any>;
 export type CenteringVisionResult = {
   corners: Quad;
   correctedDataUrl: string;
+  width: number;
+  height: number;
   innerFrame: MarginMeasurement;
   method: CenteringMethod;
   detectionConfidence: number;
@@ -29,7 +31,8 @@ export async function analyzeCenteringPhoto(input: {
   referenceImageUrl?: string | null;
 }): Promise<CenteringVisionResult> {
   const image = await loadImage(input.dataUrl);
-  const canvas = imageToCanvas(image, input.width, input.height);
+  const analysisSize = fitImageSize(input.width, input.height, 1200);
+  const canvas = imageToCanvas(image, analysisSize.width, analysisSize.height);
   const cv = await loadOpenCv();
   const blockers: string[] = [];
   let corners: Quad | null = null;
@@ -83,6 +86,8 @@ export async function analyzeCenteringPhoto(input: {
   return {
     corners,
     correctedDataUrl,
+    width: analysisSize.width,
+    height: analysisSize.height,
     innerFrame: calibrated.margins,
     method: reference ? "reference-aligned" : input.side === "back" ? "template-aligned" : "generic-border",
     detectionConfidence: Math.min(1, detectionConfidence * 0.64 + calibrated.confidenceScore * 0.36),
@@ -310,6 +315,17 @@ function imageToCanvas(image: HTMLImageElement, width: number, height: number) {
   const context = canvas.getContext("2d", { willReadFrequently: true });
   context?.drawImage(image, 0, 0, width, height);
   return canvas;
+}
+
+function fitImageSize(width: number, height: number, maxDimension: number) {
+  const longest = Math.max(width, height);
+  if (!Number.isFinite(longest) || longest <= 0) return { width: 1000, height: 1400 };
+  if (longest <= maxDimension) return { width, height };
+  const scale = maxDimension / longest;
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale))
+  };
 }
 
 function loadImage(src: string, crossOrigin?: "" | "anonymous") {
