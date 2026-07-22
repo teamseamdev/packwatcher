@@ -6,6 +6,7 @@ import { isGoogleUrl, resolveRetailerUrl } from "../lib/catalog/retailer-url.ts"
 import { FOUNDER_CARD_SCAN_LIMIT, FOUNDER_MEMBERSHIP_LIMIT, FOUNDER_VIDEO_SCAN_LIMIT, usageLimitForPlan } from "../lib/plans.ts";
 import { compareCatalogOffers, distanceLabel, offerDistanceMiles } from "../lib/catalog/offer-ranking.ts";
 import { distanceMiles } from "../lib/location/distance.ts";
+import { createConfiguredShoppingSearchProvider } from "../lib/retailers/shopping-search/connector.ts";
 import { matchProduct } from "../lib/retailers/shared/product-matching.ts";
 import { freshnessLabel, normalizeAvailabilityStatus, normalizeTitle, normalizeUpc } from "../lib/retailers/shared/normalize.ts";
 import { notificationEventKey, shouldSendRestockAlert } from "../lib/retailers/shared/restock-events.ts";
@@ -259,6 +260,51 @@ test("resolves shopping provider Google URLs to retailer URLs", () => {
   assert.equal(embedded, "https://www.acehardware.com/departments/toys-and-games/pokemon");
 });
 
+test("SerpAPI provider normalizes Google Shopping, Walmart, Amazon, and eBay search engines", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalProvider = process.env.SHOPPING_SEARCH_PROVIDER;
+  const originalUrl = process.env.SHOPPING_SEARCH_API_URL;
+  const originalKey = process.env.SHOPPING_SEARCH_API_KEY;
+  const originalEngines = process.env.SERPAPI_SEARCH_ENGINES;
+
+  process.env.SHOPPING_SEARCH_PROVIDER = "serpapi";
+  process.env.SHOPPING_SEARCH_API_URL = "https://serpapi.test/search";
+  process.env.SHOPPING_SEARCH_API_KEY = "test-key";
+  process.env.SERPAPI_SEARCH_ENGINES = "google_shopping,walmart,amazon,ebay";
+
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    const engine = url.searchParams.get("engine");
+    const payload = engine === "google_shopping" ? {
+      shopping_results: [{ title: "Pokemon Booster Bundle", source: "Target", link: "https://target.com/p/test", extracted_price: 49.99, thumbnail: "https://img.test/a.jpg", delivery: "Free shipping" }]
+    } : engine === "walmart" ? {
+      organic_results: [{ title: "Pokemon Elite Trainer Box", product_page_url: "https://www.walmart.com/ip/123", extracted_price: 54.99, thumbnail: "https://img.test/b.jpg", primary_offer: { availability: "In stock" } }]
+    } : engine === "amazon" ? {
+      organic_results: [{ title: "Pokemon Booster Pack", link_clean: "https://www.amazon.com/dp/B000TEST", extracted_price: 6.99, stock: "Only 3 left in stock", delivery: ["FREE delivery Tomorrow"], prime: true }]
+    } : {
+      organic_results: [{ title: "Pokemon Collection Box", link: "https://www.ebay.com/itm/123", price: "$29.99", shipping: "Free shipping", condition: "New", seller: "card-shop" }]
+    };
+    return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const provider = createConfiguredShoppingSearchProvider();
+    assert.ok(provider);
+    const results = await provider.searchProducts("pokemon cards", { postalCode: "15237" });
+    assert.equal(results.length, 4);
+    assert.deepEqual(results.map((result) => result.provider).sort(), ["serpapi:amazon", "serpapi:ebay", "serpapi:google_shopping", "serpapi:walmart"]);
+    assert.equal(results.find((result) => result.retailer === "Walmart")?.price, 54.99);
+    assert.equal(results.find((result) => result.retailer === "Amazon")?.shippingText, "FREE delivery Tomorrow");
+    assert.equal(results.find((result) => result.retailer === "eBay")?.sellerName, "card-shop");
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnv("SHOPPING_SEARCH_PROVIDER", originalProvider);
+    restoreEnv("SHOPPING_SEARCH_API_URL", originalUrl);
+    restoreEnv("SHOPPING_SEARCH_API_KEY", originalKey);
+    restoreEnv("SERPAPI_SEARCH_ENGINES", originalEngines);
+  }
+});
+
 test("gives admins founder-level usage without using founder membership spots", () => {
   assert.equal(usageLimitForPlan("admin", "card_scan"), FOUNDER_CARD_SCAN_LIMIT);
   assert.equal(usageLimitForPlan("admin", "video_scan"), FOUNDER_VIDEO_SCAN_LIMIT);
@@ -266,3 +312,11 @@ test("gives admins founder-level usage without using founder membership spots", 
   assert.equal(usageLimitForPlan("founder", "video_scan"), FOUNDER_VIDEO_SCAN_LIMIT);
   assert.equal(FOUNDER_MEMBERSHIP_LIMIT, 100);
 });
+
+function restoreEnv(key: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+}
