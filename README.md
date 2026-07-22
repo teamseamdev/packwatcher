@@ -195,6 +195,26 @@ To enable Sentry in Vercel:
 
 Captured categories include scanner failures, centering failures, OpenAI quota/errors, retailer discovery and monitor failures, push notification failures, Stripe webhook failures, and app-level React route errors. Metadata is sanitized before it is sent to Sentry; tokens, cookies, push keys, signatures, and large image payloads are redacted or omitted.
 
+After deployment, verify the production monitoring path with the protected smoke-test endpoint:
+
+```bash
+curl -X POST "https://packwatcher.vercel.app/api/monitoring/test" \
+  -H "content-type: application/json" \
+  -H "x-admin-secret: $ADMIN_CHECK_SECRET" \
+  -d '{"all":true}'
+```
+
+The response includes a `requestId`. In Sentry, search for `monitoring-smoke-test` or that `requestId` and confirm events appear for:
+
+- `scanner`
+- `openai`
+- `retailer`
+- `stripe`
+- `ebay`
+- `notification`
+
+The endpoint also writes the same events to `app_events`, so the Admin page should show them even if Sentry is not configured correctly.
+
 ## Supabase Setup
 
 1. Create a Supabase project.
