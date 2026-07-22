@@ -213,7 +213,7 @@ export function CatalogOfferPicker({
         </button>
       </div>
 
-      <p className="mt-2 text-xs text-slate-500">ZIP or Locate me searches with your location, prioritizes nearby pickup, and separates shipping options outside the local list.</p>
+      <p className="mt-2 text-xs text-slate-500">ZIP or Locate me searches through the configured shopping provider with your location, prioritizes nearby pickup, and separates shipping options outside the local list.</p>
       {message ? <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">{message}</p> : null}
 
       <div className="scroll-panel mt-3 grid max-h-[64vh] gap-4 pr-1">

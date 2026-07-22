@@ -77,7 +77,8 @@ export async function POST(request: Request) {
     const imported = await importPokemonFromRetailerSearch({
       query,
       postalCode,
-      perRetailerLimit: Number(process.env.USER_DISCOVERY_RESULT_LIMIT ?? process.env.RETAILER_SEARCH_LIMIT ?? 8)
+      perRetailerLimit: Number(process.env.USER_DISCOVERY_RESULT_LIMIT ?? process.env.RETAILER_SEARCH_LIMIT ?? 8),
+      sourceKeys: ["shopping-search"]
     });
     if (imported.errors.length) {
       await logAppEvent({
