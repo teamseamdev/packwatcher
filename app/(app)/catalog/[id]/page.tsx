@@ -18,7 +18,7 @@ function offerStatus(offer: CatalogOffer) {
 
 export default async function CatalogProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase, user } = await requireProfile();
+  const { supabase, user, profile } = await requireProfile();
   const [{ data: productRow }, { data: offerRows }, { data: alert }] = await Promise.all([
     supabase.from("catalog_products").select("*").eq("id", id).maybeSingle(),
     supabase
@@ -35,7 +35,7 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
   const product = productRow as CatalogProduct;
   const offers = ((offerRows ?? []) as CatalogOffer[])
     .filter((offer) => offer.active !== false)
-    .sort((a, b) => compareCatalogOffers(a, b));
+    .sort((a, b) => compareCatalogOffers(a, b, profile?.postal_code));
   const priceSummary = aggregatePrices(offers.map((offer) => ({
     retailerProductId: offer.retailer_product_id ?? offer.id,
     retailer: offer.retailer ?? offer.store_name,
@@ -117,14 +117,14 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
                 <p className="mt-5 text-2xl font-black text-white">{optionalCurrency(offer.price ?? offer.last_price)}</p>
                 {metadataText(offer, "shippingText") ? <p className="mt-2 text-sm text-slate-300">Shipping: {metadataText(offer, "shippingText")}</p> : null}
                 {metadataText(offer, "pickupText") ? <p className="mt-1 text-sm text-slate-300">Pickup: {metadataText(offer, "pickupText")}</p> : null}
-                {distanceLabel(offer) ? <p className="mt-1 text-sm text-slate-300">Distance: {distanceLabel(offer)}</p> : null}
+                {distanceLabel(offer, profile?.postal_code) ? <p className="mt-1 text-sm text-slate-300">Distance: {distanceLabel(offer, profile?.postal_code)}</p> : null}
                 {fulfillmentText(offer) ? <p className="mt-2 text-xs text-slate-500">{fulfillmentText(offer)}</p> : null}
                 <p className="mt-2 text-xs font-semibold text-slate-500">{verificationLabel(offer)}</p>
                 <p className="mt-2 text-xs text-slate-500">
                   Last checked {offer.last_checked_at ? new Date(offer.last_checked_at).toLocaleString() : "not yet"}
                 </p>
                 <a
-                  href={resolveRetailerUrl(offer.url, offer.retailer ?? offer.store_name, offer.title ?? product.title ?? product.name)}
+                  href={resolveRetailerUrl(offer.url, offer.retailer ?? offer.store_name, offer.title ?? product.title ?? product.name, profile?.postal_code)}
                   target="_blank"
                   rel="noreferrer"
                   className="mt-5 inline-flex h-10 items-center gap-2 rounded-lg border border-white/10 px-4 text-sm font-semibold text-white"

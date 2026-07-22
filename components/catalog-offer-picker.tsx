@@ -270,7 +270,7 @@ export function CatalogOfferPicker({
                         </Link>
                       ) : null}
                       <a
-                        href={resolveRetailerUrl(offer.url, offer.retailer ?? offer.store_name, offer.title ?? product?.title ?? product?.name)}
+                        href={resolveRetailerUrl(offer.url, offer.retailer ?? offer.store_name, offer.title ?? product?.title ?? product?.name, postalCode)}
                         target="_blank"
                         rel="noreferrer"
                         className="inline-flex h-9 items-center gap-1 rounded-lg border border-white/10 px-3 text-xs font-semibold text-white"

@@ -327,6 +327,22 @@ test("resolves shopping provider Google URLs to retailer URLs", () => {
   assert.equal(embedded, "https://www.acehardware.com/departments/toys-and-games/pokemon");
 });
 
+test("adds ZIP hints to retailer search and direct product URLs when supported", () => {
+  const title = "Pokemon Mega Evolution Chaos Rising Booster Pack";
+  assert.equal(
+    resolveRetailerUrl("https://www.google.com/shopping/product/123", "GameStop", title, "15237"),
+    "https://www.gamestop.com/search/?q=Pokemon%20Mega%20Evolution%20Chaos%20Rising%20Booster%20Pack&postalCode=15237"
+  );
+  assert.equal(
+    resolveRetailerUrl("https://www.walmart.com/ip/123", "Walmart", title, "15237"),
+    "https://www.walmart.com/ip/123?location=15237"
+  );
+  assert.equal(
+    resolveRetailerUrl("https://www.ebay.com/itm/123", "eBay", title, "15237"),
+    "https://www.ebay.com/itm/123?_stpos=15237"
+  );
+});
+
 test("SerpAPI provider normalizes Google Shopping, Walmart, Amazon, and eBay search engines", async () => {
   const originalFetch = globalThis.fetch;
   const originalProvider = process.env.SHOPPING_SEARCH_PROVIDER;

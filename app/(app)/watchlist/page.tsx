@@ -132,7 +132,7 @@ export default async function WatchlistPage() {
                                 {fulfillmentLabel(offer)}
                               </span>
                               <a
-                                href={resolveRetailerUrl(offer.url, offer.retailer ?? offer.store_name, offer.title ?? related.title ?? related.name)}
+                                href={resolveRetailerUrl(offer.url, offer.retailer ?? offer.store_name, offer.title ?? related.title ?? related.name, profile?.postal_code)}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="inline-flex h-8 items-center gap-1 rounded-lg border border-white/10 px-2 text-xs text-slate-200"

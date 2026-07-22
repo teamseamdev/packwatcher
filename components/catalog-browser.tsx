@@ -70,10 +70,10 @@ function featuredScore(group: CatalogProductGroup) {
   return 10;
 }
 
-export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGroup[]; isAdmin: boolean }) {
+export function CatalogBrowser({ groups, isAdmin, defaultPostalCode = "" }: { groups: CatalogProductGroup[]; isAdmin: boolean; defaultPostalCode?: string | null }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
-  const [postalCode, setPostalCode] = useState("");
+  const [postalCode, setPostalCode] = useState(defaultPostalCode ?? "");
   const [filter, setFilter] = useState<CatalogFilter>("all");
   const [expandedId, setExpandedId] = useState<string | null>(groups[0]?.product.id ?? null);
   const [message, setMessage] = useState("");
@@ -358,7 +358,7 @@ export function CatalogBrowser({ groups, isAdmin }: { groups: CatalogProductGrou
                               {fulfillmentLabel(item)}
                             </span>
                             <a
-                              href={resolveRetailerUrl(item.url, item.retailer ?? item.store_name, item.title ?? group.product.title ?? group.product.name)}
+                              href={resolveRetailerUrl(item.url, item.retailer ?? item.store_name, item.title ?? group.product.title ?? group.product.name, postalCode)}
                               target="_blank"
                               rel="noreferrer"
                               className="inline-flex h-8 items-center gap-1 rounded-lg border border-white/10 px-2 text-xs text-slate-200"
