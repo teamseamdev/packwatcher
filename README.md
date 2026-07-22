@@ -78,6 +78,18 @@ EBAY_RU_NAME=
 EBAY_TOKEN_ENCRYPTION_KEY=
 EBAY_MARKETPLACE_ID=EBAY_US
 EBAY_SCOPES=https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account
+NEXT_PUBLIC_SENTRY_DSN=
+SENTRY_DSN=
+SENTRY_ORG=
+SENTRY_PROJECT=
+SENTRY_AUTH_TOKEN=
+SENTRY_ENVIRONMENT=
+SENTRY_TRACES_SAMPLE_RATE=0.1
+SENTRY_PROFILES_SAMPLE_RATE=0
+NEXT_PUBLIC_SENTRY_ENVIRONMENT=
+NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=0.1
+NEXT_PUBLIC_SENTRY_REPLAYS_SESSION_SAMPLE_RATE=0
+NEXT_PUBLIC_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE=0.2
 ```
 
 `FFMPEG_PATH` is optional when `ffmpeg` is already available on your system `PATH`. On Windows, install FFmpeg and set this to the full binary path if needed, for example `C:\ffmpeg\bin\ffmpeg.exe`.
@@ -119,6 +131,21 @@ How to test:
 6. Click `Publish and open eBay listing`.
 
 If eBay rejects the listing, PackWatcher stores the failed attempt and displays the eBay error on the listing draft page. Common failures are missing business policies, missing inventory location, invalid category, missing card image, or seller account restrictions.
+
+## Production Monitoring
+
+PackWatcher uses `@sentry/nextjs` as an optional external monitoring layer. Without a Sentry DSN, the app continues to run and still writes internal warning/error records to `app_events`.
+
+To enable Sentry in Vercel:
+
+1. Create a Sentry project for PackWatcher, using the Next.js platform.
+2. Add `NEXT_PUBLIC_SENTRY_DSN` from Sentry's client DSN.
+3. Add `SENTRY_DSN` with the same DSN for server-side capture, or leave it blank to reuse `NEXT_PUBLIC_SENTRY_DSN`.
+4. Add `SENTRY_ORG` and `SENTRY_PROJECT` so source maps can be associated with the right Sentry project.
+5. Add `SENTRY_AUTH_TOKEN` if you want production source maps uploaded during Vercel builds.
+6. Optional: set `SENTRY_ENVIRONMENT=production` and `NEXT_PUBLIC_SENTRY_ENVIRONMENT=production`.
+
+Captured categories include scanner failures, centering failures, OpenAI quota/errors, retailer discovery and monitor failures, push notification failures, Stripe webhook failures, and app-level React route errors. Metadata is sanitized before it is sent to Sentry; tokens, cookies, push keys, signatures, and large image payloads are redacted or omitted.
 
 ## Supabase Setup
 

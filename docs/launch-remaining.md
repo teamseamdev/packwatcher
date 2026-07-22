@@ -19,6 +19,10 @@ Completed launch-readiness items:
   - The calibration engine uses front and back profiles, edge-profile smoothing, contrast scoring, light/glare blockers, and reference-guided fallback for low-contrast full-art style fronts.
   - Tests cover modern front borders, Pokemon backs, low-contrast/full-art reference guidance, and unmeasurable edge failures.
   - The scanner now rearms after a successful scan when the visible card changes, not only when detection drops to no card, which avoids getting stuck in the post-scan detecting/removal state.
+- Production monitoring:
+  - `@sentry/nextjs` is wired for client, server, edge, route error boundaries, and global errors.
+  - Existing `app_events` warning/error logs are mirrored into Sentry with sanitized metadata.
+  - Sentry remains optional; PackWatcher continues to run with internal logs when no DSN is configured.
 
 Remaining active launch work:
 
@@ -28,8 +32,8 @@ Remaining active launch work:
 2. Notification reliability
    - Test iOS PWA, Android, desktop push, restock dedupe, and cooldowns in production.
 
-3. Production monitoring
-   - Add Sentry or equivalent for scanner, retailer sync, Stripe webhook, notification, and OpenAI errors.
+3. Production monitoring configuration
+   - Create the Sentry project and add the Sentry DSN/source-map environment variables in Vercel.
 
 4. Video scanning
    - Keep paused until live scanner, inventory, and centering flows are stable.

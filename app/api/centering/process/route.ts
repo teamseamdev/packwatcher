@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { processCenteringImage } from "@/lib/centering/server-processing";
+import { errorMetadata, logAppEvent } from "@/lib/monitoring/log";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -43,6 +44,18 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, result });
   } catch (error) {
+    await logAppEvent({
+      category: "scanner",
+      severity: "warn",
+      message: "Centering photo server processing failed",
+      userId: user.id,
+      metadata: {
+        ...errorMetadata(error),
+        side: parsed.data.side,
+        hasReferenceImage: Boolean(parsed.data.referenceImageUrl),
+        imageBytes: decoded.buffer.byteLength
+      }
+    });
     return NextResponse.json({
       ok: false,
       code: "CENTERING_CARD_NOT_RECOGNIZED",

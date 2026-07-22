@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/auth";
 import { publishEbayInventoryOffer, refreshEbayAccessToken } from "@/lib/ebay/client";
 import { ebayListingUrl } from "@/lib/ebay/config";
 import { decryptEbayToken } from "@/lib/ebay/token-crypto";
+import { errorMetadata, logAppEvent } from "@/lib/monitoring/log";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { InventoryItem } from "@/lib/types";
 
@@ -105,6 +106,18 @@ export async function publishInventoryItemToEbay(formData: FormData) {
       quantity: parsed.quantity,
       payload,
       error_message: message
+    });
+    await logAppEvent({
+      category: "ebay",
+      severity: "error",
+      message: "eBay listing publish failed",
+      userId: user.id,
+      metadata: {
+        ...errorMetadata(error),
+        inventoryItemId: item.id,
+        marketplaceId: parsed.marketplace_id,
+        categoryId: parsed.category_id
+      }
     });
     throw new Error(message);
   }
