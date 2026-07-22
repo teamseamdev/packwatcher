@@ -29,11 +29,12 @@ export async function analyzeCenteringPhoto(input: {
   width: number;
   height: number;
   referenceImageUrl?: string | null;
+  useOpenCv?: boolean;
 }): Promise<CenteringVisionResult> {
   const image = await loadImage(input.dataUrl);
-  const analysisSize = fitImageSize(input.width, input.height, 1200);
+  const analysisSize = fitImageSize(input.width, input.height, 900);
   const canvas = imageToCanvas(image, analysisSize.width, analysisSize.height);
-  const cv = await loadOpenCv();
+  const cv = input.useOpenCv === false ? null : await loadOpenCv();
   const blockers: string[] = [];
   let corners: Quad | null = null;
   let detectionConfidence = 0.55;
@@ -49,7 +50,7 @@ export async function analyzeCenteringPhoto(input: {
       blockers.push("opencv-detection-failed");
     }
   } else {
-    blockers.push("opencv-unavailable");
+    blockers.push(input.useOpenCv === false ? "fast-mobile-boundary-mode" : "opencv-unavailable");
   }
 
   if (!corners) {

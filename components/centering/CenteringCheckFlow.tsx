@@ -48,8 +48,8 @@ type SideCapture = {
 
 const defaultFrontMargins = { left: 0.085, right: 0.085, top: 0.1, bottom: 0.105 };
 const defaultBackMargins = { left: 0.13, right: 0.13, top: 0.11, bottom: 0.11 };
-const CENTERING_MAX_CAPTURE_DIMENSION = 1200;
-const CENTERING_DETECTION_TIMEOUT_MS = 12000;
+const CENTERING_MAX_CAPTURE_DIMENSION = 900;
+const CENTERING_DETECTION_TIMEOUT_MS = 6000;
 
 export function CenteringCheckFlow({
   inventoryItem,
@@ -274,12 +274,32 @@ function ImageCaptureButton({
       const rawDataUrl = await readFileDataUrl(file);
       prepared = await prepareCenteringDataUrl(rawDataUrl);
       await nextFrame();
+      if (!shouldAutoDetectOnCapture()) {
+        onCapture({
+          side,
+          dataUrl: prepared.dataUrl,
+          correctedDataUrl: prepared.dataUrl,
+          width: prepared.width,
+          height: prepared.height,
+          corners: initialCorners(prepared.width, prepared.height),
+          innerFrame: side === "front" ? defaultFrontMargins : defaultBackMargins,
+          detectionMethod: "manual",
+          detectionConfidence: 0.5,
+          referenceImageUsed: null,
+          referenceRegistrationScore: null,
+          blockers: ["manual-corner-review-required"],
+          userAdjusted: true
+        });
+        onStatus("Photo loaded. Adjust the card corners and printed-frame lines, then analyze centering.");
+        return;
+      }
       const detected = await withTimeout(analyzeCenteringPhoto({
         dataUrl: prepared.dataUrl,
         side,
         width: prepared.width,
         height: prepared.height,
-        referenceImageUrl
+        referenceImageUrl,
+        useOpenCv: shouldUseOpenCvForCentering()
       }), CENTERING_DETECTION_TIMEOUT_MS);
       onCapture({
         side,
@@ -532,6 +552,21 @@ async function prepareCenteringDataUrl(dataUrl: string) {
     width: outputWidth,
     height: outputHeight
   };
+}
+
+function shouldUseOpenCvForCentering() {
+  if (typeof navigator === "undefined") return false;
+  const userAgent = navigator.userAgent.toLowerCase();
+  const mobile = /iphone|ipad|ipod|android|mobile/.test(userAgent);
+  const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  const lowMemory = typeof deviceMemory === "number" && deviceMemory <= 4;
+  return !mobile && !lowMemory;
+}
+
+function shouldAutoDetectOnCapture() {
+  if (typeof navigator === "undefined") return false;
+  const userAgent = navigator.userAgent.toLowerCase();
+  return !/iphone|ipad|ipod|android|mobile/.test(userAgent);
 }
 
 function loadImage(src: string) {
