@@ -10,6 +10,16 @@ const nonPokemonPatterns = [
   /\b(baseball|basketball|football|hockey|soccer|panini|topps|upper\s+deck)\b/i
 ];
 
+const retailerBlockPatterns = [
+  /\brobot\s+or\s+human\b/i,
+  /\bare\s+you\s+a\s+robot\b/i,
+  /\bverify\s+you(?:'| a)?re\s+human\b/i,
+  /\baccess\s+denied\b/i,
+  /\bcaptcha\b/i,
+  /\bautomated\s+access\b/i,
+  /\bunusual\s+traffic\b/i
+];
+
 const pokemonPatterns = [
   /\bpokemon\b/i,
   /\bpok[eé]mon\b/i,
@@ -45,6 +55,7 @@ export function isLikelyPokemonProduct(candidate: DiscoveryCandidate) {
   const allText = normalizeText(`${titleAndUrl} ${candidate.storeName ?? ""}`);
 
   if (!titleAndUrl.trim()) return false;
+  if (retailerBlockPatterns.some((pattern) => pattern.test(allText))) return false;
   if (nonPokemonPatterns.some((pattern) => pattern.test(allText))) return false;
 
   const hasPokemonSignal = pokemonPatterns.some((pattern) => pattern.test(titleAndUrl));

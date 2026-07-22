@@ -8,6 +8,7 @@ type LocationPostalCodeFieldProps = {
   value?: string;
   defaultValue?: string;
   onChange?: (value: string) => void;
+  onLocated?: (value: string) => void;
   placeholder?: string;
   className?: string;
   inputClassName?: string;
@@ -19,6 +20,7 @@ export function LocationPostalCodeField({
   value,
   defaultValue = "",
   onChange,
+  onLocated,
   placeholder = "ZIP",
   className = "",
   inputClassName = "",
@@ -53,6 +55,7 @@ export function LocationPostalCodeField({
           const data = await response.json() as { ok?: boolean; postalCode?: string; error?: string };
           if (!response.ok || !data.postalCode) throw new Error(data.error ?? "Could not locate ZIP.");
           update(data.postalCode);
+          onLocated?.(data.postalCode);
           setMessage(`Located ${data.postalCode}.`);
         } catch (error) {
           setMessage(error instanceof Error ? error.message : "Could not locate ZIP.");

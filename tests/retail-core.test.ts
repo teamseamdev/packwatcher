@@ -315,6 +315,7 @@ test("filters shopping discovery to Pokemon sealed/card products", () => {
   assert.equal(isLikelyPokemonProduct({ title: "Chaos Rising (Sword and Sorcery S20)", storeName: "Books A Million", productUrl: "https://example.com/book" }), false);
   assert.equal(isLikelyPokemonProduct({ title: "Pokemon Chaos Rising Blister Pack", storeName: "TCGplayer", productUrl: "https://example.com/pokemon" }), true);
   assert.equal(isLikelyPokemonProduct({ title: "Surging Sparks Elite Trainer Box", storeName: "Target", productUrl: "https://example.com/item" }), true);
+  assert.equal(isLikelyPokemonProduct({ title: "Robot or human?", storeName: "Walmart - pokemon", productUrl: "https://www.walmart.com/blocked" }), false);
 });
 
 test("resolves shopping provider Google URLs to retailer URLs", () => {

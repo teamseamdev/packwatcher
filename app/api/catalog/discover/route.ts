@@ -10,12 +10,12 @@ export const maxDuration = 60;
 
 const searchAttempts = new Map<string, number>();
 
-function rateLimitKey(userId: string, query: string) {
-  return `${userId}:${query.toLowerCase().trim()}`;
+function rateLimitKey(userId: string, query: string, postalCode: string | null) {
+  return `${userId}:${query.toLowerCase().trim()}:${postalCode ?? "no-zip"}`;
 }
 
-function assertRateLimit(userId: string, query: string) {
-  const key = rateLimitKey(userId, query);
+function assertRateLimit(userId: string, query: string, postalCode: string | null) {
+  const key = rateLimitKey(userId, query, postalCode);
   const now = Date.now();
   const previous = searchAttempts.get(key) ?? 0;
   if (now - previous < 60_000) {
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
 
   try {
     const postalCode = parsePostalCode(body.postalCode);
-    assertRateLimit(user.id, query);
+    assertRateLimit(user.id, query, postalCode);
     const admin = createAdminClient();
     await recordSearch(admin, query).catch(() => undefined);
 

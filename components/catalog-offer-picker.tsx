@@ -9,12 +9,13 @@ import { removeTrackedProduct, trackCatalogProduct, untrackCatalogProduct } from
 import { LocationPostalCodeField } from "@/components/location-postal-code-field";
 import { isLikelyPokemonProduct } from "@/lib/catalog-importers/pokemon-product-filter";
 import { isCatalogOfferAvailable } from "@/lib/catalog/offer-availability";
-import { compareCatalogOffers, fulfillmentLabel, fulfillmentText, fulfillmentTone, metadataText, verificationLabel, verificationText } from "@/lib/catalog/offer-ranking";
+import { compareCatalogOffers, fulfillmentLabel, fulfillmentText, fulfillmentTone, isLocalOffer, metadataText, offerDistanceMiles, verificationLabel, verificationText } from "@/lib/catalog/offer-ranking";
 import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
 import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, TrackedProduct } from "@/lib/types";
 
 type SortMode = "recommended" | "name" | "store" | "status" | "price" | "checked";
+const LOCAL_RADIUS_MILES = 50;
 
 function productForOffer(offer: CatalogOffer) {
   const related = offer.catalog_products as CatalogProduct | CatalogProduct[] | null;
@@ -107,10 +108,38 @@ export function CatalogOfferPicker({
     });
   }
 
-  function discoverRetailers() {
+  const resultGroups = useMemo(() => {
+    if (!postalCode.trim()) {
+      return [{ key: "all", title: "Retailer results", subtitle: "", offers: filtered }];
+    }
+
+    const nearby: CatalogOffer[] = [];
+    const shipping: CatalogOffer[] = [];
+    const other: CatalogOffer[] = [];
+
+    for (const offer of filtered) {
+      const distance = offerDistanceMiles(offer, postalCode);
+      if (isLocalOffer(offer) && (distance === null || distance <= LOCAL_RADIUS_MILES)) {
+        nearby.push(offer);
+      } else if (fulfillmentText(offer).toLowerCase().includes("ship") || fulfillmentLabel(offer).toLowerCase().includes("shipping")) {
+        shipping.push(offer);
+      } else {
+        other.push(offer);
+      }
+    }
+
+    return [
+      { key: "nearby", title: `Nearby pickup within ${LOCAL_RADIUS_MILES} miles`, subtitle: "Local results are prioritized when the retailer/search provider gives store or pickup evidence.", offers: nearby },
+      { key: "shipping", title: "Shipping and online options", subtitle: "These may ship to you, but may not be near your selected ZIP.", offers: [...shipping, ...other] }
+    ];
+  }, [filtered, postalCode]);
+
+  function discoverRetailers(postalCodeOverride?: string) {
     const trimmed = query.trim();
-    if (trimmed.length < 3) {
-      setMessage("Search for at least 3 characters before checking retailer listings.");
+    const searchQuery = trimmed.length >= 3 ? trimmed : "pokemon cards";
+    const activePostalCode = (postalCodeOverride ?? postalCode).trim();
+    if (trimmed.length < 3 && !activePostalCode) {
+      setMessage("Search for at least 3 characters or use Locate me before checking retailer listings.");
       return;
     }
 
@@ -120,7 +149,7 @@ export function CatalogOfferPicker({
         const response = await fetch("/api/catalog/discover", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ query: trimmed, postalCode: postalCode.trim() || undefined })
+          body: JSON.stringify({ query: searchQuery, postalCode: activePostalCode || undefined })
         });
         const result = await response.json() as { offersImported?: number; error?: string; errors?: string[]; discoveryErrors?: string[] };
         if (!response.ok) throw new Error(result.error ?? "Retailer discovery failed.");
@@ -129,8 +158,8 @@ export function CatalogOfferPicker({
         const issueCount = (result.errors?.length ?? 0) + (result.discoveryErrors?.length ?? 0);
         setMessage(
           result.offersImported
-            ? `Retailer search saved ${result.offersImported} listing${result.offersImported === 1 ? "" : "s"} for "${trimmed}".${issueCount ? " Some sources could not be checked." : ""}`
-            : `Retailer search ran for "${trimmed}", but no new listings were saved.${issueCount ? " Some sources could not be checked." : ""}`
+            ? `Retailer search saved ${result.offersImported} listing${result.offersImported === 1 ? "" : "s"} for "${searchQuery}"${activePostalCode ? ` near ${activePostalCode}` : ""}.${issueCount ? " Some sources could not be checked." : ""}`
+            : `Retailer search ran for "${searchQuery}"${activePostalCode ? ` near ${activePostalCode}` : ""}, but no new listings were saved.${issueCount ? " Some sources could not be checked." : ""}`
         );
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "Retailer discovery failed.");
@@ -161,6 +190,7 @@ export function CatalogOfferPicker({
         <LocationPostalCodeField
           value={postalCode}
           onChange={setPostalCode}
+          onLocated={(locatedPostalCode) => discoverRetailers(locatedPostalCode)}
           placeholder="ZIP"
           className="col-span-2 lg:col-span-1"
         />
@@ -174,8 +204,8 @@ export function CatalogOfferPicker({
         </select>
         <button
           type="button"
-          disabled={isPending || query.trim().length < 3}
-          onClick={discoverRetailers}
+          disabled={isPending || (query.trim().length < 3 && !postalCode.trim())}
+          onClick={() => discoverRetailers()}
           className="col-span-2 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-amber-300 px-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50 lg:col-span-1"
         >
           {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageSearch className="h-4 w-4" />}
@@ -183,12 +213,18 @@ export function CatalogOfferPicker({
         </button>
       </div>
 
-      <p className="mt-2 text-xs text-slate-500">ZIP or Locate me prioritizes nearby in-store pickup results. Change it here for a one-off search, or update the default in Account.</p>
+      <p className="mt-2 text-xs text-slate-500">ZIP or Locate me searches with your location, prioritizes nearby pickup, and separates shipping options outside the local list.</p>
       {message ? <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">{message}</p> : null}
 
-      <div className="scroll-panel mt-3 grid max-h-[64vh] gap-2 pr-1">
+      <div className="scroll-panel mt-3 grid max-h-[64vh] gap-4 pr-1">
         {offers.length ? (
-          filtered.length ? filtered.map((offer) => {
+          filtered.length ? resultGroups.map((group) => (
+            <section key={group.key} className="grid gap-2">
+              <div>
+                <h3 className="text-sm font-black text-white">{group.title}</h3>
+                {group.subtitle ? <p className="mt-1 text-xs text-slate-500">{group.subtitle}</p> : null}
+              </div>
+              {group.offers.length ? group.offers.map((offer) => {
             const product = productForOffer(offer);
             const trackedUrlProduct = trackedProducts.find((trackedProduct) => trackedProduct.url === offer.url);
             const isUrlTracked = Boolean(trackedUrlProduct);
@@ -284,6 +320,12 @@ export function CatalogOfferPicker({
               </article>
             );
           }) : (
+                <p className="rounded-lg border border-white/10 bg-white/5 p-4 text-sm text-slate-400">
+                  {group.key === "nearby" ? "No nearby pickup results found yet. Try a product search, another ZIP, or check the shipping options below." : "No shipping or online options found yet."}
+                </p>
+              )}
+            </section>
+          )) : (
             <p className="rounded-lg border border-white/10 bg-white/5 p-4 text-sm text-slate-400">No catalog offers match that search.</p>
           )
         ) : (
