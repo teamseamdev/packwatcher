@@ -5,6 +5,8 @@ import { AccountPlanSwitcher } from "@/components/account-plan-switcher";
 import { LocationPostalCodeField } from "@/components/location-postal-code-field";
 import { PushNotificationSettings } from "@/components/push-notification-settings";
 import { requireProfile } from "@/lib/auth";
+import { fetchEbaySellerSettings, type EbaySellerSettingsResult } from "@/lib/ebay/seller-settings";
+import type { EbayMerchantLocationOption, EbaySellerPolicyOption } from "@/lib/ebay/seller-settings-normalize";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { EbayConnection, EbayListingDefaults, FeedbackItem, FeedbackStatus } from "@/lib/types";
 import { disconnectEbay, saveEbayDefaults, submitFeedback, switchToFreePlan, updatePostalCode } from "./actions";
@@ -31,6 +33,28 @@ export default async function AccountPage() {
     admin.from("ebay_connections").select("user_id,ebay_user_id,ebay_username,environment,marketplace_id,access_token_expires_at,token_scope,refresh_token_expires_at,status,last_refreshed_at,last_error,connected_at,updated_at").eq("user_id", user.id).maybeSingle<EbayConnection>(),
     supabase.from("ebay_listing_defaults").select("*").eq("user_id", user.id).maybeSingle<EbayListingDefaults>()
   ]);
+  const ebayMarketplace = ebayDefaults?.marketplace_id ?? ebayConnection?.marketplace_id ?? "EBAY_US";
+  let ebaySellerSettings: EbaySellerSettingsResult | null = null;
+  if (ebayConnection && ebayConnection.status !== "reauthorization_required" && ebayConnection.status !== "disconnected") {
+    try {
+      ebaySellerSettings = await fetchEbaySellerSettings(admin, user.id, ebayMarketplace);
+    } catch (error) {
+      ebaySellerSettings = {
+        marketplaceId: ebayMarketplace,
+        paymentPolicies: [],
+        fulfillmentPolicies: [],
+        returnPolicies: [],
+        merchantLocations: [],
+        errors: [{ source: "seller settings", message: error instanceof Error ? error.message : "Could not load eBay seller settings." }]
+      };
+    }
+  }
+  const missingEbaySetup = Boolean(ebaySellerSettings && (
+    ebaySellerSettings.paymentPolicies.length === 0
+    || ebaySellerSettings.fulfillmentPolicies.length === 0
+    || ebaySellerSettings.returnPolicies.length === 0
+    || ebaySellerSettings.merchantLocations.length === 0
+  ));
 
   return (
     <div className="max-w-5xl space-y-5">
@@ -147,11 +171,55 @@ export default async function AccountPage() {
             <Field name="condition" label="Condition" defaultValue={ebayDefaults?.condition ?? "USED_EXCELLENT"} />
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field name="merchant_location_key" label="Merchant location key" defaultValue={ebayDefaults?.merchant_location_key ?? ""} />
-            <Field name="fulfillment_policy_id" label="Shipping/fulfillment policy ID" defaultValue={ebayDefaults?.fulfillment_policy_id ?? ""} />
-            <Field name="payment_policy_id" label="Payment policy ID" defaultValue={ebayDefaults?.payment_policy_id ?? ""} />
-            <Field name="return_policy_id" label="Return policy ID" defaultValue={ebayDefaults?.return_policy_id ?? ""} />
+            <LocationSelect
+              name="merchant_location_key"
+              label="Inventory location"
+              currentValue={ebayDefaults?.merchant_location_key ?? ""}
+              options={ebaySellerSettings?.merchantLocations ?? []}
+              disabled={!ebayConnection || ebayConnection.status === "reauthorization_required"}
+            />
+            <PolicySelect
+              name="fulfillment_policy_id"
+              label="Shipping/fulfillment policy"
+              currentValue={ebayDefaults?.fulfillment_policy_id ?? ""}
+              options={ebaySellerSettings?.fulfillmentPolicies ?? []}
+              disabled={!ebayConnection || ebayConnection.status === "reauthorization_required"}
+            />
+            <PolicySelect
+              name="payment_policy_id"
+              label="Payment policy"
+              currentValue={ebayDefaults?.payment_policy_id ?? ""}
+              options={ebaySellerSettings?.paymentPolicies ?? []}
+              disabled={!ebayConnection || ebayConnection.status === "reauthorization_required"}
+            />
+            <PolicySelect
+              name="return_policy_id"
+              label="Return policy"
+              currentValue={ebayDefaults?.return_policy_id ?? ""}
+              options={ebaySellerSettings?.returnPolicies ?? []}
+              disabled={!ebayConnection || ebayConnection.status === "reauthorization_required"}
+            />
           </div>
+          {ebayConnection ? (
+            <div className="rounded-lg border border-white/10 bg-slate-950/40 p-3 text-xs text-slate-400">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="space-y-1">
+                  {missingEbaySetup ? <p className="font-semibold text-amber-100">Create your eBay business policies in Seller Hub, then refresh.</p> : <p className="font-semibold text-emerald-100">Seller policies and inventory locations loaded from eBay.</p>}
+                  {ebaySellerSettings?.errors.length ? (
+                    <div className="space-y-1 text-rose-200">
+                      {ebaySellerSettings.errors.map((error) => (
+                        <p key={`${error.source}:${error.message}`}>{error.source}: {error.message}</p>
+                      ))}
+                    </div>
+                  ) : null}
+                  <p>Manual ID entry is available below each dropdown for advanced fallback or newly created eBay objects that have not appeared yet.</p>
+                </div>
+                <Link href="/account?section=ebay&refresh=1" className="inline-flex h-9 shrink-0 items-center justify-center rounded-lg border border-amber-300/30 px-3 text-xs font-bold text-amber-100">
+                  Refresh
+                </Link>
+              </div>
+            </div>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-[120px_120px_auto]">
             <Field name="currency" label="Currency" defaultValue={ebayDefaults?.currency ?? "USD"} />
             <Field name="listing_duration" label="Duration" defaultValue={ebayDefaults?.listing_duration ?? "GTC"} />
@@ -259,6 +327,113 @@ function Field({ name, label, defaultValue }: { name: string; label: string; def
     <label className="grid gap-1">
       <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>
       <input name={name} defaultValue={defaultValue} className="h-11 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300" />
+    </label>
+  );
+}
+
+function PolicySelect({
+  name,
+  label,
+  currentValue,
+  options,
+  disabled
+}: {
+  name: string;
+  label: string;
+  currentValue: string;
+  options: EbaySellerPolicyOption[];
+  disabled: boolean;
+}) {
+  return (
+    <SelectWithManual
+      name={name}
+      label={label}
+      currentValue={currentValue}
+      options={options.map((option) => ({
+        value: option.id,
+        label: option.name,
+        detail: [option.id, option.marketplaceId, option.description].filter(Boolean).join(" - ")
+      }))}
+      disabled={disabled}
+      emptyMessage="Create your eBay business policies in Seller Hub, then refresh."
+    />
+  );
+}
+
+function LocationSelect({
+  name,
+  label,
+  currentValue,
+  options,
+  disabled
+}: {
+  name: string;
+  label: string;
+  currentValue: string;
+  options: EbayMerchantLocationOption[];
+  disabled: boolean;
+}) {
+  return (
+    <SelectWithManual
+      name={name}
+      label={label}
+      currentValue={currentValue}
+      options={options.map((option) => ({
+        value: option.key,
+        label: option.name,
+        detail: [option.key, option.status, option.addressSummary].filter(Boolean).join(" - ")
+      }))}
+      disabled={disabled}
+      emptyMessage="Create your eBay business policies in Seller Hub, then refresh."
+    />
+  );
+}
+
+function SelectWithManual({
+  name,
+  label,
+  currentValue,
+  options,
+  disabled,
+  emptyMessage
+}: {
+  name: string;
+  label: string;
+  currentValue: string;
+  options: Array<{ value: string; label: string; detail: string }>;
+  disabled: boolean;
+  emptyMessage: string;
+}) {
+  const hasCurrentOption = currentValue && options.some((option) => option.value === currentValue);
+  return (
+    <label className="grid gap-1">
+      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>
+      <select
+        name={name}
+        defaultValue={currentValue}
+        disabled={disabled}
+        className="h-11 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <option value="">{disabled ? "Connect eBay first" : `Select ${label.toLowerCase()}`}</option>
+        {currentValue && !hasCurrentOption ? <option value={currentValue}>{currentValue} (saved)</option> : null}
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>{option.label} - {option.value}</option>
+        ))}
+      </select>
+      {options.length === 0 && !disabled ? <span className="text-xs text-amber-100">{emptyMessage}</span> : null}
+      {options.length ? (
+        <span className="text-[11px] text-slate-600">
+          {options.slice(0, 2).map((option) => option.detail).join(" | ")}
+        </span>
+      ) : null}
+      <details className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+        <summary className="cursor-pointer text-xs font-semibold text-slate-400">Advanced manual entry</summary>
+        <input
+          name={`${name}_manual`}
+          placeholder={`Manual ${label.toLowerCase()} ID`}
+          className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm outline-none focus:border-amber-300"
+        />
+      </details>
     </label>
   );
 }

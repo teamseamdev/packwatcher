@@ -115,12 +115,14 @@ Required setup:
 5. Add the eBay scopes in `.env.example`.
 6. Run `supabase/migrations/016_ebay_selling.sql`.
 7. Run `supabase/migrations/031_ebay_oauth_state_and_token_health.sql` to add server-side eBay OAuth state tracking and token-health fields.
-8. In Account, connect eBay and save seller defaults:
-   - Merchant location key
-   - Payment policy ID
-   - Return policy ID
-   - Fulfillment/shipping policy ID
+8. In Account, connect eBay and save seller defaults. PackWatcher fetches available Seller Hub business policies and Inventory API merchant locations from eBay using the connected account token, then shows them as dropdowns:
+   - Inventory location
+   - Payment policy
+   - Return policy
+   - Fulfillment/shipping policy
    - Marketplace, category, condition, currency, duration
+
+If the dropdowns are empty, create business policies and an inventory location in eBay Seller Hub, then refresh the Account page. PackWatcher keeps manual ID entry as an advanced fallback for newly created eBay objects that have not appeared in the API response yet.
 
 The default Pokemon single-card category ID is `183454` for eBay's Individual Collectible Card Game Cards category. Users can override it per account or per listing.
 

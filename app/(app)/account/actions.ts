@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import Stripe from "stripe";
 import { z } from "zod";
 import { requireProfile } from "@/lib/auth";
+import { manualOverrideValue } from "@/lib/ebay/defaults";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const PostalCodeSchema = z.object({
@@ -32,14 +33,28 @@ const FeedbackSchema = z.object({
 const EbayDefaultsSchema = z.object({
   marketplace_id: z.string().trim().min(2).default("EBAY_US"),
   category_id: z.string().trim().min(2).default("183454"),
-  merchant_location_key: z.string().trim().optional().transform((value) => value || null),
-  payment_policy_id: z.string().trim().optional().transform((value) => value || null),
-  return_policy_id: z.string().trim().optional().transform((value) => value || null),
-  fulfillment_policy_id: z.string().trim().optional().transform((value) => value || null),
+  merchant_location_key: z.string().trim().optional(),
+  merchant_location_key_manual: z.string().trim().optional(),
+  payment_policy_id: z.string().trim().optional(),
+  payment_policy_id_manual: z.string().trim().optional(),
+  return_policy_id: z.string().trim().optional(),
+  return_policy_id_manual: z.string().trim().optional(),
+  fulfillment_policy_id: z.string().trim().optional(),
+  fulfillment_policy_id_manual: z.string().trim().optional(),
   condition: z.string().trim().min(2).default("USED_EXCELLENT"),
   currency: z.string().trim().min(3).max(3).default("USD"),
   listing_duration: z.string().trim().min(2).default("GTC")
-});
+}).transform((value) => ({
+  marketplace_id: value.marketplace_id,
+  category_id: value.category_id,
+  merchant_location_key: manualOverrideValue(value.merchant_location_key, value.merchant_location_key_manual),
+  payment_policy_id: manualOverrideValue(value.payment_policy_id, value.payment_policy_id_manual),
+  return_policy_id: manualOverrideValue(value.return_policy_id, value.return_policy_id_manual),
+  fulfillment_policy_id: manualOverrideValue(value.fulfillment_policy_id, value.fulfillment_policy_id_manual),
+  condition: value.condition,
+  currency: value.currency,
+  listing_duration: value.listing_duration
+}));
 
 export async function updatePostalCode(formData: FormData) {
   const { user } = await requireProfile();
