@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   collectorNumbersPotentiallyEqual,
   compareCollectorNumbers,
+  extractCollectorNumberCandidates,
   generateCollectorNumberAlternates,
   normalizeCollectorNumber
 } from "../lib/cards/collector-number.ts";
@@ -24,6 +25,13 @@ test("handles controlled OCR number confusions without erasing prefixes", () => 
   assert.equal(collectorNumbersPotentiallyEqual("TG0I/TG3O", "TG01/TG30"), true);
   assert.equal(collectorNumbersPotentiallyEqual("SV107/SV122", "107/122"), false);
   assert.ok(generateCollectorNumberAlternates("O25/198").includes("025/198"));
+});
+
+test("extracts collector numbers from noisy OCR strings", () => {
+  assert.equal(extractCollectorNumberCandidates("065 086")[0]?.normalized, "65/86");
+  assert.equal(extractCollectorNumberCandidates("#065/086 EN")[0]?.normalized, "65/86");
+  assert.equal(extractCollectorNumberCandidates("TG0I / TG3O")[0]?.normalized, "TG1/TG30");
+  assert.equal(extractCollectorNumberCandidates("SVP00I promo")[0]?.normalized, "SVP1");
 });
 
 test("sorts collector numbers naturally with subsets after main set", () => {
@@ -65,6 +73,74 @@ test("exact selected-set collector number beats same-name ambiguity", () => {
 
   assert.equal(result.action, "auto_confirmed");
   assert.equal(result.best.id, "pika-25");
+});
+
+test("slashless selected-set collector number can auto match when unique", () => {
+  const cards: CanonicalCardCandidate[] = [
+    card("chespin-5", "set-a", "Set A", "Chespin", "5/86"),
+    card("avalugg-24", "set-a", "Set A", "Avalugg", "24/86")
+  ];
+
+  const result = matchCardWithinSelectedSet({
+    selectedSetId: "set-a",
+    ocrName: "Chespin",
+    ocrCollectorNumber: "005 086",
+    candidates: cards
+  });
+
+  assert.equal(result.action, "auto_confirmed");
+  assert.equal(result.best.id, "chespin-5");
+});
+
+test("localized OCR name with exact selected-set number still auto matches", () => {
+  const cards: CanonicalCardCandidate[] = [
+    card("dragalge-65", "set-a", "Set A", "Mega Dragalge ex", "65/86"),
+    card("tauros-69", "set-a", "Set A", "Tauros", "69/86")
+  ];
+
+  for (const localizedName of ["ドラミドロex", "毒藻龍ex", "드래캄ex"]) {
+    const result = matchCardWithinSelectedSet({
+      selectedSetId: "set-a",
+      ocrName: localizedName,
+      ocrCollectorNumber: "065/086",
+      candidates: cards
+    });
+    assert.equal(result.action, "auto_confirmed");
+    assert.equal(result.best.id, "dragalge-65");
+  }
+});
+
+test("fixed wrong number with strong different name requires confirmation", () => {
+  const cards: CanonicalCardCandidate[] = [
+    card("chespin-5", "set-a", "Set A", "Chespin", "5/86"),
+    card("tauros-63", "set-a", "Set A", "Tauros", "63/86")
+  ];
+
+  const result = matchCardWithinSelectedSet({
+    selectedSetId: "set-a",
+    ocrName: "Chespin",
+    ocrCollectorNumber: "063/086",
+    candidates: cards
+  });
+
+  assert.equal(result.action, "confirm_candidate");
+  assert.equal(result.reason, "CONFLICTING_NAME_AND_NUMBER");
+  assert.deepEqual(result.alternatives.map((candidate) => candidate.id), ["tauros-63", "chespin-5"]);
+});
+
+test("latin OCR name mismatch rejects singleton instead of accepting HP-like number", () => {
+  const cards: CanonicalCardCandidate[] = [
+    card("chespin-70", "set-a", "Set A", "Chespin", "70/86")
+  ];
+
+  const result = matchCardWithinSelectedSet({
+    selectedSetId: "set-a",
+    ocrName: "Tauros",
+    ocrCollectorNumber: "70",
+    candidates: cards
+  });
+
+  assert.equal(result.action, "no_safe_match");
 });
 
 test("same-name unreadable number requires selected-set confirmation", () => {

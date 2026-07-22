@@ -88,10 +88,54 @@ export function generateCollectorNumberAlternates(value?: string | null) {
   return Array.from(candidates);
 }
 
+export function extractCollectorNumberCandidates(value?: string | null) {
+  const normalizedText = (value ?? "")
+    .normalize("NFKC")
+    .replace(SLASHES, "/")
+    .replace(HYPHENS, "-")
+    .replace(/[#№]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+  if (!normalizedText) return [];
+
+  const candidates = new Map<string, NormalizedCollectorNumber>();
+
+  const fractionPatterns = [
+    /\b([A-Z]{0,5}(?:-[A-Z]{1,3})?[0-9OILS]{1,4}[A-Z]?)\s*\/\s*([A-Z]{0,5}[0-9OILS]{1,4})\b/g,
+    /\b([A-Z]{1,5}(?:-[A-Z]{1,3})?[0-9OILS]{1,4}[A-Z]?)\s+([A-Z]{1,5}[0-9OILS]{1,4})\b/g,
+    /\b([0-9OILS]{1,4}[A-Z]?)\s+([0-9OILS]{2,4})\b/g
+  ];
+
+  for (const pattern of fractionPatterns) {
+    for (const match of normalizedText.matchAll(pattern)) {
+      if (!/[0-9]/.test(match[2] ?? "")) continue;
+      addCandidate(candidates, normalizeCollectorNumber(`${match[1]}/${match[2]}`));
+    }
+  }
+
+  for (const match of normalizedText.matchAll(/\b((?:PR-SW|SWSH|SVP|TG|GG|RC|SV|XY|SM|SH|H)?[0-9OILS]{1,4}[A-Z]?)\b/g)) {
+    const raw = match[1];
+    if (/^\d{3,4}$/.test(raw) && Number(raw) > 400) continue;
+    addCandidate(candidates, normalizeCollectorNumber(raw));
+  }
+
+  if (!candidates.size || !/\s/.test(normalizedText)) {
+    addCandidate(candidates, normalizeCollectorNumber(normalizedText));
+  }
+
+  return Array.from(candidates.values());
+}
+
 export function compareCollectorNumbers(left?: string | null, right?: string | null) {
   const a = normalizeCollectorNumber(left)?.sortKey ?? "9:ZZZZ:999999:ZZZZ:999999:ZZZZ";
   const b = normalizeCollectorNumber(right)?.sortKey ?? "9:ZZZZ:999999:ZZZZ:999999:ZZZZ";
   return a.localeCompare(b);
+}
+
+function addCandidate(candidates: Map<string, NormalizedCollectorNumber>, candidate: NormalizedCollectorNumber | null) {
+  if (!candidate || !candidate.normalized) return;
+  candidates.set(candidate.normalized, candidate);
 }
 
 function parseCollectorPart(value: string) {

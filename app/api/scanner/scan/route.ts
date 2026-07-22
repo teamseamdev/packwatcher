@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
-import { normalizeCollectorNumber } from "@/lib/cards/collector-number";
+import { extractCollectorNumberCandidates, normalizeCollectorNumber } from "@/lib/cards/collector-number";
 import { getCanonicalSet, getCardsForSelectedSet } from "@/lib/cards/catalog";
 import { matchCardWithinSelectedSet, type ScoredCardCandidate } from "@/lib/cards/set-matching";
 import { OpenAICardRecognitionProvider } from "@/lib/clips/providers/card-recognition";
@@ -379,5 +379,5 @@ function isPlaceholderCard(card: DetectedScannerCard) {
 }
 
 function normalizeCardNumber(cardNumber: string | null | undefined) {
-  return normalizeCollectorNumber(cardNumber)?.normalized ?? null;
+  return extractCollectorNumberCandidates(cardNumber)[0]?.normalized ?? normalizeCollectorNumber(cardNumber)?.normalized ?? null;
 }
