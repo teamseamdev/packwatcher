@@ -1,5 +1,6 @@
 import { distanceMiles, numberFromUnknown, parseCoordinates, type Coordinates } from "../location/distance.ts";
 import type { CatalogOffer, StockStatus } from "../types.ts";
+import { fulfillmentLabelForStatus, isAvailableCatalogStatus, isCatalogOfferAvailable } from "./offer-availability.ts";
 
 const localPatterns = /\b(pickup|pick up|in store|in-store|store pickup|available at|nearby|curbside|local|ready within|today at)\b/i;
 const shippingPatterns = /\b(ship|shipping|delivery|deliver|arrives|free delivery|free shipping)\b/i;
@@ -20,34 +21,28 @@ export function fulfillmentText(offer: CatalogOffer) {
 }
 
 export function verificationLabel(offer: CatalogOffer) {
-  if (offer.metadata?.verifiedByRetailerConnector === true) return "Retailer checked";
+  if (offer.metadata?.verifiedByRetailerConnector === true) return "Verified by retailer";
+  if (metadataText(offer, "verificationStatus") === "verified") return "Verified by retailer";
+  if (metadataText(offer, "verificationStatus") === "discovery") return "Discovery result";
   if (metadataText(offer, "discoverySource") === "shopping-search" || metadataText(offer, "source") === "shopping-search") {
-    return "Shopping result";
+    return "Discovery result";
   }
   if (offer.last_checked_at) return "Checked";
   return "Needs confirmation";
 }
 
 export function verificationText(offer: CatalogOffer) {
-  if (offer.metadata?.verifiedByRetailerConnector === true) {
+  if (offer.metadata?.verifiedByRetailerConnector === true || metadataText(offer, "verificationStatus") === "verified") {
     return "Availability was checked against the retailer page.";
   }
-  if (metadataText(offer, "discoverySource") === "shopping-search" || metadataText(offer, "source") === "shopping-search") {
-    return "Discovered through shopping search; open the retailer page to confirm current stock.";
+  if (metadataText(offer, "verificationStatus") === "discovery" || metadataText(offer, "discoverySource") === "shopping-search" || metadataText(offer, "source") === "shopping-search") {
+    return "Discovered through shopping/search data. Stock and pickup details should be confirmed at the retailer before buying.";
   }
   return "Open the retailer page to confirm current stock before buying.";
 }
 
 export function fulfillmentLabel(offer: CatalogOffer) {
-  if (isLocalOffer(offer)) return "Pickup available";
-  if (isShippingOnlyOffer(offer)) return "Shipping only";
-  if (offer.status === "delivery_available") return "Delivery available";
-  if (offer.status === "out_of_stock" || offer.status === "unavailable") return "Out of stock";
-  if (offer.status === "preorder") return "Preorder";
-  if (offer.status === "backorder") return "Backorder";
-  if (offer.status === "limited_stock") return "Limited stock";
-  if (isAvailableStatus(offer.status) || offer.in_stock === true) return "Availability found";
-  return "Check retailer";
+  return fulfillmentLabelForStatus(offer.status, isLocalOffer(offer), isShippingOnlyOffer(offer));
 }
 
 export function fulfillmentTone(offer: CatalogOffer) {
@@ -82,7 +77,7 @@ export function compareCatalogOffers(a: CatalogOffer, b: CatalogOffer, location?
 export function offerPriority(offer: CatalogOffer, location?: string | OfferRankingLocation | null) {
   const local = isLocalOffer(offer);
   const zipMatch = isZipBiasedOffer(offer, location);
-  const available = isAvailableStatus(offer.status) || offer.in_stock === true;
+  const available = isCatalogOfferAvailable(offer);
   const shippingOnly = isShippingOnlyOffer(offer);
   const marketplace = isMarketplaceOffer(offer);
   const hasDistance = normalizedDistance(offer, location) < Number.MAX_SAFE_INTEGER;
@@ -153,7 +148,7 @@ function normalizeRankingLocation(location?: string | OfferRankingLocation | nul
 }
 
 function isAvailableStatus(status: StockStatus) {
-  return ["in_stock", "limited_stock", "pickup_available", "shipping_available", "delivery_available", "pickup_only", "shipping_only", "delivery_only", "preorder", "backorder"].includes(status);
+  return isAvailableCatalogStatus(status);
 }
 
 function normalizedPrice(offer: CatalogOffer) {

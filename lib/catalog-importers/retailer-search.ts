@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ImportedCatalogOffer } from "@/lib/catalog-importers/types";
+import { classifyOfferAvailability } from "@/lib/catalog/offer-availability";
 import { isLikelyPokemonProduct, pokemonShoppingQuery } from "@/lib/catalog-importers/pokemon-product-filter";
 import { fetchPageHtml } from "@/lib/fetch-page-html";
 import { fetchProductMetadata } from "@/lib/product-metadata";
@@ -104,6 +105,13 @@ async function buildOffer(source: RetailerSearchSource, url: string): Promise<Im
   const check = await adapter.check({ id: url, url, storeName: source.storeName }).catch(() => null);
   const id = sourceProductId(url);
   const price = firstValidPrice(check?.price, metadata?.price);
+  const classification = classifyOfferAvailability({
+    status: check?.status ?? "unknown",
+    availabilityText: check?.rawMatchReason ?? null,
+    retailer: source.storeName,
+    sourceConfidence: check ? 0.82 : 0.52,
+    verifiedByRetailerConnector: Boolean(check)
+  });
 
   return {
     source: `retailer-search-${source.key}`,
@@ -121,11 +129,19 @@ async function buildOffer(source: RetailerSearchSource, url: string): Promise<Im
     retailerProductId: id,
     url,
     lastPrice: price,
-    status: check?.status ?? "unknown",
+    status: classification.status,
     availabilityText: check?.rawMatchReason ?? "Discovered from retailer search",
     metadata: {
       discoverySource: "retailer-search",
-      query: process.env[source.queryEnv] ?? source.defaultQuery
+      query: process.env[source.queryEnv] ?? source.defaultQuery,
+      verificationStatus: check ? "verified" : "discovery",
+      verifiedByRetailerConnector: Boolean(check),
+      fulfillmentLabel: classification.fulfillmentLabel,
+      shippingAvailable: classification.shippingAvailable,
+      pickupAvailable: classification.pickupAvailable,
+      deliveryAvailable: classification.deliveryAvailable,
+      availabilityType: classification.availabilityType,
+      confidence: classification.confidence
     }
   };
 }
@@ -152,6 +168,15 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
         const price = firstValidPrice(result.price, check?.price);
         const providerAvailability = [result.availabilityText, result.shippingText, result.pickupText].filter(Boolean).join(" | ");
         const availabilityText = check?.rawMatchReason ?? (providerAvailability || "Discovered by shopping-search provider; stock not verified");
+        const classification = classifyOfferAvailability({
+          status: check?.status ?? "unknown",
+          availabilityText,
+          shippingText: result.shippingText,
+          pickupText: result.pickupText,
+          retailer,
+          sourceConfidence: result.confidence,
+          verifiedByRetailerConnector: Boolean(check)
+        });
 
         offers.push({
           source: `shopping-search-${shoppingSearch.name}`,
@@ -169,11 +194,12 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
           retailerProductId: id,
           url: result.productUrl,
           lastPrice: price,
-          status: check?.status ?? "unknown",
+          status: classification.status,
           availabilityText,
           metadata: {
             discoverySource: "shopping-search",
             provider: result.provider,
+            verificationStatus: check ? "verified" : "discovery",
             sourceUrl: result.sourceUrl,
             retrievedAt: result.retrievedAt,
             sourceConfidence: result.confidence,
@@ -184,7 +210,13 @@ export async function importPokemonFromRetailerSearch(options: { perRetailerLimi
             shippingText: result.shippingText ?? null,
             pickupText: result.pickupText ?? null,
             postalCode: options.postalCode ?? null,
-            localSearchRequested: Boolean(options.postalCode)
+            localSearchRequested: Boolean(options.postalCode),
+            fulfillmentLabel: classification.fulfillmentLabel,
+            shippingAvailable: classification.shippingAvailable,
+            pickupAvailable: classification.pickupAvailable,
+            deliveryAvailable: classification.deliveryAvailable,
+            availabilityType: classification.availabilityType,
+            confidence: classification.confidence
           }
         });
       }

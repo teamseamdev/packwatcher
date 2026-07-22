@@ -1,4 +1,5 @@
 import type { StockStatus } from "../../types.ts";
+import { isAvailableCatalogStatus } from "../../catalog/offer-availability.ts";
 
 export type PriceListing = {
   retailerProductId: string;
@@ -20,8 +21,6 @@ export type PriceAggregation = {
   inStockListingCount: number;
   retailerCount: number;
 };
-
-const availableStatuses: StockStatus[] = ["in_stock", "limited_stock", "shipping_available", "pickup_available", "delivery_available", "preorder", "backorder"];
 
 function median(values: number[]) {
   if (!values.length) return null;
@@ -46,7 +45,7 @@ export function aggregatePrices(listings: PriceListing[], options: { includeMark
   }
 
   const activeListings = Array.from(deduped.values());
-  const inStock = activeListings.filter((listing) => availableStatuses.includes(listing.status));
+  const inStock = activeListings.filter((listing) => isAvailableCatalogStatus(listing.status));
   const qualifying = inStock.filter((listing) => {
     if (!listing.price || listing.price <= 0) return false;
     if (!options.includeMarketplace && !listing.officialRetailerSeller) return false;

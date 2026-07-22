@@ -317,6 +317,30 @@ export async function disableCatalogOffer(formData: FormData) {
   revalidatePath("/catalog");
 }
 
+export async function enableCatalogOffer(formData: FormData) {
+  const { profile } = await requireProfile();
+  if (!isAdmin(profile)) throw new Error("Admin access required.");
+  const parsed = CatalogOfferIdSchema.parse(Object.fromEntries(formData));
+  const admin = createAdminClient();
+
+  const { error } = await admin
+    .from("catalog_offers")
+    .update({
+      active: true,
+      status: "unknown",
+      in_stock: false,
+      availability_text: "Re-enabled by PackWatcher admin; waiting for next check",
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", parsed.offer_id);
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/admin");
+  revalidatePath("/watchlist");
+  revalidatePath("/catalog");
+}
+
 export async function updateFeedbackStatus(formData: FormData) {
   const { profile, user } = await requireProfile();
   if (!isAdmin(profile)) throw new Error("Admin access required.");

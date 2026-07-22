@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isAvailableCatalogStatus } from "@/lib/catalog/offer-availability";
 import type { CatalogImportResult, ImportedCatalogOffer, ImportedCatalogPayload, ImportedCatalogProduct } from "@/lib/catalog-importers/types";
 
 function slugify(value: string) {
@@ -106,7 +107,7 @@ export async function upsertImportedCatalog(supabase: SupabaseClient, payload: I
           row: {
             ...base,
             status: offer.status,
-            in_stock: offer.status === "in_stock",
+            in_stock: isAvailableCatalogStatus(offer.status),
             availability_text: offer.availabilityText ?? offer.status.replaceAll("_", " "),
             last_checked_at: new Date().toISOString()
           },

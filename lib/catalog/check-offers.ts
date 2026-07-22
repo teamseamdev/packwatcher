@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { classifyOfferAvailability, isCatalogOfferAvailable } from "@/lib/catalog/offer-availability";
 import { getRetailerMonitor } from "@/lib/retailers";
 import { errorMetadata, logAppEvent } from "@/lib/monitoring/log";
 import { recordCatalogOfferObservation } from "@/lib/tracker/pipeline";
@@ -11,24 +12,45 @@ type OfferRow = CatalogOffer & {
 export async function checkCatalogOffer(supabase: SupabaseClient, offer: OfferRow) {
   if (offer.active === false) return { checked: false, outboxQueued: 0 };
 
-  const previousInStock = offer.in_stock ?? offer.status === "in_stock";
+  const previousInStock = offer.in_stock ?? isCatalogOfferAvailable(offer);
   const retailer = offer.retailer ?? offer.store_name;
   const monitor = getRetailerMonitor(offer.url, retailer);
   const checked = await monitor.checkOffer(offer);
-  const nextInStock = checked.inStock;
+  const classification = classifyOfferAvailability({
+    status: checked.status,
+    availabilityText: checked.availabilityText,
+    shippingText: typeof offer.metadata?.shippingText === "string" ? offer.metadata.shippingText : null,
+    pickupText: typeof offer.metadata?.pickupText === "string" ? offer.metadata.pickupText : null,
+    retailer,
+    sourceConfidence: 0.82,
+    verifiedByRetailerConnector: true
+  });
+  const nextInStock = classification.inStock;
   const checkedAt = checked.checkedAt;
+  const nextMetadata = {
+    ...(offer.metadata ?? {}),
+    verifiedByRetailerConnector: true,
+    verificationStatus: "verified",
+    verifiedAt: checkedAt,
+    fulfillmentLabel: classification.fulfillmentLabel,
+    shippingAvailable: classification.shippingAvailable,
+    pickupAvailable: classification.pickupAvailable,
+    deliveryAvailable: classification.deliveryAvailable,
+    confidence: classification.confidence
+  };
 
   await supabase
     .from("catalog_offers")
     .update({
-      status: checked.status,
+      status: classification.status,
       last_price: checked.price ?? offer.last_price,
       price: checked.price ?? offer.price ?? offer.last_price,
       in_stock: nextInStock,
       availability_text: checked.availabilityText,
       last_checked_at: checkedAt,
       updated_at: checkedAt,
-      image_url: checked.imageUrl ?? offer.image_url
+      image_url: checked.imageUrl ?? offer.image_url,
+      metadata: nextMetadata
     })
     .eq("id", offer.id);
 
@@ -36,16 +58,16 @@ export async function checkCatalogOffer(supabase: SupabaseClient, offer: OfferRo
     supabase,
     offer,
     observation: {
-      status: checked.status,
+      status: classification.status,
       price: checked.price,
       currency: offer.currency ?? "USD",
-      availabilityType: "online",
-      shippingAvailable: nextInStock ? true : null,
-      pickupAvailable: null,
-      deliveryAvailable: null,
+      availabilityType: classification.availabilityType,
+      shippingAvailable: classification.shippingAvailable,
+      pickupAvailable: classification.pickupAvailable,
+      deliveryAvailable: classification.deliveryAvailable,
       sellerName: typeof offer.metadata?.sellerName === "string" ? offer.metadata.sellerName : retailer,
       officialRetailerSeller: typeof offer.metadata?.officialRetailerSeller === "boolean" ? offer.metadata.officialRetailerSeller : true,
-      confidence: nextInStock ? 0.78 : 0.7,
+      confidence: classification.confidence,
       sourceStatus: checked.availabilityText,
       extractionStrategy: "catalog_offer_monitor",
       adapterVersion: "catalog-offer-monitor-v2",

@@ -9,6 +9,7 @@ import { trackCatalogOffer, trackCatalogProduct, untrackCatalogProduct } from "@
 import { LocationPostalCodeField } from "@/components/location-postal-code-field";
 import { isLikelyPokemonProduct } from "@/lib/catalog-importers/pokemon-product-filter";
 import { compareCatalogOffers, distanceLabel, fulfillmentLabel, fulfillmentText, fulfillmentTone } from "@/lib/catalog/offer-ranking";
+import { isCatalogOfferAvailable } from "@/lib/catalog/offer-availability";
 import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
 import { optionalCurrency } from "@/lib/profit";
 import type { CatalogOffer, CatalogProduct, StockStatus } from "@/lib/types";
@@ -29,7 +30,7 @@ function statusLabel(status: StockStatus) {
 }
 
 function groupStatus(group: CatalogProductGroup): StockStatus {
-  if (group.offers.some((offer) => offer.status === "in_stock")) return "in_stock";
+  if (group.offers.some((offer) => isCatalogOfferAvailable(offer))) return "in_stock";
   if (group.offers.length && group.offers.every((offer) => offer.status === "out_of_stock")) return "out_of_stock";
   return "unknown";
 }

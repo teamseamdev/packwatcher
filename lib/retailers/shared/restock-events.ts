@@ -1,4 +1,5 @@
 import type { ProductAlert, StockStatus } from "../../types.ts";
+import { isAvailableCatalogStatus } from "../../catalog/offer-availability.ts";
 
 export type RestockSnapshot = {
   retailerProductId: string;
@@ -13,11 +14,9 @@ export type RestockSnapshot = {
   storeId?: string | null;
 };
 
-const availableStatuses: StockStatus[] = ["in_stock", "limited_stock", "shipping_available", "pickup_available", "delivery_available", "preorder", "backorder"];
-
 export function shouldSendRestockAlert(alert: ProductAlert, snapshot: RestockSnapshot) {
-  const becameAvailable = !snapshot.previousStatus || !availableStatuses.includes(snapshot.previousStatus)
-    ? availableStatuses.includes(snapshot.status)
+  const becameAvailable = !snapshot.previousStatus || !isAvailableCatalogStatus(snapshot.previousStatus)
+    ? isAvailableCatalogStatus(snapshot.status)
     : false;
   const priceCrossedThreshold = typeof alert.max_price === "number" && snapshot.price !== null && snapshot.price <= alert.max_price;
   const retailerAllowed = !alert.preferred_retailers?.length || alert.preferred_retailers.includes(snapshot.retailer);

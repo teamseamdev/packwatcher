@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { aggregatePrices } from "../lib/retailers/shared/price-aggregation.ts";
 import { isLikelyPokemonProduct, pokemonShoppingQuery } from "../lib/catalog-importers/pokemon-product-filter.ts";
+import { classifyOfferAvailability, isAvailableCatalogStatus } from "../lib/catalog/offer-availability.ts";
 import { isGoogleUrl, resolveRetailerUrl } from "../lib/catalog/retailer-url.ts";
 import { FOUNDER_CARD_SCAN_LIMIT, FOUNDER_MEMBERSHIP_LIMIT, FOUNDER_VIDEO_SCAN_LIMIT, usageLimitForPlan } from "../lib/plans.ts";
-import { compareCatalogOffers, distanceLabel, offerDistanceMiles } from "../lib/catalog/offer-ranking.ts";
+import { compareCatalogOffers, distanceLabel, fulfillmentLabel, verificationLabel, offerDistanceMiles } from "../lib/catalog/offer-ranking.ts";
 import { distanceMiles } from "../lib/location/distance.ts";
 import { createConfiguredShoppingSearchProvider } from "../lib/retailers/shopping-search/connector.ts";
 import { matchProduct } from "../lib/retailers/shared/product-matching.ts";
@@ -58,6 +59,44 @@ test("aggregates prices with official retailer filtering and trimmed average", (
   assert.equal(result.lowestCurrentPrice, 49.99);
   assert.equal(result.highestCurrentPrice, 54.99);
   assert.equal(result.averageAvailablePrice, 52.49);
+});
+
+test("counts shipping-only and pickup-only offers as available", () => {
+  assert.equal(isAvailableCatalogStatus("shipping_only"), true);
+  assert.equal(isAvailableCatalogStatus("pickup_only"), true);
+  const result = aggregatePrices([
+    { retailerProductId: "1", retailer: "Walmart", status: "shipping_only", price: 36.99, officialRetailerSeller: true, checkedAt: new Date().toISOString() },
+    { retailerProductId: "2", retailer: "Target", status: "pickup_only", price: 39.99, officialRetailerSeller: true, checkedAt: new Date().toISOString() }
+  ]);
+  assert.equal(result.inStockListingCount, 2);
+  assert.equal(result.qualifyingListingCount, 2);
+  assert.equal(result.lowestCurrentPrice, 36.99);
+});
+
+test("classifies provider fulfillment evidence without marking it verified", () => {
+  const shipping = classifyOfferAvailability({
+    status: "unknown",
+    availabilityText: "In stock online",
+    shippingText: "Free delivery tomorrow",
+    retailer: "Five Below",
+    sourceConfidence: 0.68,
+    verifiedByRetailerConnector: false
+  });
+  assert.equal(shipping.status, "shipping_only");
+  assert.equal(shipping.inStock, true);
+  assert.equal(shipping.shippingAvailable, true);
+  assert.equal(shipping.pickupAvailable, false);
+  assert.equal(shipping.confidence <= 0.72, true);
+
+  const pickup = classifyOfferAvailability({
+    status: "unknown",
+    availabilityText: "Pickup available at nearby store",
+    pickupText: "Pickup today",
+    retailer: "Target",
+    sourceConfidence: 0.68
+  });
+  assert.equal(pickup.status, "pickup_available");
+  assert.equal(pickup.availabilityType, "local");
 });
 
 test("normalizes availability and freshness", () => {
@@ -228,6 +267,34 @@ test("ranks nearby local pickup offers before farther local offers and shipping"
   assert.equal(offerDistanceMiles(far), 18);
 });
 
+test("labels discovery and verified retailer offers differently", () => {
+  const base = {
+    id: "offer",
+    catalog_product_id: "p",
+    product_id: "p",
+    store_name: "Walmart",
+    retailer: "Walmart",
+    retailer_product_id: null,
+    title: "Pokemon Booster Bundle",
+    url: "https://walmart.example",
+    status: "shipping_only" as const,
+    last_price: 49.99,
+    price: 49.99,
+    currency: "USD",
+    image_url: null,
+    in_stock: true,
+    availability_text: "In stock for shipping",
+    last_checked_at: new Date().toISOString(),
+    active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    catalog_products: null
+  };
+  assert.equal(fulfillmentLabel({ ...base, metadata: { verificationStatus: "discovery" } }), "Shipping only");
+  assert.equal(verificationLabel({ ...base, metadata: { verificationStatus: "discovery" } }), "Discovery result");
+  assert.equal(verificationLabel({ ...base, metadata: { verificationStatus: "verified", verifiedByRetailerConnector: true } }), "Verified by retailer");
+});
+
 test("calculates haversine distance for local ranking", () => {
   const pittsburgh = { latitude: 40.4406, longitude: -79.9959 };
   const northHills = { latitude: 40.5434, longitude: -80.0078 };
@@ -278,7 +345,7 @@ test("SerpAPI provider normalizes Google Shopping, Walmart, Amazon, and eBay sea
     const payload = engine === "google_shopping" ? {
       shopping_results: [{ title: "Pokemon Booster Bundle", source: "Target", link: "https://target.com/p/test", extracted_price: 49.99, thumbnail: "https://img.test/a.jpg", delivery: "Free shipping" }]
     } : engine === "walmart" ? {
-      organic_results: [{ title: "Pokemon Elite Trainer Box", product_page_url: "https://www.walmart.com/ip/123", extracted_price: 54.99, thumbnail: "https://img.test/b.jpg", primary_offer: { availability: "In stock" } }]
+      organic_results: [{ title: "Pokemon Elite Trainer Box", product_page_url: "https://www.walmart.com/ip/123", extracted_price: 54.99, thumbnail: "https://img.test/b.jpg", primary_offer: { availability: "In stock for pickup" }, pickup: "Pickup today" }]
     } : engine === "amazon" ? {
       organic_results: [{ title: "Pokemon Booster Pack", link_clean: "https://www.amazon.com/dp/B000TEST", extracted_price: 6.99, stock: "Only 3 left in stock", delivery: ["FREE delivery Tomorrow"], prime: true }]
     } : {
@@ -294,6 +361,7 @@ test("SerpAPI provider normalizes Google Shopping, Walmart, Amazon, and eBay sea
     assert.equal(results.length, 4);
     assert.deepEqual(results.map((result) => result.provider).sort(), ["serpapi:amazon", "serpapi:ebay", "serpapi:google_shopping", "serpapi:walmart"]);
     assert.equal(results.find((result) => result.retailer === "Walmart")?.price, 54.99);
+    assert.equal(results.find((result) => result.retailer === "Walmart")?.pickupText, "Pickup today");
     assert.equal(results.find((result) => result.retailer === "Amazon")?.shippingText, "FREE delivery Tomorrow");
     assert.equal(results.find((result) => result.retailer === "eBay")?.sellerName, "card-shop");
   } finally {

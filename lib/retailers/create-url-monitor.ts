@@ -1,5 +1,6 @@
 import type { RetailerAdapter } from "@/lib/stock-checkers/types";
 import type { RetailerMonitor } from "@/lib/retailers/types";
+import { isAvailableCatalogStatus } from "@/lib/catalog/offer-availability";
 
 export function createUrlMonitor(name: string, adapter: RetailerAdapter): RetailerMonitor {
   return {
@@ -15,7 +16,7 @@ export function createUrlMonitor(name: string, adapter: RetailerAdapter): Retail
       return {
         status: checked.status,
         price: checked.price,
-        inStock: checked.status === "in_stock",
+        inStock: isAvailableCatalogStatus(checked.status),
         availabilityText: checked.rawMatchReason,
         checkedAt: checked.checkedAt,
         imageUrl: checked.imageUrl

@@ -8,6 +8,7 @@ import { BellOff, BellPlus, ExternalLink, Loader2, PackageSearch, Search } from 
 import { removeTrackedProduct, trackCatalogProduct, untrackCatalogProduct } from "@/app/(app)/watchlist/actions";
 import { LocationPostalCodeField } from "@/components/location-postal-code-field";
 import { isLikelyPokemonProduct } from "@/lib/catalog-importers/pokemon-product-filter";
+import { isCatalogOfferAvailable } from "@/lib/catalog/offer-availability";
 import { compareCatalogOffers, fulfillmentLabel, fulfillmentText, fulfillmentTone, metadataText, verificationLabel, verificationText } from "@/lib/catalog/offer-ranking";
 import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
 import { optionalCurrency } from "@/lib/profit";
@@ -260,7 +261,7 @@ export function CatalogOfferPicker({
                           className="inline-flex h-9 items-center gap-2 rounded-lg bg-amber-300 px-3 text-xs font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <BellPlus className="h-4 w-4" />
-                          {offer.status === "in_stock" ? "Track this" : "Notify me"}
+                          {isCatalogOfferAvailable(offer) ? "Track this" : "Notify me"}
                         </button>
                       )}
                       {product ? (

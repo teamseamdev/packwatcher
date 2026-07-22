@@ -2,9 +2,10 @@ import { redirect } from "next/navigation";
 import { AdminSyncPanel } from "@/components/admin-sync-panel";
 import { StatCard } from "@/components/stat-card";
 import { isAdmin, requireProfile } from "@/lib/auth";
+import { fulfillmentLabel, verificationLabel } from "@/lib/catalog/offer-ranking";
 import { formatPromoDiscount } from "@/lib/promo-codes";
 import type { FeedbackItem, FeedbackStatus } from "@/lib/types";
-import { addCatalogOffer, adminCheckProduct, approveProductMatch, createPromoCode, disableCatalogOffer, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, reconcilePokemonInventory, rejectProductMatch, runMonitorJobsNow, sendAdminTestNotification, setPromoCodeActive, simulateRestockPipeline, updateFeedbackStatus, updateUserPlan } from "./actions";
+import { addCatalogOffer, adminCheckProduct, approveProductMatch, createPromoCode, disableCatalogOffer, enableCatalogOffer, importBestBuyPokemonCatalog, importRetailerSearchCatalog, importRetailerUrlsToCatalog, importTcgCsvPokemonCatalog, reconcilePokemonInventory, rejectProductMatch, runMonitorJobsNow, sendAdminTestNotification, setPromoCodeActive, simulateRestockPipeline, updateFeedbackStatus, updateUserPlan } from "./actions";
 
 const panelClass = "rounded-lg border border-white/10 bg-white/[0.04] p-5";
 const scrollPanelClass = `${panelClass} scroll-panel max-h-[680px] pr-4`;
@@ -45,7 +46,7 @@ export default async function AdminPage() {
     supabase.from("retailer_connector_health").select("*").order("updated_at", { ascending: false }).limit(12),
     supabase.from("retail_job_runs").select("*").order("started_at", { ascending: false }).limit(10),
     supabase.from("product_match_reviews").select("*").eq("status", "pending").order("created_at", { ascending: false }).limit(10),
-    supabase.from("catalog_offers").select("id,title,store_name,retailer,status,last_price,price,active,created_at,url").order("created_at", { ascending: false }).limit(30),
+    supabase.from("catalog_offers").select("*").order("created_at", { ascending: false }).limit(50),
     supabase.from("app_events").select("*").in("severity", ["warn", "error"]).order("created_at", { ascending: false }).limit(30),
     supabase
       .from("feedback_items")
@@ -336,14 +337,21 @@ export default async function AdminPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate font-medium text-white">{offer.title ?? "Untitled offer"}</p>
-                    <p className="mt-1 text-slate-400">{offer.retailer ?? offer.store_name} - {offer.status} - ${offer.last_price ?? offer.price ?? "n/a"}</p>
+                    <p className="mt-1 text-slate-400">{offer.retailer ?? offer.store_name} - {fulfillmentLabel(offer)} - ${offer.last_price ?? offer.price ?? "n/a"}</p>
+                    <p className="mt-1 text-xs text-slate-500">{verificationLabel(offer)} - {offer.last_checked_at ? new Date(offer.last_checked_at).toLocaleString() : "not checked"}</p>
+                    {offer.availability_text ? <p className="mt-1 line-clamp-2 text-xs text-slate-500">{offer.availability_text}</p> : null}
                     <p className="mt-1 truncate text-xs text-slate-600">{offer.url}</p>
                   </div>
                   <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${offer.active === false ? "bg-red-400/20 text-red-100" : "bg-emerald-400/15 text-emerald-200"}`}>
                     {offer.active === false ? "Disabled" : "Active"}
                   </span>
                 </div>
-                {offer.active === false ? null : (
+                {offer.active === false ? (
+                  <form action={enableCatalogOffer} className="mt-3">
+                    <input type="hidden" name="offer_id" value={offer.id} />
+                    <button className="h-9 rounded-lg border border-emerald-300/30 px-3 text-xs font-semibold text-emerald-100">Re-enable offer</button>
+                  </form>
+                ) : (
                   <form action={disableCatalogOffer} className="mt-3">
                     <input type="hidden" name="offer_id" value={offer.id} />
                     <button className="h-9 rounded-lg border border-red-300/30 px-3 text-xs font-semibold text-red-100">Disable offer</button>

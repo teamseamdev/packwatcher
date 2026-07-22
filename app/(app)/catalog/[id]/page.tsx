@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ExternalLink } from "lucide-react";
 import { ProductTrackButton } from "@/components/product-track-button";
 import { requireProfile } from "@/lib/auth";
+import { isCatalogOfferAvailable } from "@/lib/catalog/offer-availability";
 import { compareCatalogOffers, distanceLabel, fulfillmentLabel, fulfillmentText, fulfillmentTone, metadataText, verificationLabel } from "@/lib/catalog/offer-ranking";
 import { resolveRetailerUrl } from "@/lib/catalog/retailer-url";
 import { optionalCurrency } from "@/lib/profit";
@@ -10,7 +11,7 @@ import { aggregatePrices } from "@/lib/retailers/shared/price-aggregation";
 import type { CatalogOffer, CatalogProduct } from "@/lib/types";
 
 function offerStatus(offer: CatalogOffer) {
-  if (offer.in_stock || offer.status === "in_stock") return fulfillmentLabel(offer);
+  if (isCatalogOfferAvailable(offer)) return fulfillmentLabel(offer);
   if (offer.status === "out_of_stock") return "Out of stock";
   return offer.availability_text ?? "Trackable";
 }
@@ -101,7 +102,7 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {offers.length ? offers.map((offer) => {
-            const inStock = offer.in_stock || offer.status === "in_stock";
+            const inStock = isCatalogOfferAvailable(offer);
             return (
               <article key={offer.id} className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
                 <div className="flex items-start justify-between gap-3">
