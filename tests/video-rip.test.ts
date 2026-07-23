@@ -13,6 +13,7 @@ import {
   scoreFrameQuality,
   visualFingerprintDistance
 } from "../lib/video-rip/analysis.ts";
+import { locateVideoCardCrop } from "../lib/video-rip/crop.ts";
 import type { VideoRipFrameSample, VideoRipRecognitionCard } from "../lib/video-rip/types.ts";
 
 test("video frame quality rewards sharp card-like frames", () => {
@@ -91,6 +92,30 @@ test("video card windows reject visible non-card wrapper frames", () => {
   assert.equal(isStrongFallbackCardFrame(wrapperFrame), false);
   assert.equal(isStrongFallbackCardFrame(cardFrame), true);
   assert.equal(buildCardWindows([wrapperFrame, cardFrame, cardFrameNext]).length, 1);
+});
+
+test("video crop detector isolates a small portrait card from a wide frame", () => {
+  const frame = syntheticFrame(320, 220, 42);
+  drawSyntheticCard(frame, { x: 132, y: 28, width: 74, height: 104 });
+
+  const crop = locateVideoCardCrop(frame);
+
+  assert.ok(crop);
+  assert.ok(crop.score >= 0.45);
+  assert.ok(Math.abs((crop.x + crop.width / 2) - 169) < 28);
+  assert.ok(Math.abs((crop.y + crop.height / 2) - 80) < 30);
+  assert.ok(crop.areaRatio < 0.25);
+});
+
+test("video crop detector rejects horizontal wrapper-like regions", () => {
+  const frame = syntheticFrame(320, 220, 42);
+  drawRect(frame, 48, 72, 224, 66, 172);
+  drawRectOutline(frame, 48, 72, 224, 66, 245);
+  for (let y = 84; y < 124; y += 9) drawRect(frame, 70, y, 176, 2, 22);
+
+  const crop = locateVideoCardCrop(frame);
+
+  assert.equal(crop, null);
 });
 
 test("recognition fusion boosts repeated evidence for the same canonical card", () => {
@@ -256,4 +281,34 @@ function diagnostics(overrides = {}) {
     rejectionReasons: {},
     ...overrides
   } as const;
+}
+
+function syntheticFrame(width: number, height: number, fill: number) {
+  return { width, height, luma: new Uint8Array(width * height).fill(fill) };
+}
+
+function drawSyntheticCard(frame: { width: number; height: number; luma: Uint8Array }, rect: { x: number; y: number; width: number; height: number }) {
+  drawRect(frame, rect.x, rect.y, rect.width, rect.height, 188);
+  drawRectOutline(frame, rect.x, rect.y, rect.width, rect.height, 250);
+  drawRectOutline(frame, rect.x + 6, rect.y + 6, rect.width - 12, rect.height - 12, 34);
+  drawRect(frame, rect.x + 12, rect.y + 14, rect.width - 24, 3, 24);
+  drawRectOutline(frame, rect.x + 10, rect.y + 28, rect.width - 20, 34, 32);
+  for (let y = rect.y + 69; y < rect.y + rect.height - 12; y += 8) {
+    drawRect(frame, rect.x + 12, y, rect.width - 24, 2, 28);
+  }
+}
+
+function drawRect(frame: { width: number; height: number; luma: Uint8Array }, x: number, y: number, width: number, height: number, value: number) {
+  for (let yy = Math.max(0, y); yy < Math.min(frame.height, y + height); yy += 1) {
+    for (let xx = Math.max(0, x); xx < Math.min(frame.width, x + width); xx += 1) {
+      frame.luma[yy * frame.width + xx] = value;
+    }
+  }
+}
+
+function drawRectOutline(frame: { width: number; height: number; luma: Uint8Array }, x: number, y: number, width: number, height: number, value: number) {
+  drawRect(frame, x, y, width, 2, value);
+  drawRect(frame, x, y + height - 2, width, 2, value);
+  drawRect(frame, x, y, 2, height, value);
+  drawRect(frame, x + width - 2, y, 2, height, value);
 }

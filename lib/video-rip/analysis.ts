@@ -76,6 +76,24 @@ export function scoreFrameQuality(input: {
   return { cardLikeScore: round(cardLikeScore), qualityScore: round(qualityScore) };
 }
 
+export function scoreVideoFrameWithCrop(input: {
+  brightness: number;
+  sharpness: number;
+  edgeDensity: number;
+  motionScore: number;
+  coverageScore: number;
+  glareScore: number;
+  cropScore?: number | null;
+}) {
+  const base = scoreFrameQuality(input);
+  if (!input.cropScore) return base;
+  const cropBoost = Math.max(0, input.cropScore - 0.42) * 0.34;
+  return {
+    cardLikeScore: round(Math.min(1, base.cardLikeScore + cropBoost)),
+    qualityScore: round(Math.min(1, base.qualityScore + cropBoost * 0.85))
+  };
+}
+
 export function buildCardWindows(samples: VideoRipFrameSample[]) {
   const windows: VideoRipCardWindow[] = [];
   const candidates = samples
@@ -107,10 +125,11 @@ export function visualFingerprintDistance(left?: string | null, right?: string |
 }
 
 export function isLikelyDisplayedCardFrame(sample: VideoRipFrameSample) {
+  const hasUsefulCrop = (sample.cardCropScore ?? 0) >= 0.48;
   return (
-    sample.cardLikeScore >= VIDEO_RIP_ANALYSIS_CONFIG.minimumCardLikeScore &&
+    (sample.cardLikeScore >= VIDEO_RIP_ANALYSIS_CONFIG.minimumCardLikeScore || hasUsefulCrop) &&
     sample.qualityScore >= 0.44 &&
-    sample.coverageScore >= VIDEO_RIP_ANALYSIS_CONFIG.minimumDisplayedCardCoverageScore &&
+    (sample.coverageScore >= VIDEO_RIP_ANALYSIS_CONFIG.minimumDisplayedCardCoverageScore || hasUsefulCrop) &&
     sample.edgeDensity >= 0.018 &&
     sample.edgeDensity <= 0.42 &&
     sample.brightness >= 24 &&

@@ -31,6 +31,15 @@ export type VideoRipFrameSample = {
   id: string;
   timestamp: number;
   imageDataUrl: string;
+  cardCropDataUrl?: string | null;
+  cardCropBounds?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null;
+  cardCropScore?: number | null;
+  cardCropReason?: string | null;
   brightness: number;
   sharpness: number;
   edgeDensity: number;

@@ -15,10 +15,11 @@ import {
   isStrongFallbackCardFrame,
   reportToCsv,
   reportToJson,
-  scoreFrameQuality,
+  scoreVideoFrameWithCrop,
   updateReportCards,
   visualFingerprintDistance
 } from "@/lib/video-rip/analysis";
+import { locateVideoCardCrop } from "@/lib/video-rip/crop";
 import type { FusionInput } from "@/lib/video-rip/analysis";
 import type { VideoDecodeStatus, VideoRipCardWindow, VideoRipDiagnostics, VideoRipFrameSample, VideoRipRecognitionCard, VideoRipReport, VideoRipStage } from "@/lib/video-rip/types";
 
@@ -505,6 +506,9 @@ export function VideoRipAnalysis() {
                         packNumber={pack.packNumber}
                         onDelete={() => deleteCard(card.id)}
                         onUpdate={(updates) => updateCard(card.id, updates)}
+                        onSeek={() => {
+                          if (videoRef.current) videoRef.current.currentTime = card.bestFrameTimestamp;
+                        }}
                       />
                     ))}
                   </div>
@@ -629,22 +633,24 @@ function DiagnosticItem({ label, value }: { label: string; value: string }) {
   );
 }
 
-function VideoCardReviewRow({ card, packNumber, onUpdate, onDelete }: {
+function VideoCardReviewRow({ card, packNumber, onUpdate, onDelete, onSeek }: {
   card: VideoRipRecognitionCard;
   packNumber: number;
   onUpdate: (updates: Partial<VideoRipRecognitionCard>) => void;
   onDelete: () => void;
+  onSeek: () => void;
 }) {
+  const unresolved = card.needsReview || !card.canonicalCardId;
   return (
-    <div className="grid gap-3 rounded-lg border border-white/10 bg-black/25 p-3 sm:grid-cols-[80px_1fr_auto]">
-      <div className="h-24 w-20 overflow-hidden rounded-lg border border-white/10 bg-slate-900">
+    <div className={`grid gap-3 rounded-lg border border-white/10 bg-black/25 p-3 ${unresolved ? "sm:grid-cols-[150px_1fr_auto]" : "sm:grid-cols-[80px_1fr_auto]"}`}>
+      <button type="button" onClick={onSeek} className={`${unresolved ? "h-44 w-full sm:w-36" : "h-24 w-20"} overflow-hidden rounded-lg border border-white/10 bg-slate-900 text-left`}>
         {card.referenceImageUrl || card.thumbnailDataUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={card.referenceImageUrl ?? card.thumbnailDataUrl ?? ""} alt="" className="h-full w-full object-cover" />
+          <img src={card.referenceImageUrl ?? card.thumbnailDataUrl ?? ""} alt="" className="h-full w-full object-contain" />
         ) : (
           <div className="grid h-full place-items-center text-xs text-slate-500">No image</div>
         )}
-      </div>
+      </button>
       <div className="grid gap-2">
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="text-xs font-bold uppercase tracking-wide text-slate-500">
@@ -666,7 +672,7 @@ function VideoCardReviewRow({ card, packNumber, onUpdate, onDelete }: {
         </div>
         <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
           <span>Pack {packNumber}</span>
-          <span>{formatTimestamp(card.bestFrameTimestamp)}</span>
+          <button type="button" onClick={onSeek} className="font-bold text-cyan-100 underline-offset-2 hover:underline">{formatTimestamp(card.bestFrameTimestamp)}</button>
           <span>{Math.round(card.confidence * 100)}% confidence</span>
           <label className="inline-flex items-center gap-2 font-bold text-slate-200">
             <input type="checkbox" checked={card.selected} onChange={(event) => onUpdate({ selected: event.target.checked })} className="h-4 w-4 accent-amber-300" />
@@ -783,10 +789,12 @@ function buildVideoDiagnostics(input: {
   const blackFrames = input.extraction.samples.filter((sample) => sample.brightness < 10).length;
   const cardLikeFrames = input.extraction.samples.filter((sample) => sample.cardLikeScore >= VIDEO_RIP_ANALYSIS_CONFIG.minimumCardLikeScore).length;
   const visibleFrames = input.extraction.samples.filter(isUsableVisibleSample).length;
+  const croppedFrames = input.extraction.samples.filter((sample) => sample.cardCropDataUrl).length;
   const rejectionReasons: Record<string, number> = {
     "low-card-likeness": input.extraction.samples.filter((sample) => sample.cardLikeScore < VIDEO_RIP_ANALYSIS_CONFIG.minimumCardLikeScore).length,
     "low-quality": input.extraction.samples.filter((sample) => sample.qualityScore < VIDEO_RIP_ANALYSIS_CONFIG.fallbackMinimumQualityScore).length,
     "low-coverage": input.extraction.samples.filter((sample) => sample.coverageScore < VIDEO_RIP_ANALYSIS_CONFIG.minimumDisplayedCardCoverageScore).length,
+    "no-card-crop": input.extraction.samples.length - croppedFrames,
     "black-frame": blackFrames
   };
 
@@ -862,10 +870,11 @@ function captureVideoSample(video: HTMLVideoElement, timestamp: number, previous
   const fullCanvas = document.createElement("canvas");
   fullCanvas.width = Math.min(960, sourceWidth);
   fullCanvas.height = Math.max(1, Math.round(sourceHeight / sourceWidth * fullCanvas.width));
-  const fullContext = fullCanvas.getContext("2d");
+  const fullContext = fullCanvas.getContext("2d", { willReadFrequently: true });
   if (!fullContext) throw new Error("Could not capture video frame.");
   fullContext.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
-  const scored = scoreFrameQuality(metrics);
+  const crop = createCardFocusedCrop(fullCanvas, fullContext);
+  const scored = scoreVideoFrameWithCrop({ ...metrics, cropScore: crop?.score ?? null });
 
   return {
     luma: metrics.luma,
@@ -873,6 +882,10 @@ function captureVideoSample(video: HTMLVideoElement, timestamp: number, previous
       id: crypto.randomUUID(),
       timestamp,
       imageDataUrl: fullCanvas.toDataURL("image/jpeg", 0.84),
+      cardCropDataUrl: crop?.dataUrl ?? null,
+      cardCropBounds: crop?.bounds ?? null,
+      cardCropScore: crop?.score ?? null,
+      cardCropReason: crop?.reason ?? null,
       brightness: metrics.brightness,
       sharpness: metrics.sharpness,
       edgeDensity: metrics.edgeDensity,
@@ -881,8 +894,57 @@ function captureVideoSample(video: HTMLVideoElement, timestamp: number, previous
       glareScore: metrics.glareScore,
       cardLikeScore: scored.cardLikeScore,
       qualityScore: scored.qualityScore,
-      visualFingerprint: metrics.visualFingerprint
+      visualFingerprint: crop?.fingerprint ?? metrics.visualFingerprint
     } satisfies VideoRipFrameSample
+  };
+}
+
+function createCardFocusedCrop(sourceCanvas: HTMLCanvasElement, sourceContext: CanvasRenderingContext2D) {
+  const frameImage = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+  const luma = new Uint8Array(sourceCanvas.width * sourceCanvas.height);
+  for (let index = 0; index < frameImage.data.length; index += 4) {
+    luma[index / 4] = Math.round(0.2126 * frameImage.data[index] + 0.7152 * frameImage.data[index + 1] + 0.0722 * frameImage.data[index + 2]);
+  }
+  const candidate = locateVideoCardCrop({ luma, width: sourceCanvas.width, height: sourceCanvas.height });
+  if (!candidate) return null;
+
+  const targetHeight = 980;
+  const targetWidth = Math.max(1, Math.round(targetHeight * (candidate.width / Math.max(1, candidate.height))));
+  const cropCanvas = document.createElement("canvas");
+  cropCanvas.width = Math.max(520, Math.min(860, targetWidth));
+  cropCanvas.height = Math.max(680, Math.min(1180, Math.round(cropCanvas.width / (candidate.width / Math.max(1, candidate.height)))));
+  const cropContext = cropCanvas.getContext("2d", { willReadFrequently: true });
+  if (!cropContext) return null;
+  cropContext.imageSmoothingEnabled = true;
+  cropContext.imageSmoothingQuality = "high";
+  cropContext.drawImage(
+    sourceCanvas,
+    candidate.x,
+    candidate.y,
+    candidate.width,
+    candidate.height,
+    0,
+    0,
+    cropCanvas.width,
+    cropCanvas.height
+  );
+  const cropImage = cropContext.getImageData(0, 0, cropCanvas.width, cropCanvas.height);
+  const cropLuma = new Uint8Array(cropCanvas.width * cropCanvas.height);
+  for (let index = 0; index < cropImage.data.length; index += 4) {
+    cropLuma[index / 4] = Math.round(0.2126 * cropImage.data[index] + 0.7152 * cropImage.data[index + 1] + 0.0722 * cropImage.data[index + 2]);
+  }
+
+  return {
+    dataUrl: cropCanvas.toDataURL("image/jpeg", 0.92),
+    bounds: {
+      x: Number(candidate.x.toFixed(1)),
+      y: Number(candidate.y.toFixed(1)),
+      width: Number(candidate.width.toFixed(1)),
+      height: Number(candidate.height.toFixed(1))
+    },
+    score: candidate.score,
+    reason: candidate.reason,
+    fingerprint: buildVisualFingerprint(cropLuma, cropCanvas.width, cropCanvas.height)
   };
 }
 
@@ -1067,9 +1129,42 @@ async function recognizeWindow(input: {
   setName: string;
   videoAnalysisId: string;
 }): Promise<VideoRipRecognitionCard | null> {
-  const frames = [input.window.bestFrame, ...input.window.alternateFrames].slice(0, 3);
+  const frames = [input.window.bestFrame, ...input.window.alternateFrames]
+    .sort((left, right) => (right.cardCropScore ?? 0) - (left.cardCropScore ?? 0) || right.qualityScore - left.qualityScore)
+    .slice(0, 4);
   const candidates: FusionInput[] = [];
   const notes: string[] = [];
+  if (Date.now() < videoRecognitionRateLimitedUntil) {
+    return buildReviewCard({
+      window: input.window,
+      selectedSetId: input.selectedSetId,
+      setName: input.setName,
+      note: "Recognition is temporarily rate limited. The card crop is saved for manual review."
+    });
+  }
+
+  if (!frames.some((frame) => frame.cardCropDataUrl)) {
+    return buildReviewCard({
+      window: input.window,
+      selectedSetId: input.selectedSetId,
+      setName: input.setName,
+      note: "PackWatcher found this presentation window, but could not isolate a card crop. Adjust manually or rerun with a closer video."
+    });
+  }
+
+  const cacheKey = `${input.selectedSetId}:${frames.map((frame) => frame.visualFingerprint ?? frame.id).join("|")}`;
+  const cached = videoRecognitionCache.get(cacheKey);
+  if (cached) {
+    return {
+      ...cached,
+      id: crypto.randomUUID(),
+      packId: input.window.packId,
+      firstAppearance: input.window.firstAppearance,
+      bestFrameTimestamp: input.window.bestFrameTimestamp,
+      lastAppearance: input.window.lastAppearance
+    };
+  }
+
   const recognitionImages = [
     await buildRecognitionContactSheet(frames)
   ];
@@ -1094,7 +1189,11 @@ async function recognizeWindow(input: {
     const body = await response.json().catch(() => null) as RecognitionResponse | null;
     if (response.ok && body?.cards?.length) candidates.push(...body.cards);
     else if (body?.code === "VIDEO_SCAN_LIMIT_REACHED" || body?.code === "RECOGNITION_DISABLED") throw new Error(body.error ?? "Video Rip Analysis could not continue.");
-    else if (body?.error) notes.push(cleanRecognitionError(body.error));
+    else if (body?.error) {
+      const cleaned = cleanRecognitionError(body.error);
+      notes.push(cleaned);
+      if (/rate limit|temporarily rate limited/i.test(cleaned)) videoRecognitionRateLimitedUntil = Date.now() + 6500;
+    }
     if (candidates.length && candidates.some((candidate) => candidate.confidence >= 0.72)) break;
   }
 
@@ -1108,7 +1207,7 @@ async function recognizeWindow(input: {
     });
   }
 
-  return {
+  const result = {
     id: crypto.randomUUID(),
     packId: input.window.packId,
     canonicalCardId: fused.canonicalCardId,
@@ -1124,14 +1223,19 @@ async function recognizeWindow(input: {
     firstAppearance: input.window.firstAppearance,
     bestFrameTimestamp: input.window.bestFrameTimestamp,
     lastAppearance: input.window.lastAppearance,
-    thumbnailDataUrl: input.window.bestFrame.imageDataUrl,
+    thumbnailDataUrl: bestFrameImage(input.window),
     referenceImageUrl: fused.referenceImageUrl,
     recognitionSource: fused.recognitionSource,
     pricingSource: fused.pricingSource,
     notes: candidates.length > 1 ? `Fused evidence from ${candidates.length} candidate frames.` : null,
     selected: true
   } satisfies VideoRipRecognitionCard;
+  videoRecognitionCache.set(cacheKey, result);
+  return result;
 }
+
+let videoRecognitionRateLimitedUntil = 0;
+const videoRecognitionCache = new Map<string, VideoRipRecognitionCard>();
 
 function buildReviewCard(input: {
   window: VideoRipCardWindow;
@@ -1155,7 +1259,7 @@ function buildReviewCard(input: {
     firstAppearance: input.window.firstAppearance,
     bestFrameTimestamp: input.window.bestFrameTimestamp,
     lastAppearance: input.window.lastAppearance,
-    thumbnailDataUrl: input.window.bestFrame.imageDataUrl,
+    thumbnailDataUrl: bestFrameImage(input.window),
     referenceImageUrl: null,
     recognitionSource: "video_rip_review",
     pricingSource: "manual",
@@ -1165,6 +1269,10 @@ function buildReviewCard(input: {
   } satisfies VideoRipRecognitionCard;
 }
 
+function bestFrameImage(window: VideoRipCardWindow) {
+  return window.bestFrame.cardCropDataUrl ?? window.alternateFrames.find((frame) => frame.cardCropDataUrl)?.cardCropDataUrl ?? window.bestFrame.imageDataUrl;
+}
+
 function cleanRecognitionError(error: string) {
   if (/rate limit|429/i.test(error)) return "Recognition was temporarily rate limited. Review this frame or rerun analysis later.";
   if (/no readable selected-set card/i.test(error)) return "No selected-set card was recognized from this frame. Review manually.";
@@ -1172,7 +1280,8 @@ function cleanRecognitionError(error: string) {
 }
 
 async function buildRecognitionContactSheet(frames: VideoRipFrameSample[]) {
-  const sourceImages = await Promise.all(frames.map((frame) => loadImage(frame.imageDataUrl)));
+  const sourceImages = await Promise.all(frames.map((frame) => loadImage(frame.cardCropDataUrl ?? frame.imageDataUrl)));
+  const originalImages = await Promise.all(frames.slice(0, 2).map((frame) => loadImage(frame.imageDataUrl)));
   const first = sourceImages[0];
   if (!first) return frames[0]?.imageDataUrl ?? "";
 
@@ -1186,12 +1295,14 @@ async function buildRecognitionContactSheet(frames: VideoRipFrameSample[]) {
   context.fillRect(0, 0, canvas.width, canvas.height);
 
   drawImageContain(context, first, 12, 12, 430, 430);
-  drawImageContain(context, first, 454, 12, 430, 430, centerCardCrop(first));
-  drawImageContain(context, first, 12, 454, 430, 204, relativeCrop(first, 0.12, 0.06, 0.76, 0.35));
-  drawImageContain(context, first, 12, 674, 430, 210, relativeCrop(first, 0.12, 0.58, 0.76, 0.34));
+  drawImageContain(context, first, 454, 12, 430, 430, relativeCrop(first, 0.02, 0.02, 0.96, 0.96));
+  drawImageContain(context, first, 12, 454, 430, 204, relativeCrop(first, 0.05, 0.03, 0.9, 0.22));
+  drawImageContain(context, first, 12, 674, 430, 210, relativeCrop(first, 0.05, 0.7, 0.9, 0.24));
 
   const alternate = sourceImages[1] ?? sourceImages[2] ?? first;
-  drawImageContain(context, alternate, 454, 454, 430, 430, centerCardCrop(alternate));
+  drawImageContain(context, alternate, 454, 454, 210, 430);
+  const originalContext = originalImages[0] ?? originalImages[1];
+  if (originalContext) drawImageContain(context, originalContext, 674, 454, 210, 430);
 
   return canvas.toDataURL("image/jpeg", 0.9);
 }
@@ -1222,18 +1333,6 @@ function drawImageContain(
   const drawX = x + (width - drawWidth) / 2;
   const drawY = y + (height - drawHeight) / 2;
   context.drawImage(image, crop.x, crop.y, crop.width, crop.height, drawX, drawY, drawWidth, drawHeight);
-}
-
-function centerCardCrop(image: HTMLImageElement) {
-  const content = detectNonBlackBounds(image);
-  const cropWidth = content.width * 0.72;
-  const cropHeight = content.height * 0.82;
-  return {
-    x: content.x + (content.width - cropWidth) / 2,
-    y: content.y + (content.height - cropHeight) / 2,
-    width: cropWidth,
-    height: cropHeight
-  };
 }
 
 function relativeCrop(image: HTMLImageElement, rx: number, ry: number, rw: number, rh: number) {
