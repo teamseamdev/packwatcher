@@ -8,7 +8,8 @@ import {
   fuseRecognitionCandidates,
   reportToCsv,
   reportToJson,
-  scoreFrameQuality
+  scoreFrameQuality,
+  visualFingerprintDistance
 } from "../lib/video-rip/analysis.ts";
 import type { VideoRipFrameSample, VideoRipRecognitionCard } from "../lib/video-rip/types.ts";
 
@@ -47,6 +48,24 @@ test("video card windows are grouped from neighboring card-like frames", () => {
   assert.equal(windows[0].firstAppearance, 1);
   assert.equal(windows[0].bestFrameTimestamp, 1.7);
   assert.equal(windows[1].firstAppearance, 8.5);
+});
+
+test("video card windows split when adjacent frames show different cards", () => {
+  const firstCard = "1111111100000000111111110000000011111111000000001111111100000000";
+  const secondCard = "0000000011111111000000001111111100000000111111110000000011111111";
+  const windows = buildCardWindows([
+    sample(10, 0.78, firstCard),
+    sample(10.45, 0.8, firstCard),
+    sample(10.9, 0.76, firstCard),
+    sample(11.35, 0.81, secondCard),
+    sample(11.8, 0.79, secondCard),
+    sample(12.25, 0.77, secondCard)
+  ]);
+
+  assert.equal(windows.length, 2);
+  assert.equal(windows[0].bestFrameTimestamp, 10.45);
+  assert.equal(windows[1].bestFrameTimestamp, 11.35);
+  assert.ok(visualFingerprintDistance(firstCard, secondCard) >= 18);
 });
 
 test("recognition fusion boosts repeated evidence for the same canonical card", () => {
@@ -90,7 +109,7 @@ test("timestamp formatting supports long videos", () => {
   assert.equal(formatTimestamp(3725), "1:02:05");
 });
 
-function sample(timestamp: number, cardLikeScore: number): VideoRipFrameSample {
+function sample(timestamp: number, cardLikeScore: number, visualFingerprint: string | null = null): VideoRipFrameSample {
   return {
     id: `frame-${timestamp}`,
     timestamp,
@@ -102,7 +121,8 @@ function sample(timestamp: number, cardLikeScore: number): VideoRipFrameSample {
     coverageScore: 0.86,
     glareScore: 0.02,
     cardLikeScore,
-    qualityScore: cardLikeScore
+    qualityScore: cardLikeScore,
+    visualFingerprint
   };
 }
 

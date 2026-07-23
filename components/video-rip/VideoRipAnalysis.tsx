@@ -15,7 +15,8 @@ import {
   reportToCsv,
   reportToJson,
   scoreFrameQuality,
-  updateReportCards
+  updateReportCards,
+  visualFingerprintDistance
 } from "@/lib/video-rip/analysis";
 import type { FusionInput } from "@/lib/video-rip/analysis";
 import type { VideoRipCardWindow, VideoRipFrameSample, VideoRipRecognitionCard, VideoRipReport, VideoRipStage } from "@/lib/video-rip/types";
@@ -132,16 +133,17 @@ export function VideoRipAnalysis() {
       setProgress(42);
       setStatusText("Finding card display windows...");
       const rawWindows = buildCardWindows(extraction.samples);
-      const windows = assignWindows(rawWindows.length ? rawWindows : buildFallbackWindows(extraction.samples));
+      const analysisWindows = buildAnalysisWindows(rawWindows, extraction.samples, extraction.duration);
+      const windows = assignWindows(analysisWindows);
       if (!windows.length) {
         throw new Error("PackWatcher could read the video, but it could not decode any usable visible frames. If this is an iPhone MOV/HEVC file, export it as H.264 MP4 and try again.");
       }
-      if (!rawWindows.length) {
-        setStatusText("No strong card windows were detected, so PackWatcher is reviewing the clearest video frames instead.");
+      if (analysisWindows.length > rawWindows.length) {
+        setStatusText("PackWatcher found sparse card windows, so it is also reviewing additional clear frames across the video.");
       }
 
       setStage("recognizing");
-      setStatusText(`Recognizing ${windows.length} card window${windows.length === 1 ? "" : "s"}...`);
+      setStatusText(`Detected ${windows.length} candidate card window${windows.length === 1 ? "" : "s"}. Recognizing cards...`);
       const cards: VideoRipRecognitionCard[] = [];
       for (let index = 0; index < windows.length; index += 1) {
         if (abortRef.current) return;
@@ -602,7 +604,8 @@ function captureVideoSample(video: HTMLVideoElement, timestamp: number, previous
       coverageScore: metrics.coverageScore,
       glareScore: metrics.glareScore,
       cardLikeScore: scored.cardLikeScore,
-      qualityScore: scored.qualityScore
+      qualityScore: scored.qualityScore,
+      visualFingerprint: metrics.visualFingerprint
     } satisfies VideoRipFrameSample
   };
 }
@@ -664,12 +667,36 @@ function computeFrameMetrics(imageData: ImageData, previousLuma: Uint8Array | nu
     motionScore: motion,
     coverageScore,
     glareScore: glare / pixels,
-    edgeStrength: edgeStrength / Math.max(1, laplacianCount)
+    edgeStrength: edgeStrength / Math.max(1, laplacianCount),
+    visualFingerprint: buildVisualFingerprint(luma, width, height)
   };
 }
 
 function assignWindows(windows: VideoRipCardWindow[]) {
   return assignWindowsToPacks(windows);
+}
+
+function buildAnalysisWindows(rawWindows: VideoRipCardWindow[], samples: VideoRipFrameSample[], duration: number) {
+  const fallbackWindows = buildFallbackWindows(samples);
+  const targetWindowCount = Math.min(36, Math.max(rawWindows.length, Math.ceil(duration / 5)));
+  const combined = [...rawWindows];
+
+  for (const fallback of fallbackWindows) {
+    if (combined.length >= targetWindowCount) break;
+    if (combined.some((window) => windowsOverlap(window, fallback))) continue;
+    combined.push(fallback);
+  }
+
+  return combined
+    .sort((left, right) => left.bestFrameTimestamp - right.bestFrameTimestamp)
+    .map((window, index) => ({ ...window, id: `window-${index + 1}` }));
+}
+
+function windowsOverlap(left: VideoRipCardWindow, right: VideoRipCardWindow) {
+  const timeDistance = Math.abs(left.bestFrameTimestamp - right.bestFrameTimestamp);
+  if (timeDistance < 1.1) return true;
+  const fingerprintDistance = visualFingerprintDistance(left.bestFrame.visualFingerprint, right.bestFrame.visualFingerprint);
+  return timeDistance < 4 && fingerprintDistance > 0 && fingerprintDistance < 6;
 }
 
 function buildFallbackWindows(samples: VideoRipFrameSample[]) {
@@ -678,8 +705,8 @@ function buildFallbackWindows(samples: VideoRipFrameSample[]) {
     .sort((left, right) => right.qualityScore - left.qualityScore);
   const picked: VideoRipFrameSample[] = [];
   for (const sample of visibleSamples) {
-    if (picked.length >= 18) break;
-    if (picked.some((existing) => Math.abs(existing.timestamp - sample.timestamp) < 4)) continue;
+    if (picked.length >= 36) break;
+    if (picked.some((existing) => Math.abs(existing.timestamp - sample.timestamp) < 1.2)) continue;
     picked.push(sample);
   }
   return picked
@@ -701,6 +728,37 @@ function buildFallbackWindows(samples: VideoRipFrameSample[]) {
 
 function isUsableVisibleSample(sample: VideoRipFrameSample) {
   return sample.brightness > 12 && sample.sharpness > 2 && sample.edgeDensity > 0.002;
+}
+
+function buildVisualFingerprint(luma: Uint8Array, width: number, height: number) {
+  const grid = 8;
+  const values: number[] = [];
+  const startX = Math.floor(width * 0.22);
+  const endX = Math.floor(width * 0.78);
+  const startY = Math.floor(height * 0.08);
+  const endY = Math.floor(height * 0.92);
+  const cellWidth = Math.max(1, Math.floor((endX - startX) / grid));
+  const cellHeight = Math.max(1, Math.floor((endY - startY) / grid));
+
+  for (let row = 0; row < grid; row += 1) {
+    for (let column = 0; column < grid; column += 1) {
+      let sum = 0;
+      let count = 0;
+      const x0 = startX + column * cellWidth;
+      const y0 = startY + row * cellHeight;
+      for (let y = y0; y < Math.min(endY, y0 + cellHeight); y += 1) {
+        for (let x = x0; x < Math.min(endX, x0 + cellWidth); x += 1) {
+          sum += luma[y * width + x] ?? 0;
+          count += 1;
+        }
+      }
+      values.push(count ? sum / count : 0);
+    }
+  }
+
+  const sorted = [...values].sort((left, right) => left - right);
+  const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+  return values.map((value) => value >= median ? "1" : "0").join("");
 }
 
 async function inspectVideoPreview(
@@ -731,11 +789,16 @@ async function recognizeWindow(input: {
   setName: string;
   videoAnalysisId: string;
 }) {
-  const frames = [input.window.bestFrame, ...input.window.alternateFrames].slice(0, 2);
+  const frames = [input.window.bestFrame, ...input.window.alternateFrames].slice(0, 3);
   const candidates: FusionInput[] = [];
   const notes: string[] = [];
-  for (const frame of frames) {
-    const payload = dataUrlToPayload(frame.imageDataUrl);
+  const recognitionImages = [
+    await buildRecognitionContactSheet(frames),
+    input.window.bestFrame.imageDataUrl
+  ];
+
+  for (const imageDataUrl of recognitionImages) {
+    const payload = dataUrlToPayload(imageDataUrl);
     const response = await fetch("/api/video-rip/recognize-frame", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -745,7 +808,7 @@ async function recognizeWindow(input: {
         selectedSetId: input.selectedSetId,
         imageBase64: payload.imageBase64,
         mimeType: payload.mimeType,
-        timestamp: frame.timestamp,
+        timestamp: input.window.bestFrameTimestamp,
         language: "auto",
         foilPreference: "auto"
       })
@@ -806,6 +869,119 @@ async function recognizeWindow(input: {
     notes: candidates.length > 1 ? `Fused evidence from ${candidates.length} candidate frames.` : null,
     selected: true
   } satisfies VideoRipRecognitionCard;
+}
+
+async function buildRecognitionContactSheet(frames: VideoRipFrameSample[]) {
+  const sourceImages = await Promise.all(frames.map((frame) => loadImage(frame.imageDataUrl)));
+  const first = sourceImages[0];
+  if (!first) return frames[0]?.imageDataUrl ?? "";
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 1120;
+  canvas.height = 1120;
+  const context = canvas.getContext("2d");
+  if (!context) return frames[0]?.imageDataUrl ?? "";
+
+  context.fillStyle = "#020617";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  drawImageContain(context, first, 16, 16, 536, 536);
+  drawImageContain(context, first, 568, 16, 536, 536, centerCardCrop(first));
+  drawImageContain(context, first, 16, 568, 536, 252, relativeCrop(first, 0.12, 0.06, 0.76, 0.35));
+  drawImageContain(context, first, 16, 836, 536, 252, relativeCrop(first, 0.12, 0.58, 0.76, 0.34));
+
+  const alternate = sourceImages[1] ?? sourceImages[2] ?? first;
+  drawImageContain(context, alternate, 568, 568, 536, 520, centerCardCrop(alternate));
+
+  return canvas.toDataURL("image/jpeg", 0.9);
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement | null>((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => resolve(null);
+    image.src = src;
+  });
+}
+
+function drawImageContain(
+  context: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  crop: { x: number; y: number; width: number; height: number } = { x: 0, y: 0, width: image.naturalWidth, height: image.naturalHeight }
+) {
+  context.fillStyle = "#000";
+  context.fillRect(x, y, width, height);
+  const scale = Math.min(width / crop.width, height / crop.height);
+  const drawWidth = crop.width * scale;
+  const drawHeight = crop.height * scale;
+  const drawX = x + (width - drawWidth) / 2;
+  const drawY = y + (height - drawHeight) / 2;
+  context.drawImage(image, crop.x, crop.y, crop.width, crop.height, drawX, drawY, drawWidth, drawHeight);
+}
+
+function centerCardCrop(image: HTMLImageElement) {
+  const content = detectNonBlackBounds(image);
+  const cropWidth = content.width * 0.72;
+  const cropHeight = content.height * 0.82;
+  return {
+    x: content.x + (content.width - cropWidth) / 2,
+    y: content.y + (content.height - cropHeight) / 2,
+    width: cropWidth,
+    height: cropHeight
+  };
+}
+
+function relativeCrop(image: HTMLImageElement, rx: number, ry: number, rw: number, rh: number) {
+  const content = detectNonBlackBounds(image);
+  return {
+    x: content.x + content.width * rx,
+    y: content.y + content.height * ry,
+    width: content.width * rw,
+    height: content.height * rh
+  };
+}
+
+function detectNonBlackBounds(image: HTMLImageElement) {
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.min(320, width);
+  canvas.height = Math.max(1, Math.round(height / width * canvas.width));
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return { x: 0, y: 0, width, height };
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  let minX = canvas.width;
+  let minY = canvas.height;
+  let maxX = 0;
+  let maxY = 0;
+
+  for (let y = 0; y < canvas.height; y += 1) {
+    for (let x = 0; x < canvas.width; x += 1) {
+      const index = (y * canvas.width + x) * 4;
+      const luma = 0.2126 * data[index] + 0.7152 * data[index + 1] + 0.0722 * data[index + 2];
+      if (luma <= 14) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  if (maxX <= minX || maxY <= minY) return { x: 0, y: 0, width, height };
+  const scaleX = width / canvas.width;
+  const scaleY = height / canvas.height;
+  return {
+    x: Math.max(0, minX * scaleX),
+    y: Math.max(0, minY * scaleY),
+    width: Math.min(width, (maxX - minX + 1) * scaleX),
+    height: Math.min(height, (maxY - minY + 1) * scaleY)
+  };
 }
 
 function waitForVideoMetadata(video: HTMLVideoElement) {

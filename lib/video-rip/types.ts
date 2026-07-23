@@ -21,6 +21,7 @@ export type VideoRipFrameSample = {
   glareScore: number;
   cardLikeScore: number;
   qualityScore: number;
+  visualFingerprint?: string | null;
 };
 
 export type VideoRipCardWindow = {

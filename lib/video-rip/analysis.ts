@@ -14,6 +14,8 @@ export const VIDEO_RIP_ANALYSIS_CONFIG = {
   minimumCardLikeScore: 0.5,
   minimumWindowSeconds: 0.55,
   maxGapWithinCardSeconds: 2.15,
+  visualSplitDistance: 18,
+  moderateVisualSplitDistance: 14,
   maxGapWithinPackSeconds: 36,
   maxCardsPerPackBeforeSoftSplit: 14
 } as const;
@@ -78,7 +80,8 @@ export function buildCardWindows(samples: VideoRipFrameSample[]) {
 
   for (const sample of candidates) {
     const previous = current.at(-1);
-    if (!previous || sample.timestamp - previous.timestamp <= VIDEO_RIP_ANALYSIS_CONFIG.maxGapWithinCardSeconds) {
+    const shouldSplit = previous ? shouldSplitCardWindow(current, sample) : false;
+    if (!previous || !shouldSplit) {
       current.push(sample);
       continue;
     }
@@ -87,6 +90,15 @@ export function buildCardWindows(samples: VideoRipFrameSample[]) {
   }
   pushWindow(windows, current);
   return windows;
+}
+
+export function visualFingerprintDistance(left?: string | null, right?: string | null) {
+  if (!left || !right || left.length !== right.length) return 0;
+  let distance = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) distance += 1;
+  }
+  return distance;
 }
 
 export function assignWindowsToPacks(windows: VideoRipCardWindow[]) {
@@ -261,6 +273,24 @@ function pushWindow(windows: VideoRipCardWindow[], samples: VideoRipFrameSample[
     alternateFrames: sorted.slice(1, 3),
     qualityScore: best.qualityScore
   });
+}
+
+function shouldSplitCardWindow(current: VideoRipFrameSample[], sample: VideoRipFrameSample) {
+  const previous = current.at(-1);
+  if (!previous) return false;
+  const gap = sample.timestamp - previous.timestamp;
+  if (gap > VIDEO_RIP_ANALYSIS_CONFIG.maxGapWithinCardSeconds) return true;
+  if (!sample.visualFingerprint || !previous.visualFingerprint) return false;
+
+  const recent = current.slice(-3);
+  const averageDistance = recent.reduce((sum, frame) => sum + visualFingerprintDistance(frame.visualFingerprint, sample.visualFingerprint), 0) / recent.length;
+  const immediateDistance = visualFingerprintDistance(previous.visualFingerprint, sample.visualFingerprint);
+  const enoughEvidenceForPreviousCard = current.length >= 2 || previous.qualityScore >= 0.72;
+  const newFrameUseful = sample.qualityScore >= 0.48 && sample.cardLikeScore >= VIDEO_RIP_ANALYSIS_CONFIG.minimumCardLikeScore;
+
+  if (!enoughEvidenceForPreviousCard || !newFrameUseful) return false;
+  if (immediateDistance >= VIDEO_RIP_ANALYSIS_CONFIG.visualSplitDistance && averageDistance >= VIDEO_RIP_ANALYSIS_CONFIG.moderateVisualSplitDistance) return true;
+  return current.length >= 6 && averageDistance >= VIDEO_RIP_ANALYSIS_CONFIG.visualSplitDistance;
 }
 
 function buildTimeline(input: { packs: VideoRipPack[]; duration: number }) {
