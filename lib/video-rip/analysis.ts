@@ -12,6 +12,9 @@ export const VIDEO_RIP_ANALYSIS_CONFIG = {
   denseSampleIntervalSeconds: 0.45,
   maxAnalyzedFrames: 360,
   minimumCardLikeScore: 0.5,
+  fallbackMinimumCardLikeScore: 0.58,
+  fallbackMinimumQualityScore: 0.5,
+  minimumDisplayedCardCoverageScore: 0.22,
   minimumWindowSeconds: 0.55,
   maxGapWithinCardSeconds: 2.15,
   visualSplitDistance: 18,
@@ -74,7 +77,7 @@ export function scoreFrameQuality(input: {
 export function buildCardWindows(samples: VideoRipFrameSample[]) {
   const windows: VideoRipCardWindow[] = [];
   const candidates = samples
-    .filter((sample) => sample.cardLikeScore >= VIDEO_RIP_ANALYSIS_CONFIG.minimumCardLikeScore)
+    .filter(isLikelyDisplayedCardFrame)
     .sort((left, right) => left.timestamp - right.timestamp);
   let current: VideoRipFrameSample[] = [];
 
@@ -99,6 +102,27 @@ export function visualFingerprintDistance(left?: string | null, right?: string |
     if (left[index] !== right[index]) distance += 1;
   }
   return distance;
+}
+
+export function isLikelyDisplayedCardFrame(sample: VideoRipFrameSample) {
+  return (
+    sample.cardLikeScore >= VIDEO_RIP_ANALYSIS_CONFIG.minimumCardLikeScore &&
+    sample.qualityScore >= 0.44 &&
+    sample.coverageScore >= VIDEO_RIP_ANALYSIS_CONFIG.minimumDisplayedCardCoverageScore &&
+    sample.edgeDensity >= 0.018 &&
+    sample.edgeDensity <= 0.42 &&
+    sample.brightness >= 24 &&
+    sample.brightness <= 224 &&
+    sample.glareScore <= 0.28
+  );
+}
+
+export function isStrongFallbackCardFrame(sample: VideoRipFrameSample) {
+  return (
+    isLikelyDisplayedCardFrame(sample) &&
+    sample.cardLikeScore >= VIDEO_RIP_ANALYSIS_CONFIG.fallbackMinimumCardLikeScore &&
+    sample.qualityScore >= VIDEO_RIP_ANALYSIS_CONFIG.fallbackMinimumQualityScore
+  );
 }
 
 export function assignWindowsToPacks(windows: VideoRipCardWindow[]) {

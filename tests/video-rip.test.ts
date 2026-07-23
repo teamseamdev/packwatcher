@@ -6,6 +6,8 @@ import {
   buildVideoRipReport,
   formatTimestamp,
   fuseRecognitionCandidates,
+  isLikelyDisplayedCardFrame,
+  isStrongFallbackCardFrame,
   reportToCsv,
   reportToJson,
   scoreFrameQuality,
@@ -68,6 +70,29 @@ test("video card windows split when adjacent frames show different cards", () =>
   assert.ok(visualFingerprintDistance(firstCard, secondCard) >= 18);
 });
 
+test("video card windows reject visible non-card wrapper frames", () => {
+  const wrapperFrame = sample(14, 0.62, null, {
+    coverageScore: 0.08,
+    edgeDensity: 0.48,
+    qualityScore: 0.46
+  });
+  const cardFrame = sample(15, 0.7, null, {
+    coverageScore: 0.64,
+    edgeDensity: 0.18,
+    qualityScore: 0.68
+  });
+  const cardFrameNext = sample(15.5, 0.72, null, {
+    coverageScore: 0.66,
+    edgeDensity: 0.17,
+    qualityScore: 0.7
+  });
+
+  assert.equal(isLikelyDisplayedCardFrame(wrapperFrame), false);
+  assert.equal(isStrongFallbackCardFrame(wrapperFrame), false);
+  assert.equal(isStrongFallbackCardFrame(cardFrame), true);
+  assert.equal(buildCardWindows([wrapperFrame, cardFrame, cardFrameNext]).length, 1);
+});
+
 test("recognition fusion boosts repeated evidence for the same canonical card", () => {
   const fused = fuseRecognitionCandidates([
     candidate("a", "Bulbasaur", "1/86", 0.54),
@@ -109,7 +134,7 @@ test("timestamp formatting supports long videos", () => {
   assert.equal(formatTimestamp(3725), "1:02:05");
 });
 
-function sample(timestamp: number, cardLikeScore: number, visualFingerprint: string | null = null): VideoRipFrameSample {
+function sample(timestamp: number, cardLikeScore: number, visualFingerprint: string | null = null, overrides: Partial<VideoRipFrameSample> = {}): VideoRipFrameSample {
   return {
     id: `frame-${timestamp}`,
     timestamp,
@@ -122,7 +147,8 @@ function sample(timestamp: number, cardLikeScore: number, visualFingerprint: str
     glareScore: 0.02,
     cardLikeScore,
     qualityScore: cardLikeScore,
-    visualFingerprint
+    visualFingerprint,
+    ...overrides
   };
 }
 

@@ -6,7 +6,7 @@ import { matchCardWithinSelectedSet, type ScoredCardCandidate } from "@/lib/card
 import { requireUser } from "@/lib/auth";
 import { OpenAICardRecognitionProvider } from "@/lib/clips/providers/card-recognition";
 import { errorMetadata, logAppEvent } from "@/lib/monitoring/log";
-import { reserveUsage } from "@/lib/usage-limits";
+import { getReservedUsage, reserveUsage } from "@/lib/usage-limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +19,8 @@ const VideoFrameRecognitionSchema = z.object({
   mimeType: z.string().trim().default("image/jpeg"),
   timestamp: z.number().min(0),
   language: z.enum(["auto", "english", "japanese", "chinese_simplified", "chinese_traditional", "korean"]).default("auto"),
-  foilPreference: z.enum(["auto", "normal", "foil", "reverse_holo"]).default("auto")
+  foilPreference: z.enum(["auto", "normal", "foil", "reverse_holo"]).default("auto"),
+  usageReserved: z.boolean().optional().default(false)
 });
 
 type PricedVideoRipCard = {
@@ -57,13 +58,17 @@ export async function POST(request: Request) {
     }, { status: 422 });
   }
 
-  const usage = await reserveUsage(user.id, "video_scan", {
+  const usageMetadata = {
     selectedSetId: selectedSet.id,
     selectedSetName: selectedSet.name,
     timestamp: parsed.timestamp,
     scanEventId: parsed.scanEventId,
     source: "video_rip_analysis"
-  }, parsed.videoAnalysisId);
+  };
+  const reservedUsage = parsed.usageReserved
+    ? await getReservedUsage(user.id, "video_scan", parsed.videoAnalysisId)
+    : null;
+  const usage = reservedUsage ?? await reserveUsage(user.id, "video_scan", usageMetadata, parsed.videoAnalysisId);
 
   if (!usage.allowed) {
     return NextResponse.json({

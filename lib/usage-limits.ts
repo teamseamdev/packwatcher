@@ -116,6 +116,49 @@ export async function reserveUsage(userId: string, kind: UsageKind, metadata: Re
   }
 }
 
+export async function getReservedUsage(userId: string, kind: UsageKind, scanEventId: string): Promise<UsageReservation | null> {
+  const admin = createAdminClient();
+  const now = new Date();
+  const since = new Date(now.getTime() - USAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const resetAt = new Date(now.getTime() + USAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+  const { data: existing, error: existingError } = await admin
+    .from("app_usage_events")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("usage_kind", kind)
+    .eq("scan_event_id", scanEventId)
+    .maybeSingle();
+
+  if (existingError) throw existingError;
+  if (!existing) return null;
+
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("plan")
+    .eq("id", userId)
+    .maybeSingle();
+  const plan = normalizePlan(profile?.plan);
+  const limit = usageLimitForPlan(plan, kind);
+  const { count } = await admin
+    .from("app_usage_events")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("usage_kind", kind)
+    .gte("created_at", since.toISOString());
+  const used = count ?? 0;
+
+  return {
+    allowed: true,
+    plan,
+    limit,
+    used,
+    remaining: limit === null ? null : Math.max(0, limit - used),
+    resetAt,
+    replayed: true
+  };
+}
+
 function normalizePlan(plan: unknown): Plan {
   return plan === "pro" || plan === "founder" || plan === "admin" ? plan : "free";
 }

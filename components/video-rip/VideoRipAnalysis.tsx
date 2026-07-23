@@ -12,6 +12,7 @@ import {
   currency,
   formatTimestamp,
   fuseRecognitionCandidates,
+  isStrongFallbackCardFrame,
   reportToCsv,
   reportToJson,
   scoreFrameQuality,
@@ -109,6 +110,18 @@ export function VideoRipAnalysis() {
     const videoAnalysisId = crypto.randomUUID();
 
     try {
+      const usageResponse = await fetch("/api/video-rip/start", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          videoAnalysisId,
+          selectedSetId: selectedSet.id,
+          fileName: selectedFile.name
+        })
+      });
+      const usageBody = await usageResponse.json().catch(() => null) as { error?: string } | null;
+      if (!usageResponse.ok) throw new Error(usageBody?.error ?? "Could not start Video Rip Analysis.");
+
       const setPackResponse = await fetch(`/api/scanner/set-pack?setId=${encodeURIComponent(selectedSet.id)}`);
       const setPackBody = await setPackResponse.json().catch(() => null) as { pack?: { cards?: unknown[] }; error?: string } | null;
       if (!setPackResponse.ok) throw new Error(setPackBody?.error ?? "Could not prepare the selected set.");
@@ -701,7 +714,7 @@ function windowsOverlap(left: VideoRipCardWindow, right: VideoRipCardWindow) {
 
 function buildFallbackWindows(samples: VideoRipFrameSample[]) {
   const visibleSamples = samples
-    .filter(isUsableVisibleSample)
+    .filter(isStrongFallbackCardFrame)
     .sort((left, right) => right.qualityScore - left.qualityScore);
   const picked: VideoRipFrameSample[] = [];
   for (const sample of visibleSamples) {
@@ -810,11 +823,13 @@ async function recognizeWindow(input: {
         mimeType: payload.mimeType,
         timestamp: input.window.bestFrameTimestamp,
         language: "auto",
-        foilPreference: "auto"
+        foilPreference: "auto",
+        usageReserved: true
       })
     });
     const body = await response.json().catch(() => null) as RecognitionResponse | null;
     if (response.ok && body?.cards?.length) candidates.push(...body.cards);
+    else if (body?.code === "VIDEO_SCAN_LIMIT_REACHED" || body?.code === "RECOGNITION_DISABLED") throw new Error(body.error ?? "Video Rip Analysis could not continue.");
     else if (body?.error) notes.push(body.error);
     if (candidates.length && candidates.some((candidate) => candidate.confidence >= 0.72)) break;
   }
