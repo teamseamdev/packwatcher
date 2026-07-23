@@ -1,5 +1,6 @@
 import type {
   VideoRipCardWindow,
+  VideoRipDiagnostics,
   VideoRipFrameSample,
   VideoRipPack,
   VideoRipRecognitionCard,
@@ -8,14 +9,14 @@ import type {
 } from "@/lib/video-rip/types";
 
 export const VIDEO_RIP_ANALYSIS_CONFIG = {
-  baseSampleIntervalSeconds: 0.9,
-  denseSampleIntervalSeconds: 0.45,
-  maxAnalyzedFrames: 360,
-  maxRecognitionWindows: 22,
-  minimumCardLikeScore: 0.5,
-  fallbackMinimumCardLikeScore: 0.62,
-  fallbackMinimumQualityScore: 0.54,
-  minimumDisplayedCardCoverageScore: 0.28,
+  baseSampleIntervalSeconds: 0.65,
+  denseSampleIntervalSeconds: 0.25,
+  maxAnalyzedFrames: 620,
+  maxRecognitionWindows: 28,
+  minimumCardLikeScore: 0.44,
+  fallbackMinimumCardLikeScore: 0.5,
+  fallbackMinimumQualityScore: 0.42,
+  minimumDisplayedCardCoverageScore: 0.14,
   minimumWindowSeconds: 0.55,
   maxGapWithinCardSeconds: 2.15,
   visualSplitDistance: 18,
@@ -176,6 +177,7 @@ export function buildVideoRipReport(input: {
   frameCount: number;
   analyzedFrameCount: number;
   cards: VideoRipRecognitionCard[];
+  diagnostics?: VideoRipDiagnostics;
 }) {
   const cards = input.cards.sort((left, right) => left.bestFrameTimestamp - right.bestFrameTimestamp);
   const packMap = new Map<string, VideoRipRecognitionCard[]>();
@@ -194,9 +196,17 @@ export function buildVideoRipReport(input: {
       duplicateCount: Math.max(0, packCards.length - unique.size)
     };
   });
-  const totalValue = roundMoney(cards.reduce((sum, card) => sum + card.price, 0));
-  const highestPull = cards.reduce<VideoRipRecognitionCard | null>((best, card) => !best || card.price > best.price ? card : best, null);
+  const identifiedCards = cards.filter((card) => !card.needsReview && card.canonicalCardId);
+  const reviewItemCount = cards.filter((card) => card.needsReview || !card.canonicalCardId).length;
+  const totalValue = roundMoney(identifiedCards.reduce((sum, card) => sum + card.price, 0));
+  const highestPull = identifiedCards.reduce<VideoRipRecognitionCard | null>((best, card) => !best || card.price > best.price ? card : best, null);
   const timeline = buildTimeline({ packs, duration: input.duration });
+  const outcome = classifyVideoOutcome({
+    cards,
+    identifiedCount: identifiedCards.length,
+    reviewItemCount,
+    diagnostics: input.diagnostics
+  });
   return {
     id: input.id,
     fileName: input.fileName,
@@ -211,7 +221,10 @@ export function buildVideoRipReport(input: {
     averagePackValue: packs.length ? roundMoney(totalValue / packs.length) : 0,
     highestPull,
     frameCount: input.frameCount,
-    analyzedFrameCount: input.analyzedFrameCount
+    analyzedFrameCount: input.analyzedFrameCount,
+    outcome,
+    reviewItemCount,
+    diagnostics: input.diagnostics
   } satisfies VideoRipReport;
 }
 
@@ -224,7 +237,8 @@ export function updateReportCards(report: VideoRipReport, cards: VideoRipRecogni
     duration: report.duration,
     frameCount: report.frameCount,
     analyzedFrameCount: report.analyzedFrameCount,
-    cards
+    cards,
+    diagnostics: report.diagnostics
   });
 }
 
@@ -333,6 +347,21 @@ function buildTimeline(input: { packs: VideoRipPack[]; duration: number }) {
 
 function packNumber(report: VideoRipReport, packId: string) {
   return String(report.packs.find((pack) => pack.id === packId)?.packNumber ?? "");
+}
+
+function classifyVideoOutcome(input: {
+  cards: VideoRipRecognitionCard[];
+  identifiedCount: number;
+  reviewItemCount: number;
+  diagnostics?: VideoRipDiagnostics;
+}) {
+  if (input.diagnostics?.decodeStatus && input.diagnostics.decodeStatus !== "supported") return "decode-failed";
+  if (!input.diagnostics?.cardWindows && !input.cards.length) return "no-card-windows";
+  if (input.identifiedCount > 0 && input.reviewItemCount > 0) return "partial";
+  if (input.identifiedCount > 0) return "complete";
+  if (input.reviewItemCount > 0) return "needs-review";
+  if ((input.diagnostics?.recognitionAttempts ?? 0) > 0) return "recognition-failed";
+  return "no-card-windows";
 }
 
 function csvCell(value: string | number) {

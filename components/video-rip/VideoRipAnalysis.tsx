@@ -20,7 +20,7 @@ import {
   visualFingerprintDistance
 } from "@/lib/video-rip/analysis";
 import type { FusionInput } from "@/lib/video-rip/analysis";
-import type { VideoRipCardWindow, VideoRipFrameSample, VideoRipRecognitionCard, VideoRipReport, VideoRipStage } from "@/lib/video-rip/types";
+import type { VideoDecodeStatus, VideoRipCardWindow, VideoRipDiagnostics, VideoRipFrameSample, VideoRipRecognitionCard, VideoRipReport, VideoRipStage } from "@/lib/video-rip/types";
 
 type CardSetOption = {
   id: string;
@@ -125,7 +125,15 @@ export function VideoRipAnalysis() {
       const setPackResponse = await fetch(`/api/scanner/set-pack?setId=${encodeURIComponent(selectedSet.id)}`);
       const setPackBody = await setPackResponse.json().catch(() => null) as { pack?: { cards?: unknown[] }; error?: string } | null;
       if (!setPackResponse.ok) throw new Error(setPackBody?.error ?? "Could not prepare the selected set.");
-      setStatusText(`${setPackBody?.pack?.cards?.length ?? 0} cards ready. Extracting video frames...`);
+      const preparedCardCount = setPackBody?.pack?.cards?.length ?? 0;
+      if (!preparedCardCount) throw new Error(`The selected set "${selectedSet.name}" has no prepared card candidates. Choose a different set or resync the card catalog.`);
+      setStatusText(`${preparedCardCount} cards ready. Inspecting video decode...`);
+
+      const decodeProbe = await probeVideoDecode(videoRef.current);
+      if (decodeProbe.status !== "supported") {
+        throw new Error(decodeFailureMessage(decodeProbe.status));
+      }
+      setStatusText(`Video decoded: ${decodeProbe.width} x ${decodeProbe.height}. Extracting frames...`);
 
       setStage("extracting");
       const extraction = await extractCandidateFramesFromVideo({
@@ -148,8 +156,32 @@ export function VideoRipAnalysis() {
       const rawWindows = buildCardWindows(extraction.samples);
       const analysisWindows = buildAnalysisWindows(rawWindows, extraction.samples, extraction.duration);
       const windows = assignWindows(analysisWindows);
+      const diagnosticsBase = buildVideoDiagnostics({
+        probe: decodeProbe,
+        extraction,
+        windows,
+        skippedWindows: 0,
+        recognitionAttempts: 0,
+        identifiedCards: 0,
+        reviewItems: 0
+      });
       if (!windows.length) {
-        throw new Error("PackWatcher could read the video, but it could not decode any usable visible frames. If this is an iPhone MOV/HEVC file, export it as H.264 MP4 and try again.");
+        const noWindowReport = buildVideoRipReport({
+          id: videoAnalysisId,
+          fileName: selectedFile.name,
+          setId: selectedSet.id,
+          setName: selectedSet.name,
+          duration: extraction.duration,
+          frameCount: extraction.estimatedFrameCount,
+          analyzedFrameCount: extraction.samples.length,
+          cards: [],
+          diagnostics: diagnosticsBase
+        });
+        setReport(noWindowReport);
+        setStage("report-ready");
+        setProgress(100);
+        setStatusText(`No card display windows found after sampling ${extraction.samples.length} frames. Use a closer crop or review with diagnostics.`);
+        return;
       }
       if (analysisWindows.length > rawWindows.length) {
         setStatusText("PackWatcher found sparse card windows, so it is also reviewing additional clear frames across the video.");
@@ -159,6 +191,7 @@ export function VideoRipAnalysis() {
       setStatusText(`Detected ${windows.length} candidate card window${windows.length === 1 ? "" : "s"}. Recognizing cards...`);
       const cards: VideoRipRecognitionCard[] = [];
       let skippedWindows = 0;
+      let recognitionAttempts = 0;
       for (let index = 0; index < windows.length; index += 1) {
         if (abortRef.current) return;
         const window = windows[index];
@@ -170,6 +203,7 @@ export function VideoRipAnalysis() {
           videoAnalysisId,
           setName: selectedSet.name
         });
+        recognitionAttempts += 1;
         if (card) cards.push(card);
         else skippedWindows += 1;
         await idlePause();
@@ -186,13 +220,26 @@ export function VideoRipAnalysis() {
         duration: extraction.duration,
         frameCount: extraction.estimatedFrameCount,
         analyzedFrameCount: extraction.samples.length,
-        cards
+        cards,
+        diagnostics: buildVideoDiagnostics({
+          probe: decodeProbe,
+          extraction,
+          windows,
+          skippedWindows,
+          recognitionAttempts,
+          identifiedCards: cards.filter((card) => card.canonicalCardId && !card.needsReview).length,
+          reviewItems: cards.filter((card) => card.needsReview || !card.canonicalCardId).length
+        })
       });
       setReport(nextReport);
       if (videoRef.current) videoRef.current.currentTime = 0;
       setStage("report-ready");
       setProgress(100);
-      setStatusText(`Report ready: ${nextReport.cards.length} identified card${nextReport.cards.length === 1 ? "" : "s"}${skippedWindows ? `, ${skippedWindows} unclear frame${skippedWindows === 1 ? "" : "s"} skipped` : ""}.`);
+      if (nextReport.outcome === "needs-review" || nextReport.outcome === "recognition-failed") {
+        setStatusText(`Needs review: ${nextReport.reviewItemCount} card window${nextReport.reviewItemCount === 1 ? "" : "s"} found, but automatic matching was uncertain.`);
+      } else {
+        setStatusText(`Report ready: ${nextReport.cards.filter((card) => card.canonicalCardId).length} identified card${nextReport.cards.filter((card) => card.canonicalCardId).length === 1 ? "" : "s"}${nextReport.reviewItemCount ? `, ${nextReport.reviewItemCount} needing review` : ""}.`);
+      }
     } catch (analysisError) {
       if (videoRef.current) videoRef.current.currentTime = 0;
       setStage("failed");
@@ -304,6 +351,7 @@ export function VideoRipAnalysis() {
   }
 
   const analyzing = !["idle", "report-ready", "failed"].includes(stage);
+  const currentStageLabel = stage === "report-ready" && report ? outcomeLabel(report.outcome) : stageLabels[stage];
 
   return (
     <div className="space-y-5">
@@ -384,7 +432,7 @@ export function VideoRipAnalysis() {
             )}
             <div className="mt-3">
               <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wide text-slate-400">
-                <span>{stageLabels[stage]}</span>
+                <span>{currentStageLabel}</span>
                 <span>{Math.round(progress)}%</span>
               </div>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-900">
@@ -400,13 +448,24 @@ export function VideoRipAnalysis() {
 
       {report ? (
         <section className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
             <SummaryTile label="Video length" value={formatTimestamp(report.duration)} />
             <SummaryTile label="Packs" value={String(report.packs.length)} />
-            <SummaryTile label="Cards" value={String(report.cards.length)} />
+            <SummaryTile label="Identified" value={String(report.cards.filter((card) => card.canonicalCardId && !card.needsReview).length)} />
+            <SummaryTile label="Needs review" value={String(report.reviewItemCount)} />
             <SummaryTile label="Value" value={currency(report.totalValue)} />
             <SummaryTile label="Highest pull" value={report.highestPull ? `${report.highestPull.cardName} ${currency(report.highestPull.price)}` : "None"} />
           </div>
+
+          {report.outcome !== "complete" ? (
+            <div className="rounded-lg border border-amber-300/30 bg-amber-300/10 p-3 text-sm text-amber-50">
+              <p className="font-black">{outcomeLabel(report.outcome)}</p>
+              <p className="mt-1 text-amber-100/85">
+                {outcomeHelp(report.outcome, report.diagnostics)}
+              </p>
+            </div>
+          ) : null}
+          {process.env.NODE_ENV !== "production" && report.diagnostics ? <VideoDiagnosticsPanel diagnostics={report.diagnostics} /> : null}
 
           <div className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -488,12 +547,85 @@ function SummaryTile({ label, value }: { label: string; value: string }) {
   );
 }
 
+function outcomeLabel(outcome: VideoRipReport["outcome"]) {
+  switch (outcome) {
+    case "complete":
+      return "Report ready";
+    case "partial":
+      return "Partial report";
+    case "needs-review":
+      return "Needs review";
+    case "decode-failed":
+      return "Decode failed";
+    case "no-card-windows":
+      return "No card windows found";
+    case "recognition-failed":
+      return "Recognition failed";
+    case "cancelled":
+      return "Cancelled";
+    default:
+      return "Needs review";
+  }
+}
+
+function outcomeHelp(outcome: VideoRipReport["outcome"], diagnostics?: VideoRipDiagnostics) {
+  const sampled = diagnostics?.sampledFrames ?? 0;
+  const windows = diagnostics?.cardWindows ?? 0;
+  switch (outcome) {
+    case "partial":
+      return `${windows} card window${windows === 1 ? "" : "s"} found from ${sampled} sampled frames. Review the uncertain rows before adding to inventory.`;
+    case "needs-review":
+      return `${windows} card window${windows === 1 ? "" : "s"} reached review, but automatic matching was uncertain. Edit the rows manually or rerun with a clearer video crop.`;
+    case "no-card-windows":
+      return `The video decoded and ${sampled} frames were sampled, but no card-presentation windows were strong enough to review.`;
+    case "recognition-failed":
+      return `${windows} card window${windows === 1 ? "" : "s"} reached recognition, but no selected-set candidates could be confirmed.`;
+    case "decode-failed":
+      return "The browser could not produce reliable video pixels for local analysis.";
+    case "cancelled":
+      return "The analysis was cancelled before completion.";
+    case "complete":
+    default:
+      return "Cards were identified and grouped for review.";
+  }
+}
+
 function ExportButton({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
   return (
     <button type="button" onClick={onClick} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm font-black text-slate-100">
       {icon}
       {label}
     </button>
+  );
+}
+
+function VideoDiagnosticsPanel({ diagnostics }: { diagnostics: VideoRipDiagnostics }) {
+  return (
+    <details className="rounded-lg border border-cyan-300/20 bg-cyan-300/10 p-3 text-sm text-cyan-50">
+      <summary className="cursor-pointer font-black">Development diagnostics</summary>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <DiagnosticItem label="Decode" value={`${diagnostics.decodeStatus} / ${diagnostics.decodePath}`} />
+        <DiagnosticItem label="Resolution" value={`${diagnostics.width} x ${diagnostics.height}`} />
+        <DiagnosticItem label="Frames" value={`${diagnostics.sampledFrames} sampled / ${diagnostics.visibleFrames} visible`} />
+        <DiagnosticItem label="Windows" value={String(diagnostics.cardWindows)} />
+        <DiagnosticItem label="Recognition" value={`${diagnostics.recognitionAttempts} attempts`} />
+        <DiagnosticItem label="Identified" value={String(diagnostics.identifiedCards)} />
+        <DiagnosticItem label="Review" value={String(diagnostics.reviewItems)} />
+        <DiagnosticItem label="Black frames" value={String(diagnostics.blackFrames)} />
+      </div>
+      <div className="mt-3 text-xs text-cyan-100/80">
+        {Object.entries(diagnostics.rejectionReasons).map(([reason, count]) => `${reason}: ${count}`).join(" | ")}
+      </div>
+    </details>
+  );
+}
+
+function DiagnosticItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-white/10 bg-slate-950/50 p-2">
+      <p className="text-[10px] font-black uppercase tracking-wide text-cyan-100/70">{label}</p>
+      <p className="mt-1 font-black text-white">{value}</p>
+    </div>
   );
 }
 
@@ -548,6 +680,135 @@ function VideoCardReviewRow({ card, packNumber, onUpdate, onDelete }: {
       </button>
     </div>
   );
+}
+
+async function probeVideoDecode(video: HTMLVideoElement) {
+  await waitForVideoMetadata(video);
+  if (!video.videoWidth || !video.videoHeight) {
+    return {
+      status: "canvas-empty" as VideoDecodeStatus,
+      width: video.videoWidth || 0,
+      height: video.videoHeight || 0,
+      duration: Number.isFinite(video.duration) ? video.duration : 0,
+      frames: [] as Array<{ timestamp: number; brightness: number; variance: number; nearBlackRatio: number; hash: string | null }>
+    };
+  }
+
+  const duration = Number.isFinite(video.duration) ? video.duration : 0;
+  const points = [0.03, 0.1, 0.25, 0.5, 0.75, 0.9]
+    .map((ratio) => Math.min(Math.max(0.05, duration * ratio), Math.max(0.05, duration - 0.08)));
+  const frames: Array<{ timestamp: number; brightness: number; variance: number; nearBlackRatio: number; hash: string | null }> = [];
+
+  try {
+    for (const timestamp of points) {
+      await seekVideo(video, timestamp);
+      const sample = captureVideoSample(video, timestamp, null);
+      const stats = lumaStats(sample.luma);
+      frames.push({
+        timestamp,
+        brightness: sample.frame.brightness,
+        variance: stats.variance,
+        nearBlackRatio: stats.nearBlackRatio,
+        hash: sample.frame.visualFingerprint ?? null
+      });
+    }
+    await seekVideo(video, 0);
+  } catch {
+    return {
+      status: "seek-failed" as VideoDecodeStatus,
+      width: video.videoWidth || 0,
+      height: video.videoHeight || 0,
+      duration,
+      frames
+    };
+  }
+
+  if (!frames.length) {
+    return { status: "canvas-empty" as VideoDecodeStatus, width: video.videoWidth, height: video.videoHeight, duration, frames };
+  }
+  const blackFrames = frames.filter((frame) => frame.nearBlackRatio > 0.92 || frame.brightness < 10 || frame.variance < 3).length;
+  if (blackFrames >= Math.max(3, Math.floor(frames.length * 0.65))) {
+    return { status: "black-frames" as VideoDecodeStatus, width: video.videoWidth, height: video.videoHeight, duration, frames };
+  }
+  const uniqueHashes = new Set(frames.map((frame) => frame.hash).filter(Boolean));
+  if (uniqueHashes.size <= 1 && frames.length >= 4) {
+    return { status: "frozen-frame" as VideoDecodeStatus, width: video.videoWidth, height: video.videoHeight, duration, frames };
+  }
+  return { status: "supported" as VideoDecodeStatus, width: video.videoWidth, height: video.videoHeight, duration, frames };
+}
+
+function lumaStats(luma: Uint8Array) {
+  let sum = 0;
+  let nearBlack = 0;
+  for (const value of luma) {
+    sum += value;
+    if (value < 12) nearBlack += 1;
+  }
+  const mean = sum / Math.max(1, luma.length);
+  let varianceSum = 0;
+  for (const value of luma) varianceSum += (value - mean) ** 2;
+  return {
+    variance: varianceSum / Math.max(1, luma.length),
+    nearBlackRatio: nearBlack / Math.max(1, luma.length)
+  };
+}
+
+function decodeFailureMessage(status: VideoDecodeStatus) {
+  switch (status) {
+    case "black-frames":
+      return "The browser can read this video metadata, but decoded frames are mostly black. This is usually an unsupported codec/container issue. Export as H.264 MP4 and try again.";
+    case "frozen-frame":
+      return "The browser decoded the same frozen frame across the video. Export as H.264 MP4 and try again.";
+    case "canvas-empty":
+      return "PackWatcher could not draw this video to canvas for analysis. Try an H.264 MP4 export.";
+    case "seek-failed":
+      return "PackWatcher could not seek through this video reliably. Try exporting it as a standard H.264 MP4.";
+    case "unsupported-codec":
+      return "This video codec is not supported by this browser for local analysis.";
+    case "unknown":
+    default:
+      return "PackWatcher could not verify that this video decodes correctly.";
+  }
+}
+
+function buildVideoDiagnostics(input: {
+  probe: Awaited<ReturnType<typeof probeVideoDecode>>;
+  extraction: Awaited<ReturnType<typeof extractCandidateFramesFromVideo>>;
+  windows: VideoRipCardWindow[];
+  skippedWindows: number;
+  recognitionAttempts: number;
+  identifiedCards: number;
+  reviewItems: number;
+}): VideoRipDiagnostics {
+  const blackFrames = input.extraction.samples.filter((sample) => sample.brightness < 10).length;
+  const cardLikeFrames = input.extraction.samples.filter((sample) => sample.cardLikeScore >= VIDEO_RIP_ANALYSIS_CONFIG.minimumCardLikeScore).length;
+  const visibleFrames = input.extraction.samples.filter(isUsableVisibleSample).length;
+  const rejectionReasons: Record<string, number> = {
+    "low-card-likeness": input.extraction.samples.filter((sample) => sample.cardLikeScore < VIDEO_RIP_ANALYSIS_CONFIG.minimumCardLikeScore).length,
+    "low-quality": input.extraction.samples.filter((sample) => sample.qualityScore < VIDEO_RIP_ANALYSIS_CONFIG.fallbackMinimumQualityScore).length,
+    "low-coverage": input.extraction.samples.filter((sample) => sample.coverageScore < VIDEO_RIP_ANALYSIS_CONFIG.minimumDisplayedCardCoverageScore).length,
+    "black-frame": blackFrames
+  };
+
+  return {
+    decodeStatus: input.probe.status,
+    decodePath: "native",
+    duration: input.extraction.duration,
+    width: input.probe.width,
+    height: input.probe.height,
+    probeFrames: input.probe.frames.length,
+    sampledFrames: input.extraction.samples.length,
+    visibleFrames,
+    blackFrames,
+    frozenFrames: input.probe.status === "frozen-frame",
+    cardLikeFrames,
+    cardWindows: input.windows.length,
+    recognitionAttempts: input.recognitionAttempts,
+    identifiedCards: input.identifiedCards,
+    reviewItems: input.reviewItems,
+    skippedWindows: input.skippedWindows,
+    rejectionReasons
+  };
 }
 
 async function extractCandidateFramesFromVideo(input: {
@@ -808,6 +1069,7 @@ async function recognizeWindow(input: {
 }): Promise<VideoRipRecognitionCard | null> {
   const frames = [input.window.bestFrame, ...input.window.alternateFrames].slice(0, 3);
   const candidates: FusionInput[] = [];
+  const notes: string[] = [];
   const recognitionImages = [
     await buildRecognitionContactSheet(frames)
   ];
@@ -832,11 +1094,19 @@ async function recognizeWindow(input: {
     const body = await response.json().catch(() => null) as RecognitionResponse | null;
     if (response.ok && body?.cards?.length) candidates.push(...body.cards);
     else if (body?.code === "VIDEO_SCAN_LIMIT_REACHED" || body?.code === "RECOGNITION_DISABLED") throw new Error(body.error ?? "Video Rip Analysis could not continue.");
+    else if (body?.error) notes.push(cleanRecognitionError(body.error));
     if (candidates.length && candidates.some((candidate) => candidate.confidence >= 0.72)) break;
   }
 
   const fused = fuseRecognitionCandidates(candidates);
-  if (!fused) return null;
+  if (!fused) {
+    return buildReviewCard({
+      window: input.window,
+      selectedSetId: input.selectedSetId,
+      setName: input.setName,
+      note: notes[0] ?? "Automatic matching was uncertain. Review this card window manually."
+    });
+  }
 
   return {
     id: crypto.randomUUID(),
@@ -861,6 +1131,44 @@ async function recognizeWindow(input: {
     notes: candidates.length > 1 ? `Fused evidence from ${candidates.length} candidate frames.` : null,
     selected: true
   } satisfies VideoRipRecognitionCard;
+}
+
+function buildReviewCard(input: {
+  window: VideoRipCardWindow;
+  selectedSetId: string;
+  setName: string;
+  note: string;
+}) {
+  return {
+    id: crypto.randomUUID(),
+    packId: input.window.packId,
+    canonicalCardId: null,
+    canonicalSetId: input.selectedSetId,
+    cardName: "Review needed",
+    setName: input.setName,
+    collectorNumber: null,
+    rarity: null,
+    variant: null,
+    language: null,
+    price: 0,
+    confidence: 0,
+    firstAppearance: input.window.firstAppearance,
+    bestFrameTimestamp: input.window.bestFrameTimestamp,
+    lastAppearance: input.window.lastAppearance,
+    thumbnailDataUrl: input.window.bestFrame.imageDataUrl,
+    referenceImageUrl: null,
+    recognitionSource: "video_rip_review",
+    pricingSource: "manual",
+    notes: input.note,
+    selected: false,
+    needsReview: true
+  } satisfies VideoRipRecognitionCard;
+}
+
+function cleanRecognitionError(error: string) {
+  if (/rate limit|429/i.test(error)) return "Recognition was temporarily rate limited. Review this frame or rerun analysis later.";
+  if (/no readable selected-set card/i.test(error)) return "No selected-set card was recognized from this frame. Review manually.";
+  return error.length > 180 ? `${error.slice(0, 180)}...` : error;
 }
 
 async function buildRecognitionContactSheet(frames: VideoRipFrameSample[]) {

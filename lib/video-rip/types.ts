@@ -9,6 +9,24 @@ export type VideoRipStage =
   | "report-ready"
   | "failed";
 
+export type VideoAnalysisOutcome =
+  | "complete"
+  | "partial"
+  | "needs-review"
+  | "decode-failed"
+  | "no-card-windows"
+  | "recognition-failed"
+  | "cancelled";
+
+export type VideoDecodeStatus =
+  | "supported"
+  | "black-frames"
+  | "frozen-frame"
+  | "canvas-empty"
+  | "seek-failed"
+  | "unsupported-codec"
+  | "unknown";
+
 export type VideoRipFrameSample = {
   id: string;
   timestamp: number;
@@ -57,6 +75,7 @@ export type VideoRipRecognitionCard = {
   pricingSource: string;
   notes: string | null;
   selected: boolean;
+  needsReview?: boolean;
 };
 
 export type VideoRipPack = {
@@ -94,4 +113,27 @@ export type VideoRipReport = {
   highestPull: VideoRipRecognitionCard | null;
   frameCount: number;
   analyzedFrameCount: number;
+  outcome: VideoAnalysisOutcome;
+  reviewItemCount: number;
+  diagnostics?: VideoRipDiagnostics;
+};
+
+export type VideoRipDiagnostics = {
+  decodeStatus: VideoDecodeStatus;
+  decodePath: "native" | "webcodecs" | "ffmpeg" | "unavailable";
+  duration: number;
+  width: number;
+  height: number;
+  probeFrames: number;
+  sampledFrames: number;
+  visibleFrames: number;
+  blackFrames: number;
+  frozenFrames: boolean;
+  cardLikeFrames: number;
+  cardWindows: number;
+  recognitionAttempts: number;
+  identifiedCards: number;
+  reviewItems: number;
+  skippedWindows: number;
+  rejectionReasons: Record<string, number>;
 };

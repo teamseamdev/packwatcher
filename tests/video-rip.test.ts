@@ -129,6 +129,44 @@ test("video rip report builds pack totals, timeline, and export formats", () => 
   assert.match(buildVideoRipPdf(report), /^%PDF-1.4/);
 });
 
+test("video rip report marks unresolved windows as needs-review instead of complete", () => {
+  const report = buildVideoRipReport({
+    id: "analysis-review",
+    fileName: "rip.mp4",
+    setId: "set-1",
+    setName: "Chaos Rising",
+    duration: 135,
+    frameCount: 4050,
+    analyzedFrameCount: 210,
+    diagnostics: diagnostics({ cardWindows: 4, recognitionAttempts: 4, reviewItems: 4 }),
+    cards: [
+      { ...card("review-1", "pack-1", "Review needed", 32, 0), canonicalCardId: null, needsReview: true, selected: false },
+      { ...card("review-2", "pack-1", "Review needed", 41, 0), canonicalCardId: null, needsReview: true, selected: false }
+    ]
+  });
+
+  assert.equal(report.outcome, "needs-review");
+  assert.equal(report.reviewItemCount, 2);
+  assert.equal(report.packs.length, 1);
+});
+
+test("video rip report classifies decoded videos with no card windows", () => {
+  const report = buildVideoRipReport({
+    id: "analysis-empty",
+    fileName: "rip.mp4",
+    setId: "set-1",
+    setName: "Chaos Rising",
+    duration: 135,
+    frameCount: 4050,
+    analyzedFrameCount: 210,
+    diagnostics: diagnostics({ cardWindows: 0, recognitionAttempts: 0, reviewItems: 0 }),
+    cards: []
+  });
+
+  assert.equal(report.outcome, "no-card-windows");
+  assert.equal(report.cards.length, 0);
+});
+
 test("timestamp formatting supports long videos", () => {
   assert.equal(formatTimestamp(65), "1:05");
   assert.equal(formatTimestamp(3725), "1:02:05");
@@ -195,4 +233,27 @@ function card(id: string, packId: string, cardName: string, timestamp: number, p
     notes: null,
     selected: true
   };
+}
+
+function diagnostics(overrides = {}) {
+  return {
+    decodeStatus: "supported",
+    decodePath: "native",
+    duration: 135,
+    width: 1080,
+    height: 1920,
+    probeFrames: 6,
+    sampledFrames: 210,
+    visibleFrames: 190,
+    blackFrames: 0,
+    frozenFrames: false,
+    cardLikeFrames: 36,
+    cardWindows: 0,
+    recognitionAttempts: 0,
+    identifiedCards: 0,
+    reviewItems: 0,
+    skippedWindows: 0,
+    rejectionReasons: {},
+    ...overrides
+  } as const;
 }
