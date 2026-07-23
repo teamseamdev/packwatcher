@@ -53,6 +53,8 @@ export function VideoRipAnalysis() {
   const [selectedSetName, setSelectedSetName] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [previewPoster, setPreviewPoster] = useState<string | null>(null);
+  const [decodeWarning, setDecodeWarning] = useState<string | null>(null);
   const [stage, setStage] = useState<VideoRipStage>("idle");
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState("Choose a set and upload a pack-opening video.");
@@ -121,13 +123,22 @@ export function VideoRipAnalysis() {
         shouldAbort: () => abortRef.current
       });
       if (abortRef.current) return;
+      const visibleSamples = extraction.samples.filter(isUsableVisibleSample);
+      if (extraction.samples.length && visibleSamples.length < Math.max(2, Math.floor(extraction.samples.length * 0.08))) {
+        throw new Error("The video loaded, but PackWatcher mostly received black frames from the browser decoder. This usually means the file is HEVC/H.265 MOV. Re-export or convert it as H.264 MP4, then run Video Rip Analysis again.");
+      }
 
       setStage("finding-cards");
       setProgress(42);
       setStatusText("Finding card display windows...");
       const rawWindows = buildCardWindows(extraction.samples);
-      const windows = assignWindows(rawWindows);
-      if (!windows.length) throw new Error("No card display windows were detected. Try a clearer video, closer framing, or manually review the video.");
+      const windows = assignWindows(rawWindows.length ? rawWindows : buildFallbackWindows(extraction.samples));
+      if (!windows.length) {
+        throw new Error("PackWatcher could read the video, but it could not decode any usable visible frames. If this is an iPhone MOV/HEVC file, export it as H.264 MP4 and try again.");
+      }
+      if (!rawWindows.length) {
+        setStatusText("No strong card windows were detected, so PackWatcher is reviewing the clearest video frames instead.");
+      }
 
       setStage("recognizing");
       setStatusText(`Recognizing ${windows.length} card window${windows.length === 1 ? "" : "s"}...`);
@@ -161,10 +172,12 @@ export function VideoRipAnalysis() {
         cards
       });
       setReport(nextReport);
+      if (videoRef.current) videoRef.current.currentTime = 0;
       setStage("report-ready");
       setProgress(100);
       setStatusText(`Report ready: ${nextReport.packs.length} pack${nextReport.packs.length === 1 ? "" : "s"}, ${nextReport.cards.length} card${nextReport.cards.length === 1 ? "" : "s"}.`);
     } catch (analysisError) {
+      if (videoRef.current) videoRef.current.currentTime = 0;
       setStage("failed");
       setError(analysisError instanceof Error ? analysisError.message : "Video analysis failed.");
       setStatusText("Video Rip Analysis stopped.");
@@ -308,6 +321,8 @@ export function VideoRipAnalysis() {
                   videoObjectUrlRef.current = nextUrl;
                   setSelectedFile(file);
                   setVideoUrl(nextUrl);
+                  setPreviewPoster(null);
+                  setDecodeWarning(null);
                   setReport(null);
                   setError(null);
                   setStage("idle");
@@ -336,7 +351,17 @@ export function VideoRipAnalysis() {
 
           <div className="rounded-lg border border-white/10 bg-slate-950/70 p-3">
             {videoUrl ? (
-              <video ref={videoRef} src={videoUrl} controls preload="metadata" playsInline className="aspect-video w-full rounded-lg bg-black object-contain" />
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                controls
+                preload="auto"
+                playsInline
+                muted
+                poster={previewPoster ?? undefined}
+                onLoadedData={() => void inspectVideoPreview(videoRef.current, setPreviewPoster, setDecodeWarning)}
+                className="aspect-video w-full rounded-lg bg-black object-contain"
+              />
             ) : (
               <div className="grid aspect-video place-items-center rounded-lg bg-slate-950 text-sm text-slate-500">Video preview</div>
             )}
@@ -350,6 +375,7 @@ export function VideoRipAnalysis() {
               </div>
               <p className="mt-2 text-sm text-slate-300">{statusText}</p>
               {error ? <p className="mt-2 rounded-lg border border-rose-300/25 bg-rose-500/10 p-3 text-sm text-rose-100">{error}</p> : null}
+              {decodeWarning ? <p className="mt-2 rounded-lg border border-amber-300/25 bg-amber-300/10 p-3 text-sm text-amber-100">{decodeWarning}</p> : null}
             </div>
           </div>
         </div>
@@ -514,6 +540,7 @@ async function extractCandidateFramesFromVideo(input: {
 }) {
   const { video } = input;
   await waitForVideoMetadata(video);
+  video.pause();
   const duration = Number.isFinite(video.duration) ? video.duration : 0;
   const estimatedFrameCount = Math.round(duration * 30);
   const samples: VideoRipFrameSample[] = [];
@@ -536,6 +563,7 @@ async function extractCandidateFramesFromVideo(input: {
     await idlePause();
   }
 
+  await seekVideo(video, 0);
   return { duration, estimatedFrameCount, samples };
 }
 
@@ -644,6 +672,59 @@ function assignWindows(windows: VideoRipCardWindow[]) {
   return assignWindowsToPacks(windows);
 }
 
+function buildFallbackWindows(samples: VideoRipFrameSample[]) {
+  const visibleSamples = samples
+    .filter(isUsableVisibleSample)
+    .sort((left, right) => right.qualityScore - left.qualityScore);
+  const picked: VideoRipFrameSample[] = [];
+  for (const sample of visibleSamples) {
+    if (picked.length >= 18) break;
+    if (picked.some((existing) => Math.abs(existing.timestamp - sample.timestamp) < 4)) continue;
+    picked.push(sample);
+  }
+  return picked
+    .sort((left, right) => left.timestamp - right.timestamp)
+    .map((sample, index): VideoRipCardWindow => ({
+      id: `fallback-window-${index + 1}`,
+      packId: `pack-${Math.floor(index / 11) + 1}`,
+      firstAppearance: Math.max(0, sample.timestamp - 1.2),
+      bestFrameTimestamp: sample.timestamp,
+      lastAppearance: sample.timestamp + 1.2,
+      bestFrame: sample,
+      alternateFrames: samples
+        .filter((candidate) => candidate.id !== sample.id && Math.abs(candidate.timestamp - sample.timestamp) <= 1.8)
+        .sort((left, right) => right.qualityScore - left.qualityScore)
+        .slice(0, 2),
+      qualityScore: sample.qualityScore
+    }));
+}
+
+function isUsableVisibleSample(sample: VideoRipFrameSample) {
+  return sample.brightness > 12 && sample.sharpness > 2 && sample.edgeDensity > 0.002;
+}
+
+async function inspectVideoPreview(
+  video: HTMLVideoElement | null,
+  setPreviewPoster: (value: string | null) => void,
+  setDecodeWarning: (value: string | null) => void
+) {
+  if (!video || !video.videoWidth || !video.videoHeight) return;
+  try {
+    video.pause();
+    await seekVideo(video, Math.min(1, Math.max(0.05, video.duration * 0.03)));
+    const sample = captureVideoSample(video, video.currentTime, null).frame;
+    if (isUsableVisibleSample(sample)) {
+      setPreviewPoster(sample.imageDataUrl);
+      setDecodeWarning(null);
+    } else {
+      setDecodeWarning("PackWatcher can read the video duration, but the preview frame is black. This is usually an HEVC/H.265 MOV decode issue in this browser. Convert/export the video as H.264 MP4 for reliable analysis.");
+    }
+    video.currentTime = 0;
+  } catch {
+    setDecodeWarning("PackWatcher could not decode a preview frame from this video. Convert/export it as H.264 MP4 and try again.");
+  }
+}
+
 async function recognizeWindow(input: {
   window: VideoRipCardWindow;
   selectedSetId: string;
@@ -744,14 +825,43 @@ function waitForVideoMetadata(video: HTMLVideoElement) {
 
 function seekVideo(video: HTMLVideoElement, seconds: number) {
   return new Promise<void>((resolve, reject) => {
+    const target = Math.min(Math.max(0, seconds), Math.max(0, video.duration - 0.05));
     const timeout = window.setTimeout(() => reject(new Error("Video seek timed out.")), 10000);
-    const done = () => {
+    const done = async () => {
       window.clearTimeout(timeout);
       video.removeEventListener("seeked", done);
+      await waitForDecodedFrame(video);
       resolve();
     };
+    if (Math.abs(video.currentTime - target) < 0.015 && video.readyState >= 2) {
+      window.clearTimeout(timeout);
+      void waitForDecodedFrame(video).then(resolve);
+      return;
+    }
     video.addEventListener("seeked", done);
-    video.currentTime = Math.min(Math.max(0, seconds), Math.max(0, video.duration - 0.05));
+    video.currentTime = target;
+  });
+}
+
+function waitForDecodedFrame(video: HTMLVideoElement) {
+  return new Promise<void>((resolve) => {
+    const requestVideoFrameCallback = (
+      video as HTMLVideoElement & {
+        requestVideoFrameCallback?: (callback: () => void) => number;
+      }
+    ).requestVideoFrameCallback;
+    const timeout = window.setTimeout(() => resolve(), 180);
+    if (typeof requestVideoFrameCallback === "function") {
+      requestVideoFrameCallback.call(video, () => {
+        window.clearTimeout(timeout);
+        resolve();
+      });
+      return;
+    }
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      window.clearTimeout(timeout);
+      resolve();
+    }));
   });
 }
 
