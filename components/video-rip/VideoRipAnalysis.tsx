@@ -158,6 +158,7 @@ export function VideoRipAnalysis() {
       setStage("recognizing");
       setStatusText(`Detected ${windows.length} candidate card window${windows.length === 1 ? "" : "s"}. Recognizing cards...`);
       const cards: VideoRipRecognitionCard[] = [];
+      let skippedWindows = 0;
       for (let index = 0; index < windows.length; index += 1) {
         if (abortRef.current) return;
         const window = windows[index];
@@ -169,7 +170,8 @@ export function VideoRipAnalysis() {
           videoAnalysisId,
           setName: selectedSet.name
         });
-        cards.push(card);
+        if (card) cards.push(card);
+        else skippedWindows += 1;
         await idlePause();
       }
 
@@ -190,7 +192,7 @@ export function VideoRipAnalysis() {
       if (videoRef.current) videoRef.current.currentTime = 0;
       setStage("report-ready");
       setProgress(100);
-      setStatusText(`Report ready: ${nextReport.packs.length} pack${nextReport.packs.length === 1 ? "" : "s"}, ${nextReport.cards.length} card${nextReport.cards.length === 1 ? "" : "s"}.`);
+      setStatusText(`Report ready: ${nextReport.cards.length} identified card${nextReport.cards.length === 1 ? "" : "s"}${skippedWindows ? `, ${skippedWindows} unclear frame${skippedWindows === 1 ? "" : "s"} skipped` : ""}.`);
     } catch (analysisError) {
       if (videoRef.current) videoRef.current.currentTime = 0;
       setStage("failed");
@@ -691,7 +693,7 @@ function assignWindows(windows: VideoRipCardWindow[]) {
 
 function buildAnalysisWindows(rawWindows: VideoRipCardWindow[], samples: VideoRipFrameSample[], duration: number) {
   const fallbackWindows = buildFallbackWindows(samples);
-  const targetWindowCount = Math.min(36, Math.max(rawWindows.length, Math.ceil(duration / 5)));
+  const targetWindowCount = Math.min(VIDEO_RIP_ANALYSIS_CONFIG.maxRecognitionWindows, Math.max(rawWindows.length, Math.ceil(duration / 7.5)));
   const combined = [...rawWindows];
 
   for (const fallback of fallbackWindows) {
@@ -701,6 +703,8 @@ function buildAnalysisWindows(rawWindows: VideoRipCardWindow[], samples: VideoRi
   }
 
   return combined
+    .sort((left, right) => right.qualityScore - left.qualityScore)
+    .slice(0, VIDEO_RIP_ANALYSIS_CONFIG.maxRecognitionWindows)
     .sort((left, right) => left.bestFrameTimestamp - right.bestFrameTimestamp)
     .map((window, index) => ({ ...window, id: `window-${index + 1}` }));
 }
@@ -718,8 +722,8 @@ function buildFallbackWindows(samples: VideoRipFrameSample[]) {
     .sort((left, right) => right.qualityScore - left.qualityScore);
   const picked: VideoRipFrameSample[] = [];
   for (const sample of visibleSamples) {
-    if (picked.length >= 36) break;
-    if (picked.some((existing) => Math.abs(existing.timestamp - sample.timestamp) < 1.2)) continue;
+    if (picked.length >= VIDEO_RIP_ANALYSIS_CONFIG.maxRecognitionWindows) break;
+    if (picked.some((existing) => Math.abs(existing.timestamp - sample.timestamp) < 2.2)) continue;
     picked.push(sample);
   }
   return picked
@@ -801,13 +805,11 @@ async function recognizeWindow(input: {
   selectedSetId: string;
   setName: string;
   videoAnalysisId: string;
-}) {
+}): Promise<VideoRipRecognitionCard | null> {
   const frames = [input.window.bestFrame, ...input.window.alternateFrames].slice(0, 3);
   const candidates: FusionInput[] = [];
-  const notes: string[] = [];
   const recognitionImages = [
-    await buildRecognitionContactSheet(frames),
-    input.window.bestFrame.imageDataUrl
+    await buildRecognitionContactSheet(frames)
   ];
 
   for (const imageDataUrl of recognitionImages) {
@@ -830,36 +832,11 @@ async function recognizeWindow(input: {
     const body = await response.json().catch(() => null) as RecognitionResponse | null;
     if (response.ok && body?.cards?.length) candidates.push(...body.cards);
     else if (body?.code === "VIDEO_SCAN_LIMIT_REACHED" || body?.code === "RECOGNITION_DISABLED") throw new Error(body.error ?? "Video Rip Analysis could not continue.");
-    else if (body?.error) notes.push(body.error);
     if (candidates.length && candidates.some((candidate) => candidate.confidence >= 0.72)) break;
   }
 
   const fused = fuseRecognitionCandidates(candidates);
-  if (!fused) {
-    return {
-      id: crypto.randomUUID(),
-      packId: input.window.packId,
-      canonicalCardId: null,
-      canonicalSetId: input.selectedSetId,
-      cardName: "Unidentified card",
-      setName: input.setName,
-      collectorNumber: null,
-      rarity: null,
-      variant: null,
-      language: null,
-      price: 0,
-      confidence: 0,
-      firstAppearance: input.window.firstAppearance,
-      bestFrameTimestamp: input.window.bestFrameTimestamp,
-      lastAppearance: input.window.lastAppearance,
-      thumbnailDataUrl: input.window.bestFrame.imageDataUrl,
-      referenceImageUrl: null,
-      recognitionSource: "video_rip_unmatched",
-      pricingSource: "none",
-      notes: notes[0] ?? "No selected-set card recognized. Review manually.",
-      selected: false
-    } satisfies VideoRipRecognitionCard;
-  }
+  if (!fused) return null;
 
   return {
     id: crypto.randomUUID(),
@@ -892,21 +869,21 @@ async function buildRecognitionContactSheet(frames: VideoRipFrameSample[]) {
   if (!first) return frames[0]?.imageDataUrl ?? "";
 
   const canvas = document.createElement("canvas");
-  canvas.width = 1120;
-  canvas.height = 1120;
+  canvas.width = 896;
+  canvas.height = 896;
   const context = canvas.getContext("2d");
   if (!context) return frames[0]?.imageDataUrl ?? "";
 
   context.fillStyle = "#020617";
   context.fillRect(0, 0, canvas.width, canvas.height);
 
-  drawImageContain(context, first, 16, 16, 536, 536);
-  drawImageContain(context, first, 568, 16, 536, 536, centerCardCrop(first));
-  drawImageContain(context, first, 16, 568, 536, 252, relativeCrop(first, 0.12, 0.06, 0.76, 0.35));
-  drawImageContain(context, first, 16, 836, 536, 252, relativeCrop(first, 0.12, 0.58, 0.76, 0.34));
+  drawImageContain(context, first, 12, 12, 430, 430);
+  drawImageContain(context, first, 454, 12, 430, 430, centerCardCrop(first));
+  drawImageContain(context, first, 12, 454, 430, 204, relativeCrop(first, 0.12, 0.06, 0.76, 0.35));
+  drawImageContain(context, first, 12, 674, 430, 210, relativeCrop(first, 0.12, 0.58, 0.76, 0.34));
 
   const alternate = sourceImages[1] ?? sourceImages[2] ?? first;
-  drawImageContain(context, alternate, 568, 568, 536, 520, centerCardCrop(alternate));
+  drawImageContain(context, alternate, 454, 454, 430, 430, centerCardCrop(alternate));
 
   return canvas.toDataURL("image/jpeg", 0.9);
 }

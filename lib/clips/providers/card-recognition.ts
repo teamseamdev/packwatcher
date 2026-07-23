@@ -41,71 +41,75 @@ export class OpenAICardRecognitionProvider implements CardRecognitionProvider {
   async recognize(input: { imageBase64?: string | null; mimeType?: string | null; notes?: string | null }): Promise<CardRecognitionCandidate[]> {
     if (process.env.CLIPS_ENABLE_OPENAI !== "true" || !this.apiKey || !input.imageBase64) return [];
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const requestBody = JSON.stringify({
+      model: this.model,
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            [
+              "You identify Pokemon TCG cards from camera photos and pack-opening video frames.",
+              "Cards may be English, Japanese, Simplified Chinese, Traditional Chinese, Korean, or another localized Pokemon TCG language.",
+              "Use the artwork, Pokemon/card name, HP, attacks, rarity marks, collector/card number, regulation mark, set code, and visible text.",
+              "For live camera scans, prioritize the card title/name near the top border and the collector number/set code near the lower-left or lower edge.",
+              "When the user provides a pack/set hint, use the visible collector number plus that hint as the strongest signal for exact card identity.",
+              "If the visible card text is Latin/English, set language to English. Do not mark an English card as Japanese, Chinese, or Korean because the set name, artwork, or user hint is ambiguous.",
+              "Only set language to Japanese, Chinese, or Korean when localized printed text from that language is actually visible.",
+              "Hands, thumbs, sleeves, glare, and pack wrappers may block parts of the card; infer from the readable top name, bottom number, artwork, HP, and set context.",
+              "If the image is a contact sheet or grid of video frames, inspect every panel and return candidates for every readable Pokemon card you can identify.",
+              "For non-English cards, return cardName as the best English/Tcgplayer-compatible card name when you can infer it. Put the printed/localized name in originalName.",
+              "If a Pokemon card or Pokemon TCG card front is visible but exact identity is uncertain, return your best guess with low confidence, or return cardName \"Unknown Pokemon card\" with low confidence.",
+              "Do not return an empty candidates array just because text is partially blurred, localized, angled, or small.",
+              "Return an empty candidates array only when no Pokemon card or Pokemon TCG card front is visible.",
+              "Return JSON only."
+            ].join(" ")
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                [
+                  input.notes ? `Language/user hint: ${input.notes}.` : "Language/user hint: auto detect.",
+                  "Identify Pokemon card(s) in this image. If this is a contact sheet, inspect all panels from left to right and top to bottom.",
+                  "Some panels may be crops of the same card: one full frame, one top-title crop, one lower-left number crop, and one card-body crop. Combine those clues into one candidate when they match.",
+                  "For pack-opening video contact sheets, return one candidate for each distinct revealed card in reveal order. Do not repeat the same card across adjacent frames unless the visible card name or collector number changes.",
+                  "Return {\"candidates\":[{\"cardName\":\"English pricing name\",\"originalName\":null,\"language\":null,\"setName\":null,\"cardNumber\":null,\"variant\":null,\"confidence\":0.0}]}",
+                  "Use confidence 0-1.",
+                  "For Japanese, Chinese, or Korean cards, translate or normalize the cardName to the closest English card name for pricing when possible.",
+                  "If the card name, attacks, or collector text are readable in English, return language \"English\" and originalName null unless a distinct localized printed name is visible.",
+                  "If only the card border/art/card shape is visible, return Unknown Pokemon card with confidence 0.08-0.3.",
+                  "Include setName, cardNumber, and variant when visible. Only return cardNumber when it is directly readable on the current card image; otherwise return null. Never copy a collector number from one panel/card to another."
+                ].join(" ")
+              },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${input.mimeType ?? "image/jpeg"};base64,${input.imageBase64}`,
+                detail: "high"
+              }
+            }
+          ]
+        }
+      ]
+    });
+    const response = await fetchWithOpenAIRetry("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         authorization: `Bearer ${this.apiKey}`,
         "content-type": "application/json"
       },
-      body: JSON.stringify({
-        model: this.model,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content:
-              [
-                "You identify Pokemon TCG cards from camera photos and pack-opening video frames.",
-                "Cards may be English, Japanese, Simplified Chinese, Traditional Chinese, Korean, or another localized Pokemon TCG language.",
-                "Use the artwork, Pokemon/card name, HP, attacks, rarity marks, collector/card number, regulation mark, set code, and visible text.",
-                "For live camera scans, prioritize the card title/name near the top border and the collector number/set code near the lower-left or lower edge.",
-                "When the user provides a pack/set hint, use the visible collector number plus that hint as the strongest signal for exact card identity.",
-                "If the visible card text is Latin/English, set language to English. Do not mark an English card as Japanese, Chinese, or Korean because the set name, artwork, or user hint is ambiguous.",
-                "Only set language to Japanese, Chinese, or Korean when localized printed text from that language is actually visible.",
-                "Hands, thumbs, sleeves, glare, and pack wrappers may block parts of the card; infer from the readable top name, bottom number, artwork, HP, and set context.",
-                "If the image is a contact sheet or grid of video frames, inspect every panel and return candidates for every readable Pokemon card you can identify.",
-                "For non-English cards, return cardName as the best English/Tcgplayer-compatible card name when you can infer it. Put the printed/localized name in originalName.",
-                "If a Pokemon card or Pokemon TCG card front is visible but exact identity is uncertain, return your best guess with low confidence, or return cardName \"Unknown Pokemon card\" with low confidence.",
-                "Do not return an empty candidates array just because text is partially blurred, localized, angled, or small.",
-                "Return an empty candidates array only when no Pokemon card or Pokemon TCG card front is visible.",
-                "Return JSON only."
-              ].join(" ")
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text:
-                  [
-                    input.notes ? `Language/user hint: ${input.notes}.` : "Language/user hint: auto detect.",
-                    "Identify Pokemon card(s) in this image. If this is a contact sheet, inspect all panels from left to right and top to bottom.",
-                    "Some panels may be crops of the same card: one full frame, one top-title crop, one lower-left number crop, and one card-body crop. Combine those clues into one candidate when they match.",
-                    "For pack-opening video contact sheets, return one candidate for each distinct revealed card in reveal order. Do not repeat the same card across adjacent frames unless the visible card name or collector number changes.",
-                    "Return {\"candidates\":[{\"cardName\":\"English pricing name\",\"originalName\":null,\"language\":null,\"setName\":null,\"cardNumber\":null,\"variant\":null,\"confidence\":0.0}]}",
-                    "Use confidence 0-1.",
-                    "For Japanese, Chinese, or Korean cards, translate or normalize the cardName to the closest English card name for pricing when possible.",
-                    "If the card name, attacks, or collector text are readable in English, return language \"English\" and originalName null unless a distinct localized printed name is visible.",
-                    "If only the card border/art/card shape is visible, return Unknown Pokemon card with confidence 0.08-0.3.",
-                    "Include setName, cardNumber, and variant when visible. Only return cardNumber when it is directly readable on the current card image; otherwise return null. Never copy a collector number from one panel/card to another."
-                  ].join(" ")
-                },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:${input.mimeType ?? "image/jpeg"};base64,${input.imageBase64}`,
-                  detail: "high"
-                }
-              }
-            ]
-          }
-        ]
-      })
+      body: requestBody
     });
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
+      if (response.status === 429) {
+        throw new Error("OpenAI card recognition is temporarily rate limited. PackWatcher retried the request, but this frame could not be processed yet.");
+      }
       throw new Error(`OpenAI card recognition failed with HTTP ${response.status}${body ? `: ${body.slice(0, 240)}` : ""}`);
     }
 
@@ -154,4 +158,33 @@ export class PokeTraceProvider implements CardRecognitionProvider {
 function stringOrNull(value: unknown) {
   const text = typeof value === "string" ? value.trim() : "";
   return text || null;
+}
+
+async function fetchWithOpenAIRetry(url: string, init: RequestInit) {
+  let lastResponse: Response | null = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const response = await fetch(url, init);
+    if (response.status !== 429 && response.status < 500) return response;
+    lastResponse = response;
+    if (attempt === 3) break;
+    const body = await response.clone().text().catch(() => "");
+    const retryAfterMs = retryDelayMs(response, body, attempt);
+    await sleep(retryAfterMs);
+  }
+  return lastResponse ?? fetch(url, init);
+}
+
+function retryDelayMs(response: Response, body: string, attempt: number) {
+  const retryAfter = response.headers.get("retry-after");
+  const retryAfterSeconds = retryAfter ? Number(retryAfter) : Number.NaN;
+  if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+    return Math.min(4000, retryAfterSeconds * 1000);
+  }
+  const bodyDelay = body.match(/try again in\s+(\d+)ms/i)?.[1];
+  if (bodyDelay) return Math.min(4000, Math.max(350, Number(bodyDelay) + 150));
+  return Math.min(4000, 650 * (attempt + 1));
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
