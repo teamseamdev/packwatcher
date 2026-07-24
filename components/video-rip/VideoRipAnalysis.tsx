@@ -790,7 +790,9 @@ function buildVideoDiagnostics(input: {
   const cardLikeFrames = input.extraction.samples.filter((sample) => sample.cardLikeScore >= VIDEO_RIP_ANALYSIS_CONFIG.minimumCardLikeScore).length;
   const visibleFrames = input.extraction.samples.filter(isUsableVisibleSample).length;
   const croppedFrames = input.extraction.samples.filter((sample) => sample.cardCropDataUrl).length;
+  const verifiedLooseCardFrames = input.extraction.samples.filter((sample) => sample.looseCardStatus === "verified").length;
   const rejectionReasons: Record<string, number> = {
+    "stage-a-not-loose-card": input.extraction.samples.length - verifiedLooseCardFrames,
     "low-card-likeness": input.extraction.samples.filter((sample) => sample.cardLikeScore < VIDEO_RIP_ANALYSIS_CONFIG.minimumCardLikeScore).length,
     "low-quality": input.extraction.samples.filter((sample) => sample.qualityScore < VIDEO_RIP_ANALYSIS_CONFIG.fallbackMinimumQualityScore).length,
     "low-coverage": input.extraction.samples.filter((sample) => sample.coverageScore < VIDEO_RIP_ANALYSIS_CONFIG.minimumDisplayedCardCoverageScore).length,
@@ -886,6 +888,9 @@ function captureVideoSample(video: HTMLVideoElement, timestamp: number, previous
       cardCropBounds: crop?.bounds ?? null,
       cardCropScore: crop?.score ?? null,
       cardCropReason: crop?.reason ?? null,
+      looseCardStatus: crop?.looseCardStatus ?? "rejected",
+      looseCardConfidence: crop?.looseCardConfidence ?? 0,
+      looseCardReason: crop?.reason ?? "No verified loose-card region found.",
       brightness: metrics.brightness,
       sharpness: metrics.sharpness,
       edgeDensity: metrics.edgeDensity,
@@ -944,6 +949,8 @@ function createCardFocusedCrop(sourceCanvas: HTMLCanvasElement, sourceContext: C
     },
     score: candidate.score,
     reason: candidate.reason,
+    looseCardStatus: candidate.looseCardStatus,
+    looseCardConfidence: candidate.looseCardConfidence,
     fingerprint: buildVisualFingerprint(cropLuma, cropCanvas.width, cropCanvas.height)
   };
 }
@@ -1130,10 +1137,12 @@ async function recognizeWindow(input: {
   videoAnalysisId: string;
 }): Promise<VideoRipRecognitionCard | null> {
   const frames = [input.window.bestFrame, ...input.window.alternateFrames]
+    .filter((frame) => frame.looseCardStatus === "verified")
     .sort((left, right) => (right.cardCropScore ?? 0) - (left.cardCropScore ?? 0) || right.qualityScore - left.qualityScore)
     .slice(0, 4);
   const candidates: FusionInput[] = [];
   const notes: string[] = [];
+  if (!frames.length) return null;
   if (Date.now() < videoRecognitionRateLimitedUntil) {
     return buildReviewCard({
       window: input.window,

@@ -40,6 +40,9 @@ export type VideoRipFrameSample = {
   } | null;
   cardCropScore?: number | null;
   cardCropReason?: string | null;
+  looseCardStatus?: "verified" | "possible" | "rejected";
+  looseCardConfidence?: number;
+  looseCardReason?: string | null;
   brightness: number;
   sharpness: number;
   edgeDensity: number;

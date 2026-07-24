@@ -10,6 +10,8 @@ export type VideoCardCropCandidate = VideoCropRect & {
   areaRatio: number;
   aspectRatio: number;
   reason: string;
+  looseCardStatus: "verified" | "possible" | "rejected";
+  looseCardConfidence: number;
 };
 
 type LocateInput = {
@@ -53,7 +55,7 @@ export function locateVideoCardCrop(input: LocateInput): VideoCardCropCandidate 
     }
   }
 
-  return best && best.score >= 0.45 ? expandCrop(best, input.width, input.height, 0.08) : null;
+  return best && best.looseCardStatus !== "rejected" && best.score >= 0.45 ? expandCrop(best, input.width, input.height, 0.08) : null;
 }
 
 export function expandCrop(rect: VideoCardCropCandidate, frameWidth: number, frameHeight: number, paddingRatio = 0.08): VideoCardCropCandidate {
@@ -109,10 +111,15 @@ function scoreCropCandidate(
   const rightSideEdges = rectMean(verticalEdgeIntegral, input.width, rightBorder);
   const topSideEdges = rectMean(horizontalEdgeIntegral, input.width, topBorder);
   const bottomSideEdges = rectMean(horizontalEdgeIntegral, input.width, bottomBorder);
+  const leftSpan = edgeRowSpan(verticalEdgeIntegral, input.width, leftBorder);
+  const rightSpan = edgeRowSpan(verticalEdgeIntegral, input.width, rightBorder);
+  const topSpan = edgeColumnSpan(horizontalEdgeIntegral, input.width, topBorder);
+  const bottomSpan = edgeColumnSpan(horizontalEdgeIntegral, input.width, bottomBorder);
   const sideBorderEdges = (leftSideEdges + rightSideEdges) / 2;
   const topBottomEdges = (topSideEdges + bottomSideEdges) / 2;
   const borderEdges = sideBorderEdges * 0.65 + topBottomEdges * 0.35;
   if (Math.min(leftSideEdges, rightSideEdges) < 0.035 || sideBorderEdges < 0.055) return null;
+  if (Math.min(leftSpan, rightSpan) < 0.32 || Math.min(topSpan, bottomSpan) < 0.28) return null;
 
   const meanLuma = rectMean(lumaIntegral, input.width, rect);
   const centerX = rect.x + rect.width / 2;
@@ -129,6 +136,20 @@ function scoreCropCandidate(
     borderEdges * 2.6
   );
   const textVsArtScore = textEdges >= artEdges * 0.45 ? 1 : 0.65;
+  const borderContinuityScore = clamp01((leftSpan + rightSpan + topSpan + bottomSpan) / 2.4);
+  const looseCardConfidence = clamp01(
+    aspectScore * 0.18 +
+    sizeScore * 0.12 +
+    layoutScore * 0.2 +
+    borderContinuityScore * 0.28 +
+    textVsArtScore * 0.12 +
+    centerScore * 0.1
+  );
+  const looseCardStatus = looseCardConfidence >= 0.68
+    ? "verified"
+    : looseCardConfidence >= 0.54
+      ? "possible"
+      : "rejected";
 
   const score = clamp01(
     aspectScore * 0.2 +
@@ -145,8 +166,32 @@ function scoreCropCandidate(
     score: Number(score.toFixed(3)),
     areaRatio: Number(areaRatio.toFixed(4)),
     aspectRatio: Number(aspectRatio.toFixed(3)),
-    reason: `aspect ${aspectRatio.toFixed(2)}, area ${(areaRatio * 100).toFixed(1)}%, layout ${layoutScore.toFixed(2)}, side ${sideBorderEdges.toFixed(2)}`
+    looseCardStatus,
+    looseCardConfidence: Number(looseCardConfidence.toFixed(3)),
+    reason: `loose-card ${looseCardStatus}, confidence ${looseCardConfidence.toFixed(2)}, aspect ${aspectRatio.toFixed(2)}, area ${(areaRatio * 100).toFixed(1)}%, layout ${layoutScore.toFixed(2)}, border ${borderContinuityScore.toFixed(2)}`
   };
+}
+
+function edgeRowSpan(integral: Float64Array, sourceWidth: number, rect: VideoCropRect) {
+  const y0 = Math.max(0, Math.floor(rect.y));
+  const y1 = Math.max(y0 + 1, Math.floor(rect.y + rect.height));
+  let rowsWithEdges = 0;
+  for (let y = y0; y < y1; y += 1) {
+    const mean = rectMean(integral, sourceWidth, { x: rect.x, y, width: rect.width, height: 1 });
+    if (mean > 0.025) rowsWithEdges += 1;
+  }
+  return rowsWithEdges / Math.max(1, y1 - y0);
+}
+
+function edgeColumnSpan(integral: Float64Array, sourceWidth: number, rect: VideoCropRect) {
+  const x0 = Math.max(0, Math.floor(rect.x));
+  const x1 = Math.max(x0 + 1, Math.floor(rect.x + rect.width));
+  let columnsWithEdges = 0;
+  for (let x = x0; x < x1; x += 1) {
+    const mean = rectMean(integral, sourceWidth, { x, y: rect.y, width: 1, height: rect.height });
+    if (mean > 0.025) columnsWithEdges += 1;
+  }
+  return columnsWithEdges / Math.max(1, x1 - x0);
 }
 
 function buildEdgeMaps(input: LocateInput) {

@@ -125,8 +125,10 @@ export function visualFingerprintDistance(left?: string | null, right?: string |
 }
 
 export function isLikelyDisplayedCardFrame(sample: VideoRipFrameSample) {
-  const hasUsefulCrop = (sample.cardCropScore ?? 0) >= 0.48;
+  const verifiedLooseCard = sample.looseCardStatus === "verified" && (sample.looseCardConfidence ?? 0) >= 0.68;
+  const hasUsefulCrop = verifiedLooseCard && (sample.cardCropScore ?? 0) >= 0.48;
   return (
+    verifiedLooseCard &&
     (sample.cardLikeScore >= VIDEO_RIP_ANALYSIS_CONFIG.minimumCardLikeScore || hasUsefulCrop) &&
     sample.qualityScore >= 0.44 &&
     (sample.coverageScore >= VIDEO_RIP_ANALYSIS_CONFIG.minimumDisplayedCardCoverageScore || hasUsefulCrop) &&
@@ -141,6 +143,7 @@ export function isLikelyDisplayedCardFrame(sample: VideoRipFrameSample) {
 export function isStrongFallbackCardFrame(sample: VideoRipFrameSample) {
   return (
     isLikelyDisplayedCardFrame(sample) &&
+    sample.looseCardStatus === "verified" &&
     sample.cardLikeScore >= VIDEO_RIP_ANALYSIS_CONFIG.fallbackMinimumCardLikeScore &&
     sample.qualityScore >= VIDEO_RIP_ANALYSIS_CONFIG.fallbackMinimumQualityScore
   );

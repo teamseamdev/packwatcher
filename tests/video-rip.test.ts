@@ -75,23 +75,44 @@ test("video card windows reject visible non-card wrapper frames", () => {
   const wrapperFrame = sample(14, 0.62, null, {
     coverageScore: 0.08,
     edgeDensity: 0.48,
-    qualityScore: 0.46
+    qualityScore: 0.46,
+    looseCardStatus: "rejected",
+    looseCardConfidence: 0.18
   });
   const cardFrame = sample(15, 0.7, null, {
     coverageScore: 0.64,
     edgeDensity: 0.18,
-    qualityScore: 0.68
+    qualityScore: 0.68,
+    cardCropScore: 0.72,
+    looseCardStatus: "verified",
+    looseCardConfidence: 0.82
   });
   const cardFrameNext = sample(15.5, 0.72, null, {
     coverageScore: 0.66,
     edgeDensity: 0.17,
-    qualityScore: 0.7
+    qualityScore: 0.7,
+    cardCropScore: 0.76,
+    looseCardStatus: "verified",
+    looseCardConfidence: 0.86
   });
 
   assert.equal(isLikelyDisplayedCardFrame(wrapperFrame), false);
   assert.equal(isStrongFallbackCardFrame(wrapperFrame), false);
   assert.equal(isStrongFallbackCardFrame(cardFrame), true);
   assert.equal(buildCardWindows([wrapperFrame, cardFrame, cardFrameNext]).length, 1);
+});
+
+test("interesting frames cannot create video card windows without verified loose-card evidence", () => {
+  const handAndBackground = sample(22, 0.86, null, {
+    qualityScore: 0.9,
+    coverageScore: 0.92,
+    cardCropScore: 0.61,
+    looseCardStatus: "possible",
+    looseCardConfidence: 0.57
+  });
+
+  assert.equal(isLikelyDisplayedCardFrame(handAndBackground), false);
+  assert.equal(buildCardWindows([handAndBackground]).length, 0);
 });
 
 test("video crop detector isolates a small portrait card from a wide frame", () => {
@@ -211,6 +232,9 @@ function sample(timestamp: number, cardLikeScore: number, visualFingerprint: str
     cardLikeScore,
     qualityScore: cardLikeScore,
     visualFingerprint,
+    cardCropScore: cardLikeScore >= 0.65 ? 0.7 : null,
+    looseCardStatus: cardLikeScore >= 0.65 ? "verified" : "rejected",
+    looseCardConfidence: cardLikeScore >= 0.65 ? 0.8 : 0.1,
     ...overrides
   };
 }
