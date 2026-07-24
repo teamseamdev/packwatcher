@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Download, FileJson, FileSpreadsheet, FileText, Loader2, PackageOpen, Play, Plus, Save, Trash2, Upload, Wand2 } from "lucide-react";
+import { Download, EyeOff, FileJson, FileSpreadsheet, FileText, Loader2, PackageOpen, Play, Plus, Save, Trash2, Upload, Wand2 } from "lucide-react";
 import { SetCombobox } from "@/components/set-combobox";
 import { prepareRecognitionImage, validateRecognitionImageMetrics, type PreparedRecognitionImage } from "@/lib/scanner/recognition-image";
 import {
@@ -22,6 +22,13 @@ import {
   visualFingerprintDistance
 } from "@/lib/video-rip/analysis";
 import { locateVideoCardCrop } from "@/lib/video-rip/crop";
+import {
+  cropLumaToRegion,
+  evaluatePhysicalCardMotion,
+  percentRegionToPixels,
+  regionOverlapRatio,
+  type VideoRegionPercent
+} from "@/lib/video-rip/loose-card";
 import type { FusionInput } from "@/lib/video-rip/analysis";
 import type { VideoDecodeStatus, VideoRipCardWindow, VideoRipDiagnostics, VideoRipFrameSample, VideoRipRecognitionCard, VideoRipReport, VideoRipStage } from "@/lib/video-rip/types";
 
@@ -50,6 +57,9 @@ const stageLabels: Record<VideoRipStage, string> = {
 };
 
 const VIDEO_AUTO_REMOTE_RECOGNITION_ENABLED = process.env.NEXT_PUBLIC_VIDEO_AUTO_REMOTE_RECOGNITION === "true";
+const VIDEO_REQUIRE_VERIFIED_LOOSE_CARD = process.env.NEXT_PUBLIC_VIDEO_REQUIRE_VERIFIED_LOOSE_CARD !== "false";
+const DEFAULT_REVEAL_ZONE: VideoRegionPercent = { x: 42, y: 4, width: 38, height: 88 };
+const DEFAULT_EXCLUSION_ZONE: VideoRegionPercent = { x: 0, y: 0, width: 36, height: 100 };
 
 type ParityCropPercent = {
   x: number;
@@ -72,6 +82,12 @@ type ParityResult = {
   ok: boolean;
   status: number;
   durationMs: number;
+};
+
+type CandidateTrack = {
+  id: string;
+  window: VideoRipCardWindow;
+  status: "pending" | "approved" | "rejected";
 };
 
 export function VideoRipAnalysis() {
@@ -97,6 +113,10 @@ export function VideoRipAnalysis() {
   const [parityResult, setParityResult] = useState<ParityResult | null>(null);
   const [parityError, setParityError] = useState<string | null>(null);
   const [isParityScanning, setIsParityScanning] = useState(false);
+  const [revealZone, setRevealZone] = useState<VideoRegionPercent>(DEFAULT_REVEAL_ZONE);
+  const [exclusionZones, setExclusionZones] = useState<VideoRegionPercent[]>([DEFAULT_EXCLUSION_ZONE]);
+  const [showVideoZones, setShowVideoZones] = useState(true);
+  const [candidateTracks, setCandidateTracks] = useState<CandidateTrack[]>([]);
 
   const selectedSet = useMemo(() => {
     const normalized = normalizeSet(selectedSetName);
@@ -137,6 +157,7 @@ export function VideoRipAnalysis() {
 
     abortRef.current = false;
     setReport(null);
+    setCandidateTracks([]);
     setError(null);
     setStage("preparing");
     setProgress(2);
@@ -172,6 +193,8 @@ export function VideoRipAnalysis() {
       setStage("extracting");
       const extraction = await extractCandidateFramesFromVideo({
         video: videoRef.current,
+        revealZone,
+        exclusionZones: VIDEO_REQUIRE_VERIFIED_LOOSE_CARD ? exclusionZones : [],
         onProgress: (sampled, duration) => {
           setProgress(Math.min(38, 5 + sampled * 33));
           setStatusText(`Extracted ${Math.round(sampled * 100)}% of ${formatTimestamp(duration)}.`);
@@ -223,12 +246,7 @@ export function VideoRipAnalysis() {
 
       setStage("recognizing");
       if (!VIDEO_AUTO_REMOTE_RECOGNITION_ENABLED) {
-        const reviewCards = windows.map((window) => buildReviewCard({
-          window,
-          selectedSetId: selectedSet.id,
-          setName: selectedSet.name,
-          note: "Automatic video recognition is disabled while scanner parity is being verified. This row is a verified card crop; use the Video Scanner Parity Test to send a manual crop through the live scanner."
-        }));
+        setCandidateTracks(windows.map((window) => ({ id: window.id, window, status: "pending" })));
         const gatedReport = buildVideoRipReport({
           id: videoAnalysisId,
           fileName: selectedFile.name,
@@ -237,7 +255,7 @@ export function VideoRipAnalysis() {
           duration: extraction.duration,
           frameCount: extraction.estimatedFrameCount,
           analyzedFrameCount: extraction.samples.length,
-          cards: reviewCards,
+          cards: [],
           diagnostics: buildVideoDiagnostics({
             probe: decodeProbe,
             extraction,
@@ -245,14 +263,14 @@ export function VideoRipAnalysis() {
             skippedWindows: 0,
             recognitionAttempts: 0,
             identifiedCards: 0,
-            reviewItems: reviewCards.length
+            reviewItems: 0
           })
         });
         setReport(gatedReport);
         if (videoRef.current) videoRef.current.currentTime = 0;
         setStage("report-ready");
         setProgress(100);
-        setStatusText(`Verified ${windows.length} card crop${windows.length === 1 ? "" : "s"}. Auto recognition is off until scanner parity is proven.`);
+        setStatusText(`Detected ${windows.length} verified loose-card track${windows.length === 1 ? "" : "s"}. Approve candidate tracks before recognition.`);
         return;
       }
 
@@ -542,6 +560,7 @@ export function VideoRipAnalysis() {
                   setPreviewPoster(null);
                   setDecodeWarning(null);
                   setReport(null);
+                  setCandidateTracks([]);
                   setError(null);
                   setStage("idle");
                   setProgress(0);
@@ -569,17 +588,20 @@ export function VideoRipAnalysis() {
 
           <div className="rounded-lg border border-white/10 bg-slate-950/70 p-3">
             {videoUrl ? (
-              <video
-                ref={videoRef}
-                src={videoUrl}
-                controls
-                preload="auto"
-                playsInline
-                muted
-                poster={previewPoster ?? undefined}
-                onLoadedData={() => void inspectVideoPreview(videoRef.current, setPreviewPoster, setDecodeWarning)}
-                className="aspect-video w-full rounded-lg bg-black object-contain"
-              />
+              <div className="relative overflow-hidden rounded-lg bg-black">
+                <video
+                  ref={videoRef}
+                  src={videoUrl}
+                  controls
+                  preload="auto"
+                  playsInline
+                  muted
+                  poster={previewPoster ?? undefined}
+                  onLoadedData={() => void inspectVideoPreview(videoRef.current, setPreviewPoster, setDecodeWarning)}
+                  className="aspect-video w-full bg-black object-contain"
+                />
+                {showVideoZones ? <VideoZoneOverlay revealZone={revealZone} exclusionZones={exclusionZones} /> : null}
+              </div>
             ) : (
               <div className="grid aspect-video place-items-center rounded-lg bg-slate-950 text-sm text-slate-500">Video preview</div>
             )}
@@ -599,6 +621,19 @@ export function VideoRipAnalysis() {
         </div>
       </section>
 
+      <VideoZoneSetupPanel
+        revealZone={revealZone}
+        exclusionZones={exclusionZones}
+        showZones={showVideoZones}
+        onToggleZones={() => setShowVideoZones((value) => !value)}
+        onRevealZoneChange={setRevealZone}
+        onExclusionZoneChange={(index, zone) => {
+          setExclusionZones((zones) => zones.map((existing, existingIndex) => existingIndex === index ? zone : existing));
+        }}
+        onAddExclusion={() => setExclusionZones((zones) => [...zones, { x: 0, y: 0, width: 28, height: 45 }])}
+        onRemoveExclusion={(index) => setExclusionZones((zones) => zones.filter((_, existingIndex) => existingIndex !== index))}
+      />
+
       {process.env.NODE_ENV !== "production" ? (
         <VideoScannerParityPanel
           selectedSetName={selectedSet?.name ?? null}
@@ -617,6 +652,16 @@ export function VideoRipAnalysis() {
             setParityPreparedImage(null);
             setParityResult(null);
           }}
+        />
+      ) : null}
+
+      {candidateTracks.length ? (
+        <CandidateTracksPanel
+          tracks={candidateTracks}
+          onSeek={(timestamp) => {
+            if (videoRef.current) videoRef.current.currentTime = timestamp;
+          }}
+          onStatusChange={(id, status) => setCandidateTracks((tracks) => tracks.map((track) => track.id === id ? { ...track, status } : track))}
         />
       ) : null}
 
@@ -721,6 +766,140 @@ function SummaryTile({ label, value }: { label: string; value: string }) {
       <p className="pw-hud text-[11px] font-black">{label}</p>
       <p className="mt-2 line-clamp-2 text-xl font-black text-white">{value}</p>
     </div>
+  );
+}
+
+function VideoZoneOverlay({ revealZone, exclusionZones }: { revealZone: VideoRegionPercent; exclusionZones: VideoRegionPercent[] }) {
+  return (
+    <div className="pointer-events-none absolute inset-0">
+      <div
+        className="absolute border-2 border-cyan-300 bg-cyan-300/10"
+        style={{ left: `${revealZone.x}%`, top: `${revealZone.y}%`, width: `${revealZone.width}%`, height: `${revealZone.height}%` }}
+      >
+        <span className="absolute left-1 top-1 rounded bg-cyan-950/80 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-cyan-100">Reveal zone</span>
+      </div>
+      {exclusionZones.map((zone, index) => (
+        <div
+          key={`${zone.x}-${zone.y}-${index}`}
+          className="absolute border-2 border-rose-300 bg-rose-500/10"
+          style={{ left: `${zone.x}%`, top: `${zone.y}%`, width: `${zone.width}%`, height: `${zone.height}%` }}
+        >
+          <span className="absolute left-1 top-1 rounded bg-rose-950/80 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-rose-100">Exclude {index + 1}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function VideoZoneSetupPanel(props: {
+  revealZone: VideoRegionPercent;
+  exclusionZones: VideoRegionPercent[];
+  showZones: boolean;
+  onToggleZones: () => void;
+  onRevealZoneChange: (zone: VideoRegionPercent) => void;
+  onExclusionZoneChange: (index: number, zone: VideoRegionPercent) => void;
+  onAddExclusion: () => void;
+  onRemoveExclusion: (index: number) => void;
+}) {
+  return (
+    <section className="pw-panel rounded-lg border border-white/10 bg-white/[0.04] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="pw-hud text-xs font-black">Candidate setup</p>
+          <h3 className="text-xl font-black text-white">Loose-card detection zones</h3>
+          <p className="mt-1 text-sm text-slate-300">Analyze card candidates inside the reveal zone and suppress product box, wrapper, or background regions.</p>
+        </div>
+        <button type="button" onClick={props.onToggleZones} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-white/10 px-3 text-sm font-black text-slate-100">
+          {props.showZones ? "Hide zones" : "Show zones"}
+        </button>
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <ZoneEditor title="Select where cards are shown" zone={props.revealZone} onChange={(zone) => props.onRevealZoneChange(clampZone(zone))} tone="cyan" />
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-black text-white">Exclude packaging/background areas</p>
+              <p className="text-xs text-slate-400">Regions here cannot create automatic card tracks.</p>
+            </div>
+            <button type="button" onClick={props.onAddExclusion} className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-xs font-black text-slate-100">
+              <EyeOff className="h-4 w-4" />
+              Add
+            </button>
+          </div>
+          {props.exclusionZones.map((zone, index) => (
+            <div key={index} className="rounded-lg border border-rose-300/20 bg-rose-500/5 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs font-black uppercase tracking-wide text-rose-100">Exclusion {index + 1}</p>
+                <button type="button" onClick={() => props.onRemoveExclusion(index)} className="text-xs font-black text-rose-100">Remove</button>
+              </div>
+              <ZoneSliders zone={zone} onChange={(next) => props.onExclusionZoneChange(index, clampZone(next))} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ZoneEditor({ title, zone, onChange, tone }: { title: string; zone: VideoRegionPercent; onChange: (zone: VideoRegionPercent) => void; tone: "cyan" | "rose" }) {
+  return (
+    <div className={`rounded-lg border p-3 ${tone === "cyan" ? "border-cyan-300/20 bg-cyan-300/5" : "border-rose-300/20 bg-rose-500/5"}`}>
+      <p className="text-sm font-black text-white">{title}</p>
+      <ZoneSliders zone={zone} onChange={onChange} />
+    </div>
+  );
+}
+
+function ZoneSliders({ zone, onChange }: { zone: VideoRegionPercent; onChange: (zone: VideoRegionPercent) => void }) {
+  return (
+    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+      <ParityRange label="Left" value={zone.x} max={95} onChange={(x) => onChange({ ...zone, x })} />
+      <ParityRange label="Top" value={zone.y} max={95} onChange={(y) => onChange({ ...zone, y })} />
+      <ParityRange label="Width" value={zone.width} min={5} max={100} onChange={(width) => onChange({ ...zone, width })} />
+      <ParityRange label="Height" value={zone.height} min={5} max={100} onChange={(height) => onChange({ ...zone, height })} />
+    </div>
+  );
+}
+
+function CandidateTracksPanel(props: {
+  tracks: CandidateTrack[];
+  onSeek: (timestamp: number) => void;
+  onStatusChange: (id: string, status: CandidateTrack["status"]) => void;
+}) {
+  return (
+    <section className="pw-panel rounded-lg border border-amber-300/20 bg-amber-300/[0.04] p-4">
+      <p className="pw-hud text-xs font-black">Pre-recognition review</p>
+      <h3 className="text-xl font-black text-white">Detected card moments</h3>
+      <p className="mt-1 text-sm text-slate-300">These are verified loose-card tracks only. Approving a track is the next gate before scanner recognition.</p>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        {props.tracks.map((track) => (
+          <article key={track.id} className="grid gap-3 rounded-lg border border-white/10 bg-slate-950/65 p-3 sm:grid-cols-[110px_1fr]">
+            <button type="button" onClick={() => props.onSeek(track.window.bestFrameTimestamp)} className="h-36 overflow-hidden rounded-lg border border-white/10 bg-black">
+              {bestFrameImage(track.window) ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={bestFrameImage(track.window) ?? ""} alt="" className="h-full w-full object-contain" />
+              ) : <span className="grid h-full place-items-center text-xs text-slate-500">No crop</span>}
+            </button>
+            <div className="space-y-2">
+              <p className="font-black text-white">{formatTimestamp(track.window.firstAppearance)} - {formatTimestamp(track.window.lastAppearance)}</p>
+              <p className="text-xs text-slate-400">
+                Best frame {formatTimestamp(track.window.bestFrameTimestamp)} · {track.window.bestFrame.looseCardReason ?? "Verified by loose-card gate"}
+              </p>
+              {track.window.bestFrame.physicalCardMotion ? (
+                <p className="text-xs text-cyan-100/80">
+                  Motion {track.window.bestFrame.physicalCardMotion.independentMotionScore} · packaging attach {track.window.bestFrame.physicalCardMotion.attachedToPackagingScore}
+                </p>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => props.onStatusChange(track.id, "approved")} className="inline-flex min-h-9 items-center justify-center rounded-lg bg-amber-300 px-3 text-xs font-black text-slate-950">Approve</button>
+                <button type="button" onClick={() => props.onStatusChange(track.id, "rejected")} className="inline-flex min-h-9 items-center justify-center rounded-lg border border-white/10 px-3 text-xs font-black text-slate-100">Reject</button>
+                <span className="inline-flex min-h-9 items-center rounded-lg border border-white/10 px-3 text-xs font-black text-slate-300">{track.status}</span>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1078,8 +1257,14 @@ function buildVideoDiagnostics(input: {
   const visibleFrames = input.extraction.samples.filter(isUsableVisibleSample).length;
   const croppedFrames = input.extraction.samples.filter((sample) => sample.cardCropDataUrl).length;
   const verifiedLooseCardFrames = input.extraction.samples.filter((sample) => sample.looseCardStatus === "verified").length;
+  const revealZoneMisses = input.extraction.samples.filter((sample) => sample.cardCropDataUrl && !sample.revealZoneHit).length;
+  const exclusionZoneHits = input.extraction.samples.filter((sample) => sample.exclusionZoneHit).length;
+  const invalidPhysicalMotion = input.extraction.samples.filter((sample) => sample.cardCropDataUrl && !sample.physicalCardMotion?.validLooseCardBehavior).length;
   const rejectionReasons: Record<string, number> = {
     "stage-a-not-loose-card": input.extraction.samples.length - verifiedLooseCardFrames,
+    "outside-reveal-zone": revealZoneMisses,
+    "inside-exclusion-zone": exclusionZoneHits,
+    "invalid-physical-card-motion": invalidPhysicalMotion,
     "low-card-likeness": input.extraction.samples.filter((sample) => sample.cardLikeScore < VIDEO_RIP_ANALYSIS_CONFIG.minimumCardLikeScore).length,
     "low-quality": input.extraction.samples.filter((sample) => sample.qualityScore < VIDEO_RIP_ANALYSIS_CONFIG.fallbackMinimumQualityScore).length,
     "low-coverage": input.extraction.samples.filter((sample) => sample.coverageScore < VIDEO_RIP_ANALYSIS_CONFIG.minimumDisplayedCardCoverageScore).length,
@@ -1173,12 +1358,22 @@ function clampParityCrop(crop: ParityCropPercent): ParityCropPercent {
   return { x, y, width, height };
 }
 
+function clampZone(zone: VideoRegionPercent): VideoRegionPercent {
+  const x = Math.max(0, Math.min(95, zone.x));
+  const y = Math.max(0, Math.min(95, zone.y));
+  const width = Math.max(5, Math.min(100 - x, zone.width));
+  const height = Math.max(5, Math.min(100 - y, zone.height));
+  return { x, y, width, height };
+}
+
 function roundPercent(value: number) {
   return Math.round(value * 10) / 10;
 }
 
 async function extractCandidateFramesFromVideo(input: {
   video: HTMLVideoElement;
+  revealZone: VideoRegionPercent;
+  exclusionZones: VideoRegionPercent[];
   onProgress: (progress: number, duration: number) => void;
   shouldAbort: () => boolean;
 }) {
@@ -1189,14 +1384,20 @@ async function extractCandidateFramesFromVideo(input: {
   const estimatedFrameCount = Math.round(duration * 30);
   const samples: VideoRipFrameSample[] = [];
   let previousLuma: Uint8Array | null = null;
+  let previousFrame: VideoRipFrameSample | null = null;
   let timestamp = 0;
   let sampleCount = 0;
 
   while (timestamp <= duration && sampleCount < VIDEO_RIP_ANALYSIS_CONFIG.maxAnalyzedFrames) {
     if (input.shouldAbort()) break;
     await seekVideo(video, timestamp);
-    const sample = captureVideoSample(video, timestamp, previousLuma);
+    const sample = captureVideoSample(video, timestamp, previousLuma, {
+      previousFrame,
+      revealZone: input.revealZone,
+      exclusionZones: input.exclusionZones
+    });
     previousLuma = sample.luma;
+    previousFrame = sample.frame;
     samples.push(sample.frame);
     sampleCount += 1;
     input.onProgress(duration ? timestamp / duration : 1, duration);
@@ -1211,7 +1412,16 @@ async function extractCandidateFramesFromVideo(input: {
   return { duration, estimatedFrameCount, samples };
 }
 
-function captureVideoSample(video: HTMLVideoElement, timestamp: number, previousLuma: Uint8Array | null) {
+function captureVideoSample(
+  video: HTMLVideoElement,
+  timestamp: number,
+  previousLuma: Uint8Array | null,
+  options: {
+    previousFrame?: VideoRipFrameSample | null;
+    revealZone?: VideoRegionPercent;
+    exclusionZones?: VideoRegionPercent[];
+  } = {}
+) {
   const sourceWidth = video.videoWidth || 1280;
   const sourceHeight = video.videoHeight || 720;
   const width = 360;
@@ -1231,7 +1441,11 @@ function captureVideoSample(video: HTMLVideoElement, timestamp: number, previous
   const fullContext = fullCanvas.getContext("2d", { willReadFrequently: true });
   if (!fullContext) throw new Error("Could not capture video frame.");
   fullContext.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
-  const crop = createCardFocusedCrop(fullCanvas, fullContext);
+  const crop = createCardFocusedCrop(fullCanvas, fullContext, {
+    previousFrame: options.previousFrame ?? null,
+    revealZone: options.revealZone ?? DEFAULT_REVEAL_ZONE,
+    exclusionZones: options.exclusionZones ?? []
+  });
   const scored = scoreVideoFrameWithCrop({ ...metrics, cropScore: crop?.score ?? null });
 
   return {
@@ -1247,6 +1461,9 @@ function captureVideoSample(video: HTMLVideoElement, timestamp: number, previous
       looseCardStatus: crop?.looseCardStatus ?? "rejected",
       looseCardConfidence: crop?.looseCardConfidence ?? 0,
       looseCardReason: crop?.reason ?? "No verified loose-card region found.",
+      revealZoneHit: crop?.revealZoneHit ?? false,
+      exclusionZoneHit: crop?.exclusionZoneHit ?? false,
+      physicalCardMotion: crop?.physicalCardMotion ?? null,
       brightness: metrics.brightness,
       sharpness: metrics.sharpness,
       edgeDensity: metrics.edgeDensity,
@@ -1260,14 +1477,33 @@ function captureVideoSample(video: HTMLVideoElement, timestamp: number, previous
   };
 }
 
-function createCardFocusedCrop(sourceCanvas: HTMLCanvasElement, sourceContext: CanvasRenderingContext2D) {
+function createCardFocusedCrop(
+  sourceCanvas: HTMLCanvasElement,
+  sourceContext: CanvasRenderingContext2D,
+  options: {
+    previousFrame: VideoRipFrameSample | null;
+    revealZone: VideoRegionPercent;
+    exclusionZones: VideoRegionPercent[];
+  }
+) {
   const frameImage = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
   const luma = new Uint8Array(sourceCanvas.width * sourceCanvas.height);
   for (let index = 0; index < frameImage.data.length; index += 4) {
     luma[index / 4] = Math.round(0.2126 * frameImage.data[index] + 0.7152 * frameImage.data[index + 1] + 0.0722 * frameImage.data[index + 2]);
   }
-  const candidate = locateVideoCardCrop({ luma, width: sourceCanvas.width, height: sourceCanvas.height });
+  const revealRegion = percentRegionToPixels(options.revealZone, { width: sourceCanvas.width, height: sourceCanvas.height });
+  const revealLuma = cropLumaToRegion({ luma, width: sourceCanvas.width, height: sourceCanvas.height }, revealRegion);
+  const revealCandidate = locateVideoCardCrop({ luma: revealLuma.luma, width: revealLuma.width, height: revealLuma.height });
+  const candidate = revealCandidate ? {
+    ...revealCandidate,
+    x: revealCandidate.x + revealLuma.offsetX,
+    y: revealCandidate.y + revealLuma.offsetY
+  } : null;
   if (!candidate) return null;
+  const candidateBounds = { x: candidate.x, y: candidate.y, width: candidate.width, height: candidate.height };
+  const revealZoneHit = regionOverlapRatio(candidateBounds, revealRegion) >= 0.72;
+  const exclusionRegions = options.exclusionZones.map((zone) => percentRegionToPixels(zone, { width: sourceCanvas.width, height: sourceCanvas.height }));
+  const exclusionZoneHit = exclusionRegions.some((zone) => regionOverlapRatio(candidateBounds, zone) >= 0.24);
 
   const targetHeight = 980;
   const targetWidth = Math.max(1, Math.round(targetHeight * (candidate.width / Math.max(1, candidate.height))));
@@ -1294,6 +1530,21 @@ function createCardFocusedCrop(sourceCanvas: HTMLCanvasElement, sourceContext: C
   for (let index = 0; index < cropImage.data.length; index += 4) {
     cropLuma[index / 4] = Math.round(0.2126 * cropImage.data[index] + 0.7152 * cropImage.data[index + 1] + 0.0722 * cropImage.data[index + 2]);
   }
+  const fingerprint = buildVisualFingerprint(cropLuma, cropCanvas.width, cropCanvas.height);
+  const physicalCardMotion = evaluatePhysicalCardMotion({
+    currentBounds: candidateBounds,
+    previousBounds: options.previousFrame?.cardCropBounds ?? null,
+    currentFingerprint: fingerprint,
+    previousFingerprint: options.previousFrame?.visualFingerprint ?? null,
+    revealZoneHit,
+    exclusionZoneHit,
+    looseCardConfidence: candidate.looseCardConfidence,
+    cropScore: candidate.score,
+    frameWidth: sourceCanvas.width,
+    frameHeight: sourceCanvas.height
+  });
+  const looseCardStatus = physicalCardMotion.validLooseCardBehavior ? candidate.looseCardStatus : "rejected";
+  const looseCardConfidence = physicalCardMotion.validLooseCardBehavior ? candidate.looseCardConfidence : Math.min(candidate.looseCardConfidence, 0.42);
 
   return {
     dataUrl: cropCanvas.toDataURL("image/jpeg", 0.92),
@@ -1304,10 +1555,13 @@ function createCardFocusedCrop(sourceCanvas: HTMLCanvasElement, sourceContext: C
       height: Number(candidate.height.toFixed(1))
     },
     score: candidate.score,
-    reason: candidate.reason,
-    looseCardStatus: candidate.looseCardStatus,
-    looseCardConfidence: candidate.looseCardConfidence,
-    fingerprint: buildVisualFingerprint(cropLuma, cropCanvas.width, cropCanvas.height)
+    reason: `${candidate.reason}; reveal-zone ${revealZoneHit ? "hit" : "miss"}; exclusion ${exclusionZoneHit ? "hit" : "clear"}; motion ${physicalCardMotion.validLooseCardBehavior ? "valid" : physicalCardMotion.rejectionReasons.join(", ")}`,
+    looseCardStatus,
+    looseCardConfidence,
+    revealZoneHit,
+    exclusionZoneHit,
+    physicalCardMotion,
+    fingerprint
   };
 }
 

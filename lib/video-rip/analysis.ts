@@ -7,6 +7,7 @@ import type {
   VideoRipReport,
   VideoRipTimelineEvent
 } from "@/lib/video-rip/types";
+import { canCreateAutomaticCardTrack } from "./loose-card.ts";
 
 export const VIDEO_RIP_ANALYSIS_CONFIG = {
   baseSampleIntervalSeconds: 0.65,
@@ -22,7 +23,9 @@ export const VIDEO_RIP_ANALYSIS_CONFIG = {
   visualSplitDistance: 18,
   moderateVisualSplitDistance: 14,
   maxGapWithinPackSeconds: 36,
-  maxCardsPerPackBeforeSoftSplit: 14
+  maxCardsPerPackBeforeSoftSplit: 14,
+  minimumTrackFrames: 3,
+  minimumTrackSeconds: 0.2
 } as const;
 
 export type FusionInput = {
@@ -125,6 +128,7 @@ export function visualFingerprintDistance(left?: string | null, right?: string |
 }
 
 export function isLikelyDisplayedCardFrame(sample: VideoRipFrameSample) {
+  if (!canCreateAutomaticCardTrack(sample).allowed) return false;
   const gate = canAttemptVideoRecognition(sample);
   const verifiedLooseCard = gate.allowed;
   const hasUsefulCrop = verifiedLooseCard && (sample.cardCropScore ?? 0) >= 0.48;
@@ -142,6 +146,8 @@ export function isLikelyDisplayedCardFrame(sample: VideoRipFrameSample) {
 }
 
 export function canAttemptVideoRecognition(sample: VideoRipFrameSample) {
+  const looseCardGate = canCreateAutomaticCardTrack(sample);
+  if (!looseCardGate.allowed) return { allowed: false, reason: looseCardGate.reason };
   if (sample.looseCardStatus !== "verified") return { allowed: false, reason: "no_verified_loose_card" as const };
   if ((sample.looseCardConfidence ?? 0) < 0.68) return { allowed: false, reason: "low_loose_card_confidence" as const };
   if (!sample.cardCropDataUrl) return { allowed: false, reason: "no_card_crop" as const };
@@ -333,7 +339,9 @@ function pushWindow(windows: VideoRipCardWindow[], samples: VideoRipFrameSample[
   if (!samples.length) return;
   const first = samples[0];
   const last = samples.at(-1) ?? first;
-  if (last.timestamp - first.timestamp < VIDEO_RIP_ANALYSIS_CONFIG.minimumWindowSeconds && samples.length < 2) return;
+  if (samples.length < VIDEO_RIP_ANALYSIS_CONFIG.minimumTrackFrames) return;
+  if (last.timestamp - first.timestamp < VIDEO_RIP_ANALYSIS_CONFIG.minimumTrackSeconds) return;
+  if (last.timestamp - first.timestamp < VIDEO_RIP_ANALYSIS_CONFIG.minimumWindowSeconds && samples.length < VIDEO_RIP_ANALYSIS_CONFIG.minimumTrackFrames) return;
   const sorted = [...samples].sort((left, right) => right.qualityScore - left.qualityScore);
   const best = sorted[0];
   windows.push({

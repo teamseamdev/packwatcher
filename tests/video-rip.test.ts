@@ -15,6 +15,7 @@ import {
   visualFingerprintDistance
 } from "../lib/video-rip/analysis.ts";
 import { locateVideoCardCrop } from "../lib/video-rip/crop.ts";
+import { canCreateAutomaticCardTrack, evaluatePhysicalCardMotion, percentRegionToPixels, regionOverlapRatio } from "../lib/video-rip/loose-card.ts";
 import type { VideoRipFrameSample, VideoRipRecognitionCard } from "../lib/video-rip/types.ts";
 
 test("video frame quality rewards sharp card-like frames", () => {
@@ -44,8 +45,10 @@ test("video card windows are grouped from neighboring card-like frames", () => {
     sample(0, 0.2),
     sample(1, 0.68),
     sample(1.7, 0.76),
+    sample(2.05, 0.72),
     sample(8.5, 0.74),
-    sample(9.2, 0.72)
+    sample(9.2, 0.72),
+    sample(9.55, 0.7)
   ]);
 
   assert.equal(windows.length, 2);
@@ -96,11 +99,19 @@ test("video card windows reject visible non-card wrapper frames", () => {
     looseCardStatus: "verified",
     looseCardConfidence: 0.86
   });
+  const cardFrameThird = sample(15.85, 0.7, null, {
+    coverageScore: 0.66,
+    edgeDensity: 0.17,
+    qualityScore: 0.69,
+    cardCropScore: 0.75,
+    looseCardStatus: "verified",
+    looseCardConfidence: 0.84
+  });
 
   assert.equal(isLikelyDisplayedCardFrame(wrapperFrame), false);
   assert.equal(isStrongFallbackCardFrame(wrapperFrame), false);
   assert.equal(isStrongFallbackCardFrame(cardFrame), true);
-  assert.equal(buildCardWindows([wrapperFrame, cardFrame, cardFrameNext]).length, 1);
+  assert.equal(buildCardWindows([wrapperFrame, cardFrame, cardFrameNext, cardFrameThird]).length, 1);
 });
 
 test("interesting frames cannot create video card windows without verified loose-card evidence", () => {
@@ -134,6 +145,69 @@ test("video recognition gate blocks false candidates before remote recognition",
 
   assert.deepEqual(canAttemptVideoRecognition(packaging), { allowed: false, reason: "no_verified_loose_card" });
   assert.deepEqual(canAttemptVideoRecognition(verified), { allowed: true, reason: "verified_card_crop" });
+});
+
+test("exclusion zones suppress packaging detections", () => {
+  const frame = { width: 1000, height: 1000 };
+  const candidate = { x: 80, y: 120, width: 220, height: 310 };
+  const packagingZone = percentRegionToPixels({ x: 0, y: 0, width: 40, height: 100 }, frame);
+  const revealZone = percentRegionToPixels({ x: 45, y: 5, width: 35, height: 90 }, frame);
+
+  assert.ok(regionOverlapRatio(candidate, packagingZone) > 0.9);
+  assert.equal(regionOverlapRatio(candidate, revealZone), 0);
+});
+
+test("loose card motion accepts independent card behavior and rejects attached packaging", () => {
+  const accepted = evaluatePhysicalCardMotion({
+    currentBounds: { x: 520, y: 120, width: 240, height: 340 },
+    previousBounds: { x: 500, y: 112, width: 236, height: 338 },
+    currentFingerprint: "1111000011110000111100001111000011110000111100001111000011110000",
+    previousFingerprint: "1110000011110000111100001111000011110000111100001111000011110000",
+    revealZoneHit: true,
+    exclusionZoneHit: false,
+    looseCardConfidence: 0.82,
+    cropScore: 0.78,
+    frameWidth: 1000,
+    frameHeight: 1000
+  });
+  const rejected = evaluatePhysicalCardMotion({
+    currentBounds: { x: 80, y: 120, width: 220, height: 310 },
+    previousBounds: { x: 80, y: 120, width: 220, height: 310 },
+    currentFingerprint: "1111000011110000111100001111000011110000111100001111000011110000",
+    previousFingerprint: "1111000011110000111100001111000011110000111100001111000011110000",
+    revealZoneHit: false,
+    exclusionZoneHit: true,
+    looseCardConfidence: 0.82,
+    cropScore: 0.78,
+    frameWidth: 1000,
+    frameHeight: 1000
+  });
+
+  assert.equal(accepted.validLooseCardBehavior, true);
+  assert.equal(rejected.validLooseCardBehavior, false);
+  assert.ok(rejected.rejectionReasons.includes("outside-reveal-zone"));
+  assert.ok(rejected.rejectionReasons.includes("inside-exclusion-zone"));
+});
+
+test("automatic card tracks require verified loose-card behavior", () => {
+  const packaging = sample(31, 0.82, null, {
+    revealZoneHit: false,
+    exclusionZoneHit: true,
+    physicalCardMotion: {
+      independentMotionScore: 0,
+      rigidPlanarScore: 0.8,
+      entersFrame: false,
+      exitsFrame: false,
+      backgroundOcclusionScore: 0,
+      attachedToPackagingScore: 1,
+      validLooseCardBehavior: false,
+      rejectionReasons: ["outside-reveal-zone", "inside-exclusion-zone"]
+    }
+  });
+  const looseCard = sample(32, 0.82);
+
+  assert.deepEqual(canCreateAutomaticCardTrack(packaging), { allowed: false, reason: "outside_reveal_zone" });
+  assert.deepEqual(canCreateAutomaticCardTrack(looseCard), { allowed: true, reason: "verified_loose_card_track_input" });
 });
 
 test("video crop detector isolates a small portrait card from a wide frame", () => {
@@ -258,6 +332,18 @@ function sample(timestamp: number, cardLikeScore: number, visualFingerprint: str
     cardCropBounds: cardLikeScore >= 0.65 ? { x: 40, y: 20, width: 120, height: 170 } : null,
     looseCardStatus: cardLikeScore >= 0.65 ? "verified" : "rejected",
     looseCardConfidence: cardLikeScore >= 0.65 ? 0.8 : 0.1,
+    revealZoneHit: cardLikeScore >= 0.65,
+    exclusionZoneHit: false,
+    physicalCardMotion: cardLikeScore >= 0.65 ? {
+      independentMotionScore: 0.08,
+      rigidPlanarScore: 0.8,
+      entersFrame: false,
+      exitsFrame: false,
+      backgroundOcclusionScore: 0.24,
+      attachedToPackagingScore: 0.1,
+      validLooseCardBehavior: true,
+      rejectionReasons: []
+    } : null,
     ...overrides
   };
 }

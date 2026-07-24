@@ -43,6 +43,18 @@ export type VideoRipFrameSample = {
   looseCardStatus?: "verified" | "possible" | "rejected";
   looseCardConfidence?: number;
   looseCardReason?: string | null;
+  revealZoneHit?: boolean;
+  exclusionZoneHit?: boolean;
+  physicalCardMotion?: {
+    independentMotionScore: number;
+    rigidPlanarScore: number;
+    entersFrame: boolean;
+    exitsFrame: boolean;
+    backgroundOcclusionScore: number;
+    attachedToPackagingScore: number;
+    validLooseCardBehavior: boolean;
+    rejectionReasons: string[];
+  } | null;
   brightness: number;
   sharpness: number;
   edgeDensity: number;
