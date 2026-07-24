@@ -125,7 +125,8 @@ export function visualFingerprintDistance(left?: string | null, right?: string |
 }
 
 export function isLikelyDisplayedCardFrame(sample: VideoRipFrameSample) {
-  const verifiedLooseCard = sample.looseCardStatus === "verified" && (sample.looseCardConfidence ?? 0) >= 0.68;
+  const gate = canAttemptVideoRecognition(sample);
+  const verifiedLooseCard = gate.allowed;
   const hasUsefulCrop = verifiedLooseCard && (sample.cardCropScore ?? 0) >= 0.48;
   return (
     verifiedLooseCard &&
@@ -138,6 +139,17 @@ export function isLikelyDisplayedCardFrame(sample: VideoRipFrameSample) {
     sample.brightness <= 224 &&
     sample.glareScore <= 0.28
   );
+}
+
+export function canAttemptVideoRecognition(sample: VideoRipFrameSample) {
+  if (sample.looseCardStatus !== "verified") return { allowed: false, reason: "no_verified_loose_card" as const };
+  if ((sample.looseCardConfidence ?? 0) < 0.68) return { allowed: false, reason: "low_loose_card_confidence" as const };
+  if (!sample.cardCropDataUrl) return { allowed: false, reason: "no_card_crop" as const };
+  if ((sample.cardCropScore ?? 0) < 0.48) return { allowed: false, reason: "low_crop_score" as const };
+  if (!sample.cardCropBounds || sample.cardCropBounds.width < 80 || sample.cardCropBounds.height < 110) {
+    return { allowed: false, reason: "crop_too_small" as const };
+  }
+  return { allowed: true, reason: "verified_card_crop" as const };
 }
 
 export function isStrongFallbackCardFrame(sample: VideoRipFrameSample) {

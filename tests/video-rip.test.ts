@@ -4,6 +4,7 @@ import {
   buildCardWindows,
   buildVideoRipPdf,
   buildVideoRipReport,
+  canAttemptVideoRecognition,
   formatTimestamp,
   fuseRecognitionCandidates,
   isLikelyDisplayedCardFrame,
@@ -113,6 +114,26 @@ test("interesting frames cannot create video card windows without verified loose
 
   assert.equal(isLikelyDisplayedCardFrame(handAndBackground), false);
   assert.equal(buildCardWindows([handAndBackground]).length, 0);
+});
+
+test("video recognition gate blocks false candidates before remote recognition", () => {
+  const packaging = sample(24, 0.9, null, {
+    looseCardStatus: "possible",
+    looseCardConfidence: 0.62,
+    cardCropDataUrl: "data:image/jpeg;base64,abc",
+    cardCropBounds: { x: 10, y: 10, width: 180, height: 120 },
+    cardCropScore: 0.7
+  });
+  const verified = sample(25, 0.74, null, {
+    looseCardStatus: "verified",
+    looseCardConfidence: 0.82,
+    cardCropDataUrl: "data:image/jpeg;base64,abc",
+    cardCropBounds: { x: 80, y: 20, width: 120, height: 170 },
+    cardCropScore: 0.72
+  });
+
+  assert.deepEqual(canAttemptVideoRecognition(packaging), { allowed: false, reason: "no_verified_loose_card" });
+  assert.deepEqual(canAttemptVideoRecognition(verified), { allowed: true, reason: "verified_card_crop" });
 });
 
 test("video crop detector isolates a small portrait card from a wide frame", () => {
@@ -233,6 +254,8 @@ function sample(timestamp: number, cardLikeScore: number, visualFingerprint: str
     qualityScore: cardLikeScore,
     visualFingerprint,
     cardCropScore: cardLikeScore >= 0.65 ? 0.7 : null,
+    cardCropDataUrl: cardLikeScore >= 0.65 ? "data:image/jpeg;base64,abc" : null,
+    cardCropBounds: cardLikeScore >= 0.65 ? { x: 40, y: 20, width: 120, height: 170 } : null,
     looseCardStatus: cardLikeScore >= 0.65 ? "verified" : "rejected",
     looseCardConfidence: cardLikeScore >= 0.65 ? 0.8 : 0.1,
     ...overrides

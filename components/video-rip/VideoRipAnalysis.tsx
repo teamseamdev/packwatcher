@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Download, FileJson, FileSpreadsheet, FileText, Loader2, PackageOpen, Play, Plus, Save, Trash2, Upload, Wand2 } from "lucide-react";
 import { SetCombobox } from "@/components/set-combobox";
+import { prepareRecognitionImage, validateRecognitionImageMetrics, type PreparedRecognitionImage } from "@/lib/scanner/recognition-image";
 import {
   VIDEO_RIP_ANALYSIS_CONFIG,
   assignWindowsToPacks,
   buildCardWindows,
   buildVideoRipPdf,
   buildVideoRipReport,
+  canAttemptVideoRecognition,
   currency,
   formatTimestamp,
   fuseRecognitionCandidates,
@@ -47,6 +49,31 @@ const stageLabels: Record<VideoRipStage, string> = {
   failed: "Needs attention"
 };
 
+const VIDEO_AUTO_REMOTE_RECOGNITION_ENABLED = process.env.NEXT_PUBLIC_VIDEO_AUTO_REMOTE_RECOGNITION === "true";
+
+type ParityCropPercent = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type ParityFrame = {
+  dataUrl: string;
+  timestamp: number;
+  width: number;
+  height: number;
+  decodePath: string;
+};
+
+type ParityResult = {
+  request: Record<string, unknown>;
+  response: unknown;
+  ok: boolean;
+  status: number;
+  durationMs: number;
+};
+
 export function VideoRipAnalysis() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const abortRef = useRef(false);
@@ -64,6 +91,12 @@ export function VideoRipAnalysis() {
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<VideoRipReport | null>(null);
   const [isAddingInventory, setIsAddingInventory] = useState(false);
+  const [parityFrame, setParityFrame] = useState<ParityFrame | null>(null);
+  const [parityCrop, setParityCrop] = useState<ParityCropPercent>({ x: 32, y: 10, width: 36, height: 78 });
+  const [parityPreparedImage, setParityPreparedImage] = useState<PreparedRecognitionImage | null>(null);
+  const [parityResult, setParityResult] = useState<ParityResult | null>(null);
+  const [parityError, setParityError] = useState<string | null>(null);
+  const [isParityScanning, setIsParityScanning] = useState(false);
 
   const selectedSet = useMemo(() => {
     const normalized = normalizeSet(selectedSetName);
@@ -189,7 +222,41 @@ export function VideoRipAnalysis() {
       }
 
       setStage("recognizing");
-      setStatusText(`Detected ${windows.length} candidate card window${windows.length === 1 ? "" : "s"}. Recognizing cards...`);
+      if (!VIDEO_AUTO_REMOTE_RECOGNITION_ENABLED) {
+        const reviewCards = windows.map((window) => buildReviewCard({
+          window,
+          selectedSetId: selectedSet.id,
+          setName: selectedSet.name,
+          note: "Automatic video recognition is disabled while scanner parity is being verified. This row is a verified card crop; use the Video Scanner Parity Test to send a manual crop through the live scanner."
+        }));
+        const gatedReport = buildVideoRipReport({
+          id: videoAnalysisId,
+          fileName: selectedFile.name,
+          setId: selectedSet.id,
+          setName: selectedSet.name,
+          duration: extraction.duration,
+          frameCount: extraction.estimatedFrameCount,
+          analyzedFrameCount: extraction.samples.length,
+          cards: reviewCards,
+          diagnostics: buildVideoDiagnostics({
+            probe: decodeProbe,
+            extraction,
+            windows,
+            skippedWindows: 0,
+            recognitionAttempts: 0,
+            identifiedCards: 0,
+            reviewItems: reviewCards.length
+          })
+        });
+        setReport(gatedReport);
+        if (videoRef.current) videoRef.current.currentTime = 0;
+        setStage("report-ready");
+        setProgress(100);
+        setStatusText(`Verified ${windows.length} card crop${windows.length === 1 ? "" : "s"}. Auto recognition is off until scanner parity is proven.`);
+        return;
+      }
+
+      setStatusText(`Detected ${windows.length} verified card crop${windows.length === 1 ? "" : "s"}. Recognizing cards...`);
       const cards: VideoRipRecognitionCard[] = [];
       let skippedWindows = 0;
       let recognitionAttempts = 0;
@@ -351,6 +418,91 @@ export function VideoRipAnalysis() {
     downloadText(`packwatcher-video-rip-${Date.now()}.pdf`, buildVideoRipPdf(report), "application/pdf");
   }
 
+  async function captureParityFrame() {
+    if (!videoRef.current) return;
+    setParityError(null);
+    setParityResult(null);
+    setParityPreparedImage(null);
+    try {
+      const capture = captureVideoFrameForParity(videoRef.current);
+      setParityFrame(capture.frame);
+      setParityCrop(capture.crop);
+    } catch (captureError) {
+      setParityError(captureError instanceof Error ? captureError.message : "Could not capture the current video frame.");
+    }
+  }
+
+  async function previewParityCrop() {
+    if (!parityFrame) return;
+    setParityError(null);
+    try {
+      const prepared = await prepareParityCrop(parityFrame, parityCrop);
+      const validation = validateRecognitionImageMetrics(prepared);
+      if (!validation.ok) throw new Error(`Prepared crop is not valid for scanner recognition: ${validation.reason}.`);
+      setParityPreparedImage(prepared);
+    } catch (previewError) {
+      setParityPreparedImage(null);
+      setParityError(previewError instanceof Error ? previewError.message : "Could not prepare this crop.");
+    }
+  }
+
+  async function sendParityCropToLiveScanner() {
+    if (!selectedSet) {
+      setParityError("Choose a canonical set before running the scanner parity test.");
+      return;
+    }
+    setIsParityScanning(true);
+    setParityError(null);
+    try {
+      const prepared = parityPreparedImage ?? (parityFrame ? await prepareParityCrop(parityFrame, parityCrop) : null);
+      if (!prepared) throw new Error("Capture and preview a video crop first.");
+      const validation = validateRecognitionImageMetrics(prepared);
+      if (!validation.ok) throw new Error(`Prepared crop is not valid for scanner recognition: ${validation.reason}.`);
+      setParityPreparedImage(prepared);
+      const scanEventId = crypto.randomUUID();
+      const startedAt = Date.now();
+      const response = await fetch("/api/scanner/scan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: prepared.imageBase64,
+          mimeType: prepared.mimeType,
+          scanEventId,
+          scannerSessionId: `video-parity-${crypto.randomUUID()}`,
+          language: "auto",
+          foilPreference: "auto",
+          packHint: selectedSet.name,
+          selectedSetId: selectedSet.id
+        })
+      });
+      const body = await response.json().catch(() => null);
+      setParityResult({
+        ok: response.ok,
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+        request: {
+          endpoint: "/api/scanner/scan",
+          selectedSetId: selectedSet.id,
+          selectedSetName: selectedSet.name,
+          scanEventId,
+          imageMime: prepared.mimeType,
+          imageWidth: prepared.width,
+          imageHeight: prepared.height,
+          imageByteSize: prepared.byteSize,
+          fingerprint: prepared.fingerprint,
+          source: "video-parity-manual-crop",
+          timestamp: parityFrame?.timestamp ?? null,
+          cropPercent: parityCrop
+        },
+        response: body
+      });
+    } catch (scanError) {
+      setParityError(scanError instanceof Error ? scanError.message : "Parity scan failed.");
+    } finally {
+      setIsParityScanning(false);
+    }
+  }
+
   const analyzing = !["idle", "report-ready", "failed"].includes(stage);
   const currentStageLabel = stage === "report-ready" && report ? outcomeLabel(report.outcome) : stageLabels[stage];
 
@@ -446,6 +598,27 @@ export function VideoRipAnalysis() {
           </div>
         </div>
       </section>
+
+      {process.env.NODE_ENV !== "production" ? (
+        <VideoScannerParityPanel
+          selectedSetName={selectedSet?.name ?? null}
+          selectedSetId={selectedSet?.id ?? null}
+          frame={parityFrame}
+          crop={parityCrop}
+          preparedImage={parityPreparedImage}
+          result={parityResult}
+          error={parityError}
+          isScanning={isParityScanning}
+          onCaptureFrame={() => void captureParityFrame()}
+          onPreviewCrop={() => void previewParityCrop()}
+          onScanCrop={() => void sendParityCropToLiveScanner()}
+          onCropChange={(crop) => {
+            setParityCrop(crop);
+            setParityPreparedImage(null);
+            setParityResult(null);
+          }}
+        />
+      ) : null}
 
       {report ? (
         <section className="space-y-4">
@@ -548,6 +721,120 @@ function SummaryTile({ label, value }: { label: string; value: string }) {
       <p className="pw-hud text-[11px] font-black">{label}</p>
       <p className="mt-2 line-clamp-2 text-xl font-black text-white">{value}</p>
     </div>
+  );
+}
+
+function VideoScannerParityPanel(props: {
+  selectedSetId: string | null;
+  selectedSetName: string | null;
+  frame: ParityFrame | null;
+  crop: ParityCropPercent;
+  preparedImage: PreparedRecognitionImage | null;
+  result: ParityResult | null;
+  error: string | null;
+  isScanning: boolean;
+  onCaptureFrame: () => void;
+  onPreviewCrop: () => void;
+  onScanCrop: () => void;
+  onCropChange: (crop: ParityCropPercent) => void;
+}) {
+  const overlayStyle = {
+    left: `${props.crop.x}%`,
+    top: `${props.crop.y}%`,
+    width: `${props.crop.width}%`,
+    height: `${props.crop.height}%`
+  };
+  return (
+    <section className="pw-panel rounded-lg border border-cyan-300/25 bg-cyan-300/[0.04] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="pw-hud text-xs font-black text-cyan-100">Development</p>
+          <h3 className="text-xl font-black text-white">Video Scanner Parity Test</h3>
+          <p className="mt-1 text-sm text-slate-300">
+            Manual video crop to the live scanner endpoint. Set: {props.selectedSetName ?? "none selected"}.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={props.onCaptureFrame} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-white/10 px-3 text-sm font-black text-white">
+            Use current frame
+          </button>
+          <button type="button" onClick={props.onPreviewCrop} disabled={!props.frame} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-white/10 px-3 text-sm font-black text-white disabled:opacity-50">
+            Preview crop
+          </button>
+          <button type="button" onClick={props.onScanCrop} disabled={!props.frame || !props.selectedSetId || props.isScanning} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-cyan-300 px-3 text-sm font-black text-slate-950 disabled:opacity-50">
+            {props.isScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            Send to live scanner
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_0.7fr]">
+        <div className="space-y-3">
+          <div className="relative overflow-hidden rounded-lg border border-white/10 bg-black">
+            {props.frame ? (
+              <>
+                <img src={props.frame.dataUrl} alt="Extracted video frame" className="w-full" />
+                <div className="absolute border-2 border-cyan-300 bg-cyan-300/10 shadow-[0_0_0_9999px_rgba(0,0,0,0.28)]" style={overlayStyle} />
+              </>
+            ) : (
+              <div className="grid aspect-video place-items-center text-sm text-slate-500">Pause the preview on a card, then use current frame.</div>
+            )}
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <ParityRange label="Left" value={props.crop.x} max={95} onChange={(x) => props.onCropChange(clampParityCrop({ ...props.crop, x }))} />
+            <ParityRange label="Top" value={props.crop.y} max={95} onChange={(y) => props.onCropChange(clampParityCrop({ ...props.crop, y }))} />
+            <ParityRange label="Width" value={props.crop.width} min={8} max={100} onChange={(width) => props.onCropChange(clampParityCrop({ ...props.crop, width }))} />
+            <ParityRange label="Height" value={props.crop.height} min={12} max={100} onChange={(height) => props.onCropChange(clampParityCrop({ ...props.crop, height }))} />
+          </div>
+          {props.frame ? (
+            <p className="text-xs text-slate-400">
+              Source frame: {formatTimestamp(props.frame.timestamp)} · {props.frame.width} x {props.frame.height} · {props.frame.decodePath}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="space-y-3">
+          <div className="rounded-lg border border-white/10 bg-slate-950/70 p-3">
+            <p className="pw-hud text-[11px] font-black">Prepared crop</p>
+            {props.preparedImage ? (
+              <>
+                <img src={props.preparedImage.dataUrl} alt="Prepared card crop" className="mt-2 max-h-80 w-full rounded-lg object-contain" />
+                <p className="mt-2 text-xs text-slate-300">
+                  {props.preparedImage.mimeType} · {props.preparedImage.width} x {props.preparedImage.height} · {props.preparedImage.byteSize} bytes
+                </p>
+              </>
+            ) : (
+              <p className="mt-2 text-sm text-slate-400">Preview the crop before sending it to the live scanner.</p>
+            )}
+          </div>
+          {props.error ? <p className="rounded-lg border border-rose-300/25 bg-rose-500/10 p-3 text-sm text-rose-100">{props.error}</p> : null}
+          {props.result ? (
+            <pre className="max-h-96 overflow-auto rounded-lg border border-white/10 bg-slate-950/80 p-3 text-xs text-slate-200">
+              {JSON.stringify(props.result, null, 2)}
+            </pre>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ParityRange(props: { label: string; value: number; min?: number; max?: number; onChange: (value: number) => void }) {
+  return (
+    <label className="rounded-lg border border-white/10 bg-slate-950/55 p-2 text-xs font-bold text-slate-300">
+      <span className="flex items-center justify-between">
+        {props.label}
+        <span>{Math.round(props.value)}%</span>
+      </span>
+      <input
+        type="range"
+        min={props.min ?? 0}
+        max={props.max ?? 100}
+        value={props.value}
+        onChange={(event) => props.onChange(Number(event.target.value))}
+        className="mt-2 w-full"
+      />
+    </label>
   );
 }
 
@@ -819,6 +1106,75 @@ function buildVideoDiagnostics(input: {
     skippedWindows: input.skippedWindows,
     rejectionReasons
   };
+}
+
+function captureVideoFrameForParity(video: HTMLVideoElement): { frame: ParityFrame; crop: ParityCropPercent } {
+  if (!video.videoWidth || !video.videoHeight) throw new Error("Video pixels are not ready yet.");
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) throw new Error("Could not capture video frame.");
+  context.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const frameImage = context.getImageData(0, 0, canvas.width, canvas.height);
+  const luma = new Uint8Array(canvas.width * canvas.height);
+  for (let index = 0; index < frameImage.data.length; index += 4) {
+    luma[index / 4] = Math.round(0.2126 * frameImage.data[index] + 0.7152 * frameImage.data[index + 1] + 0.0722 * frameImage.data[index + 2]);
+  }
+  const candidate = locateVideoCardCrop({ luma, width: canvas.width, height: canvas.height });
+  const crop = candidate
+    ? {
+        x: roundPercent(candidate.x / canvas.width * 100),
+        y: roundPercent(candidate.y / canvas.height * 100),
+        width: roundPercent(candidate.width / canvas.width * 100),
+        height: roundPercent(candidate.height / canvas.height * 100)
+      }
+    : { x: 32, y: 10, width: 36, height: 78 };
+  return {
+    frame: {
+      dataUrl: canvas.toDataURL("image/jpeg", 0.9),
+      timestamp: video.currentTime,
+      width: canvas.width,
+      height: canvas.height,
+      decodePath: "native-video-element"
+    },
+    crop: clampParityCrop(crop)
+  };
+}
+
+async function prepareParityCrop(frame: ParityFrame, cropPercent: ParityCropPercent) {
+  const image = await loadImage(frame.dataUrl);
+  if (!image) throw new Error("Could not load extracted frame.");
+  const sourceCanvas = document.createElement("canvas");
+  sourceCanvas.width = frame.width;
+  sourceCanvas.height = frame.height;
+  const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
+  if (!sourceContext) throw new Error("Could not prepare extracted frame.");
+  sourceContext.drawImage(image, 0, 0, sourceCanvas.width, sourceCanvas.height);
+  return prepareRecognitionImage(sourceCanvas, {
+    crop: {
+      x: cropPercent.x / 100 * frame.width,
+      y: cropPercent.y / 100 * frame.height,
+      width: cropPercent.width / 100 * frame.width,
+      height: cropPercent.height / 100 * frame.height
+    },
+    maxWidth: 900,
+    maxHeight: 1200,
+    mimeType: "image/jpeg",
+    jpegQuality: 0.9
+  });
+}
+
+function clampParityCrop(crop: ParityCropPercent): ParityCropPercent {
+  const x = Math.max(0, Math.min(95, crop.x));
+  const y = Math.max(0, Math.min(95, crop.y));
+  const width = Math.max(8, Math.min(100 - x, crop.width));
+  const height = Math.max(12, Math.min(100 - y, crop.height));
+  return { x, y, width, height };
+}
+
+function roundPercent(value: number) {
+  return Math.round(value * 10) / 10;
 }
 
 async function extractCandidateFramesFromVideo(input: {
@@ -1137,7 +1493,7 @@ async function recognizeWindow(input: {
   videoAnalysisId: string;
 }): Promise<VideoRipRecognitionCard | null> {
   const frames = [input.window.bestFrame, ...input.window.alternateFrames]
-    .filter((frame) => frame.looseCardStatus === "verified")
+    .filter((frame) => canAttemptVideoRecognition(frame).allowed)
     .sort((left, right) => (right.cardCropScore ?? 0) - (left.cardCropScore ?? 0) || right.qualityScore - left.qualityScore)
     .slice(0, 4);
   const candidates: FusionInput[] = [];
